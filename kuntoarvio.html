@@ -1,0 +1,1262 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>Kiinteistön kuntoarvio — kenttälomake</title>
+<style>
+  :root{
+    --ink:#1c2430;
+    --ink-soft:#4a5568;
+    --paper:#f7f5f0;
+    --paper-raised:#ffffff;
+    --line:#dcd7cb;
+    --line-strong:#b9b2a0;
+    --brand:#33455c;
+    --brand-deep:#233043;
+    --ok:#2f6f4e;
+    --ok-bg:#e6f0ea;
+    --note:#a15a1e;
+    --note-bg:#f7e9dc;
+    --skip:#7a7566;
+    --skip-bg:#eeece5;
+    --unchecked:#8c8676;
+    --danger:#a13030;
+    --radius:10px;
+    --shadow:0 1px 3px rgba(28,36,48,.08), 0 1px 2px rgba(28,36,48,.06);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--paper);
+    color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    font-size:16px;
+    line-height:1.45;
+    padding-bottom:96px;
+  }
+  h1,h2,h3{font-family:Georgia,"Iowan Old Style","Times New Roman",serif;margin:0;}
+  button{font-family:inherit;}
+  ::selection{background:#cfe0d6;}
+
+  /* ---- Top bar ---- */
+  header.topbar{
+    position:sticky;top:0;z-index:30;
+    background:var(--brand-deep);
+    color:#f2efe6;
+    padding:12px 14px 10px;
+    box-shadow:var(--shadow);
+  }
+  header.topbar h1{
+    font-size:1.15rem;
+    font-weight:700;
+    letter-spacing:.01em;
+  }
+  header.topbar .sub{
+    font-size:.78rem;
+    color:#c9cfd8;
+    margin-top:2px;
+  }
+  .progress-wrap{
+    margin-top:10px;
+    background:rgba(255,255,255,.14);
+    border-radius:99px;
+    height:7px;
+    overflow:hidden;
+  }
+  .progress-bar{
+    height:100%;
+    background:#8fb79c;
+    width:0%;
+    transition:width .3s ease;
+  }
+  .progress-label{
+    font-size:.72rem;
+    color:#c9cfd8;
+    margin-top:5px;
+    display:flex;
+    justify-content:space-between;
+  }
+  .save-indicator{
+    font-size:.7rem;
+    color:#a9c6b3;
+  }
+  .quicknav{
+    display:flex;
+    gap:6px;
+    overflow-x:auto;
+    padding:9px 0 1px;
+    margin-top:2px;
+    -webkit-overflow-scrolling:touch;
+    scrollbar-width:none;
+  }
+  .quicknav::-webkit-scrollbar{display:none;}
+  .qn-chip{
+    flex:0 0 auto;
+    min-width:32px;
+    height:32px;
+    border-radius:8px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:.76rem;
+    font-weight:700;
+    border:1.5px solid rgba(255,255,255,.28);
+    background:rgba(255,255,255,.07);
+    color:#dfe3e8;
+    cursor:pointer;
+    position:relative;
+    padding:0;
+  }
+  .qn-chip.qn-complete{background:#3f6b52;border-color:#3f6b52;color:#fff;}
+  .qn-chip.qn-partial{border-color:#c99a4f;color:#f0dcb3;}
+  .qn-chip.qn-active{outline:2px solid #fff;outline-offset:1px;}
+  .qn-chip.qn-attention::after{
+    content:"";
+    position:absolute;top:-3px;right:-3px;
+    width:8px;height:8px;border-radius:50%;
+    background:#e07a4f;border:1.5px solid var(--brand-deep);
+  }
+
+  /* ---- Header info form ---- */
+  .card{
+    background:var(--paper-raised);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    margin:12px 14px;
+    box-shadow:var(--shadow);
+    overflow:hidden;
+  }
+  .card-header{
+    padding:13px 14px 10px;
+    border-bottom:1px solid var(--line);
+    display:flex;
+    align-items:baseline;
+    justify-content:space-between;
+    gap:8px;
+  }
+  .card-header h2{
+    font-size:1.02rem;
+    color:var(--brand-deep);
+  }
+  .card-body{padding:12px 14px 14px;}
+  .field{margin-bottom:10px;}
+  .field label{
+    display:block;
+    font-size:.76rem;
+    color:var(--ink-soft);
+    margin-bottom:3px;
+    font-weight:600;
+  }
+  .field input[type=text],
+  .field input[type=date],
+  .field textarea{
+    width:100%;
+    border:1px solid var(--line-strong);
+    border-radius:7px;
+    padding:9px 10px;
+    font-size:.95rem;
+    font-family:inherit;
+    background:#fff;
+    color:var(--ink);
+  }
+  .field textarea{min-height:64px;resize:vertical;}
+  .field-row{display:flex;gap:8px;}
+  .field-row .field{flex:1;min-width:0;}
+
+  /* ---- Sections (accordion) ---- */
+  .section{
+    background:var(--paper-raised);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    margin:10px 14px;
+    box-shadow:var(--shadow);
+    overflow:hidden;
+    scroll-margin-top:150px;
+  }
+  .section-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    padding:13px 14px;
+    cursor:pointer;
+    user-select:none;
+    background:var(--paper-raised);
+  }
+  .section-head:active{background:#f1efe8;}
+  .section-title-wrap{display:flex;align-items:baseline;gap:9px;min-width:0;}
+  .section-num{
+    font-size:.72rem;
+    color:#fff;
+    background:var(--brand);
+    border-radius:5px;
+    padding:2px 6px;
+    flex-shrink:0;
+  }
+  .section-head h2{
+    font-size:1rem;
+    color:var(--brand-deep);
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  .section-count{
+    font-size:.75rem;
+    color:var(--ink-soft);
+    flex-shrink:0;
+    white-space:nowrap;
+  }
+  .section-count.complete{color:var(--ok);font-weight:600;}
+  .section-count.has-notes{color:var(--note);font-weight:600;}
+  .chevron{
+    width:9px;height:9px;
+    border-right:2px solid var(--ink-soft);
+    border-bottom:2px solid var(--ink-soft);
+    transform:rotate(45deg);
+    transition:transform .2s ease;
+    flex-shrink:0;
+    margin-left:2px;
+  }
+  .section.open .chevron{transform:rotate(-135deg);}
+  .section-items{display:none;border-top:1px solid var(--line);}
+  .section.open .section-items{display:block;}
+
+  /* ---- Items ---- */
+  .item{
+    padding:12px 14px;
+    border-bottom:1px solid var(--line);
+  }
+  .item:last-child{border-bottom:none;}
+  .item-text{font-size:.93rem;margin-bottom:8px;color:var(--ink);}
+  .status-row{
+    display:flex;
+    gap:6px;
+    flex-wrap:wrap;
+    margin-bottom:8px;
+  }
+  .status-btn{
+    border:1px solid var(--line-strong);
+    background:#fff;
+    color:var(--ink-soft);
+    font-size:.76rem;
+    padding:7px 10px;
+    border-radius:99px;
+    cursor:pointer;
+    line-height:1;
+  }
+  .status-btn[data-status=kl5].active{background:#e6f0ea;border-color:#2f6f4e;color:#2f6f4e;font-weight:600;}
+  .status-btn[data-status=kl4].active{background:#eef2e2;border-color:#5c7a3a;color:#5c7a3a;font-weight:600;}
+  .status-btn[data-status=kl3].active{background:#f7f1dc;border-color:#a1861e;color:#a1861e;font-weight:600;}
+  .status-btn[data-status=kl2].active{background:#f7e9dc;border-color:#a15a1e;color:#a15a1e;font-weight:600;}
+  .status-btn[data-status=kl1].active{background:#f7dcdc;border-color:#a13030;color:#a13030;font-weight:600;}
+  .status-btn[data-status=unchecked].active{background:#eee;border-color:var(--unchecked);color:var(--unchecked);font-weight:600;}
+  .action-area{margin-bottom:8px;}
+  .action-area label{display:block;font-size:.72rem;color:var(--ink-soft);margin-bottom:3px;font-weight:600;}
+  .action-area input{width:100%;border:1px solid var(--line-strong);border-radius:7px;padding:8px 9px;font-size:.9rem;font-family:inherit;}
+
+  .note-area{
+    display:none;
+    margin-bottom:8px;
+  }
+  .note-area.show{display:block;}
+  .note-area textarea{
+    width:100%;
+    border:1px solid var(--line-strong);
+    border-radius:7px;
+    padding:8px 9px;
+    font-size:.9rem;
+    font-family:inherit;
+    min-height:56px;
+    resize:vertical;
+  }
+
+  .photo-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;}
+  .photo-thumb{
+    position:relative;
+    width:64px;height:64px;
+    border-radius:7px;
+    overflow:hidden;
+    border:1px solid var(--line-strong);
+    flex-shrink:0;
+  }
+  .photo-thumb img{width:100%;height:100%;object-fit:cover;display:block;}
+  .photo-thumb .rm{
+    position:absolute;top:0;right:0;
+    background:rgba(28,36,48,.72);
+    color:#fff;
+    width:20px;height:20px;
+    border:none;
+    font-size:.75rem;
+    line-height:20px;
+    text-align:center;
+    cursor:pointer;
+    border-bottom-left-radius:7px;
+  }
+  .add-photo-btn{
+    width:64px;height:64px;
+    border-radius:7px;
+    border:1.5px dashed var(--line-strong);
+    background:#fbfaf7;
+    color:var(--ink-soft);
+    font-size:1.4rem;
+    cursor:pointer;
+    display:flex;align-items:center;justify-content:center;
+    flex-shrink:0;
+  }
+  .add-photo-btn:active{background:#f1efe8;}
+
+  /* ---- Footer action bar ---- */
+  footer.actionbar{
+    position:fixed;bottom:0;left:0;right:0;
+    background:var(--paper-raised);
+    border-top:1px solid var(--line);
+    padding:10px 14px calc(10px + env(safe-area-inset-bottom));
+    display:flex;
+    gap:8px;
+    z-index:30;
+    box-shadow:0 -2px 8px rgba(28,36,48,.08);
+  }
+  .btn{
+    flex:1;
+    border:none;
+    border-radius:8px;
+    padding:12px 10px;
+    font-size:.9rem;
+    font-weight:600;
+    cursor:pointer;
+    text-align:center;
+  }
+  .btn-primary{background:var(--brand-deep);color:#fff;}
+  .btn-secondary{background:#fff;color:var(--ink);border:1px solid var(--line-strong);}
+  .btn-danger{background:#fff;color:var(--danger);border:1px solid var(--danger);}
+  .btn:disabled{opacity:.5;}
+
+  /* ---- Modal ---- */
+  .modal-backdrop{
+    display:none;
+    position:fixed;inset:0;
+    background:rgba(20,24,30,.55);
+    z-index:60;
+    align-items:flex-end;
+    justify-content:center;
+  }
+  .modal-backdrop.show{display:flex;}
+  .modal{
+    background:#fff;
+    border-radius:14px 14px 0 0;
+    width:100%;
+    max-width:520px;
+    padding:18px 18px calc(18px + env(safe-area-inset-bottom));
+  }
+  .modal h3{font-size:1.05rem;margin-bottom:8px;color:var(--brand-deep);}
+  .modal p{font-size:.88rem;color:var(--ink-soft);margin-bottom:16px;}
+  .modal .row{display:flex;gap:8px;}
+
+  .photo-view-backdrop{
+    display:none;position:fixed;inset:0;background:rgba(10,12,16,.92);
+    z-index:70;align-items:center;justify-content:center;flex-direction:column;
+  }
+  .photo-view-backdrop.show{display:flex;}
+  .photo-view-backdrop img{max-width:94vw;max-height:80vh;border-radius:6px;}
+  .photo-view-backdrop .pv-close{
+    position:absolute;top:16px;right:16px;
+    background:rgba(255,255,255,.15);color:#fff;border:none;
+    width:36px;height:36px;border-radius:50%;font-size:1.1rem;
+  }
+
+  .toast{
+    position:fixed;bottom:78px;left:50%;transform:translateX(-50%);
+    background:var(--brand-deep);color:#fff;
+    padding:9px 16px;border-radius:99px;font-size:.82rem;
+    z-index:80;opacity:0;pointer-events:none;transition:opacity .25s ease;
+  }
+  .toast.show{opacity:1;}
+
+  input[type=file]{display:none;}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <h1>Kiinteistön kuntoarvio</h1>
+  <div class="sub">Kenttälomake — RT 103002/103003 -suoritusohjeen ja kuntoluokituksen (RT 18-11061) mukainen arviointi</div>
+  <div class="progress-wrap"><div class="progress-bar" id="progressBar"></div></div>
+  <div class="progress-label">
+    <span id="progressText">0 / 0 kohtaa käsitelty</span>
+    <span class="save-indicator" id="saveIndicator">Tallennettu</span>
+  </div>
+  <div class="quicknav" id="quickNav" aria-label="Pikasiirtymä osioihin"></div>
+</header>
+
+<section class="card" id="headerCard">
+  <div class="card-header"><h2>Kiinteistön ja kuntoarvion tiedot</h2></div>
+  <div class="card-body" id="headerFields"></div>
+</section>
+
+<main id="sections"></main>
+
+<footer class="actionbar">
+  <button class="btn btn-secondary" id="btnNew">Tyhjennä lomake</button>
+  <button class="btn btn-primary" id="btnExport">Vie raportti (.docx)</button>
+</footer>
+
+<div class="modal-backdrop" id="confirmBackdrop">
+  <div class="modal">
+    <h3 id="confirmTitle">Vahvista</h3>
+    <p id="confirmText"></p>
+    <div class="row">
+      <button class="btn btn-secondary" id="confirmCancel">Peruuta</button>
+      <button class="btn btn-danger" id="confirmOk">Vahvista</button>
+    </div>
+  </div>
+</div>
+
+<div class="photo-view-backdrop" id="photoView">
+  <button class="pv-close" id="photoViewClose">✕</button>
+  <img id="photoViewImg" src="">
+</div>
+
+<div class="toast" id="toast"></div>
+
+<input type="file" id="cameraInput" accept="image/*" capture="environment">
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+"use strict";
+/* =========================================================================
+   KUNTOARVION SISÄLTÖ
+   Runko noudattaa RT 103002 (Tilaajan ohje) / RT 103003 (Kuntoarvioijan
+   ohje, aiemmin RT 18-11131) "Asuinkiinteistön kuntoarvio" -korttien
+   jäsentelyä (rakenteet/rakennusosat/järjestelmät, energiatalous,
+   turvallisuus ja terveellisyys, hissit) sekä yleisesti käytettyä
+   kuntoarvioraportin rakennetta (aluerakenteet, ulkopuoliset osat,
+   rakennustekniikka, yleiset tilat, huonetilat, LVIA, sähkö).
+   Kuntoluokitus (KL 1–5) noudattaa RT 18-11061 "Kiinteistön kuntoarvio.
+   Kuntoluokan määräytyminen" -kortin määritelmiä. Lomake ei korvaa itse
+   ohjekortteja, vaan tukee kuntoarvioijaa kentällä.
+   ========================================================================= */
+const SECTIONS = [
+  { id:"s1", title:"Yleistiedot ja lähtötiedot", notesOnly:true, items:[
+    "Kiinteistön perustiedot (rakennusvuosi, laajuus, huoneistomäärä, rakennustyyppi)",
+    "Käytettävissä olleet asiakirjat (pohjapiirustukset, rakennepiirustukset, huoltokirja, aiemmat kuntoarviot/-tutkimukset)",
+    "Korjaushistoria (linjasaneeraukset, julkisivu-, katto- ja ikkunaremontit ym.)",
+    "Käyttäjäkyselyn/asukaskyselyn tulokset tai kyselyn toteutus",
+    "Isännöitsijän/huoltoyhtiön haastattelu (havaitut ongelmat, toistuvat vikailmoitukset)",
+    "Sääolosuhteet ja vuodenaika",
+    "Kiinteistötarkastuksen laajuus ja rajaukset (mihin tiloihin/rakenteisiin päästiin)"
+  ]},
+  { id:"s2", title:"Piha-alueet ja aluerakenteet", items:[
+    "Kulkuväylien, pysäköintialueiden ja piha-kansien pintakunto ja kallistukset",
+    "Aitojen, tukimuurien ja portaiden kunto",
+    "Leikki- ja oleskelualueiden sekä -välineiden kunto ja turvallisuus",
+    "Ulkovalaistuksen kattavuus ja kunto",
+    "Jätehuollon tilat ja järjestelyt",
+    "Sadevesijärjestelmän toimivuus ja purkupaikat",
+    "Salaojajärjestelmän olemassaolo, ikä ja tarkastuskaivojen kunto",
+    "Istutusten ja kasvillisuuden sijainti suhteessa rakennuksen vaippaan"
+  ]},
+  { id:"s3", title:"Rakennuksen ulkopuoliset osat", items:[
+    "Julkisivumateriaalien ja -pintojen yleiskunto rakennuksittain",
+    "Julkisivujen halkeamat, maalipinnan hilseily tai muu vaurioituminen",
+    "Ikkunoiden ja ulko-ovien ikä, tyyppi ja yleiskunto",
+    "Parvekkeiden, terassien ja katosten rakenteellinen kunto ja vedeneristys",
+    "Räystäiden, pellitysten ja sadevesijärjestelmän kunto",
+    "Vesikatteen materiaali, ikä ja yleiskunto",
+    "Vesikaton läpivientien, saumojen ja liittymien tiiveys"
+  ]},
+  { id:"s4", title:"Kantavat rakenteet ja rakennustekniikka", items:[
+    "Perustamistapa ja perustusten yleiskunto",
+    "Sokkelin halkeamat, painumat ja kosteustekninen liitos maanpintaan",
+    "Alapohjarakenteen tyyppi ja kunto (maanvarainen/ryömintätila/kellari)",
+    "Ryömintätilan tuuletus, kosteus ja puhtaus (jos päästään tarkastamaan)",
+    "Kantavan rungon silmämääräinen kunto",
+    "Yläpohjan lämmöneristyksen kunto, paksuus ja tuuletus",
+    "Valesokkeli- tai muun ikäkaudelle tyypillisen riskirakenteen mahdollisuus arvioitu"
+  ]},
+  { id:"s5", title:"Yleiset sisätilat", items:[
+    "Porrashuoneiden ja käytävien yleiskunto sekä pintamateriaalit",
+    "Kellari- ja varastotilojen kunto, kosteus ja tuuletus",
+    "Väestönsuojan kunto ja varusteet (jos on)",
+    "Teknisten tilojen (lämmönjako, IV-konehuone) yleiskunto ja siisteys",
+    "Yhteisten saunatilojen ja pesuhuoneiden kunto",
+    "Kulunvalvonnan ja ovipuhelinjärjestelmän toimivuus"
+  ]},
+  { id:"s6", title:"Huonetilat (pistokoetarkastelu asunnoista)", items:[
+    "Otanta tarkastettavista huoneistoista sovittu ja kirjattu",
+    "Pintamateriaalien yleiskunto tarkastelluissa huoneistoissa",
+    "Kosteus- tai valumajälkiä katoissa, seinissä tai lattioissa",
+    "Märkätilojen vedeneristyksen ikä ja pintakosteusmittaukset tarkastelluissa huoneistoissa",
+    "Asukkailta saadut havainnot yksittäisistä ongelmakohdista"
+  ]},
+  { id:"s7", title:"Lämmitysjärjestelmä", items:[
+    "Lämmitysmuoto, -laitteisto ja arvioitu ikä",
+    "Lämmönjakokeskuksen/-huoneen yleiskunto",
+    "Patteriverkoston ja säätölaitteiden toimivuus",
+    "Lämmönjaon tasapainotus ja huoltohistoria",
+    "Energiatehokkuuteen liittyvät havainnot (esim. säätöautomaation ikä)"
+  ]},
+  { id:"s8", title:"Vesi- ja viemärijärjestelmät", items:[
+    "Käyttövesiputkiston materiaali, ikä ja kunto",
+    "Viemäriputkiston materiaali, ikä ja kunto",
+    "Aiemmat linjasaneeraukset tai osauusinnat selvitetty",
+    "Vesikalusteiden ja hanojen yleiskunto sekä tunnetut vuodot",
+    "Putkistojen kuntotutkimustarve arvioitu"
+  ]},
+  { id:"s9", title:"Ilmanvaihtojärjestelmä", items:[
+    "Ilmanvaihdon tyyppi (painovoimainen/koneellinen tulo-poisto) ja ikä",
+    "IV-konehuoneen ja laitteiston yleiskunto",
+    "Kanavien, venttiilien ja päätelaitteiden puhtaus ja toimivuus",
+    "Ilmanvaihdon huoltohistoria ja säätöjen ajantasaisuus",
+    "Sisäilman laatuun viittaavat havainnot ilmanvaihdon toiminnassa"
+  ]},
+  { id:"s10", title:"Sähkö- ja tietojärjestelmät", items:[
+    "Pääkeskuksen ja nousujohtojen ikä ja yleiskunto",
+    "Ryhmäkeskusten ja johdotustyypin ikä huoneistoissa (esim. alumiini-/kuparijohdot)",
+    "Vikavirtasuojien kattavuus",
+    "Antenni-, tietoliikenne- ja turvajärjestelmien kunto",
+    "Ulkovalaistuksen ja -pistorasioiden kunto",
+    "Sähköjärjestelmän kuntotutkimustarve arvioitu"
+  ]},
+  { id:"s11", title:"Hissit (jos on)", items:[
+    "Hissien lukumäärä, ikä ja käyttötarkoitus",
+    "Hissien viimeisin määräaikaistarkastus ja sen huomautukset",
+    "Hissikorin ja -konehuoneen yleiskunto",
+    "Esteettömyys ja saavutettavuus (kynnykset, kutsupainikkeet, ovileveys)"
+  ]},
+  { id:"s12", title:"Paloturvallisuus ja poistumistiet", items:[
+    "Poistumisteiden merkinnät, esteettömyys ja valaistus",
+    "Palo-ovien ja osastoivien rakenteiden kunto",
+    "Alkusammutuskaluston ja palovaroitinjärjestelmän olemassaolo",
+    "Pelastustien merkintä ja käytettävyys",
+    "Viimeisimmän palotarkastuksen huomautukset selvitetty"
+  ]},
+  { id:"s13", title:"Sisäolosuhteet, turvallisuus ja terveellisyys", items:[
+    "Sisäilman laatuun viittaavat havainnot ja asukaspalaute käyty läpi",
+    "Kosteusvaurioepäilyt ja niiden laajuuden alustava arviointi",
+    "Radonhavainnot tai -mittaustieto selvitetty, jos saatavilla",
+    "Epäily haitta-aineista (esim. asbesti, PAH-yhdisteet) kirjattu, jos aihetta",
+    "Putoamissuojauksen ja yleisen turvallisuuden havainnot yhteisissä tiloissa ja pihalla"
+  ]}
+];
+
+const STATUS_LABELS = {
+  unchecked:"Ei arvioitu",
+  kl5:"KL 5 – Uusi",
+  kl4:"KL 4 – Hyvä",
+  kl3:"KL 3 – Tyydyttävä",
+  kl2:"KL 2 – Välttävä",
+  kl1:"KL 1 – Heikko"
+};
+const STATUS_DESC = {
+  kl5:"Ei toimenpiteitä seuraavien 10 vuoden aikana",
+  kl4:"Kevyt huoltokorjaus 6–10 vuoden kuluessa",
+  kl3:"Kevyt huoltokorjaus 1–5 v tai peruskorjaus 6–10 v kuluessa",
+  kl2:"Peruskorjaus 1–5 v tai uusiminen 6–10 v kuluessa",
+  kl1:"Uusiminen 1–5 vuoden kuluessa"
+};
+const STATUS_ORDER = ["kl5","kl4","kl3","kl2","kl1","unchecked"];
+
+const HEADER_FIELDS = [
+  { id:"osoite", label:"Kiinteistön nimi ja osoite", type:"text", full:true },
+  { id:"rtype", label:"Rakennustyyppi", type:"text" },
+  { id:"vuosi", label:"Rakennusvuosi", type:"text" },
+  { id:"laajuus", label:"Laajuus (kerrosala/huoneistot)", type:"text" },
+  { id:"tilaaja", label:"Tilaaja (esim. taloyhtiö)", type:"text" },
+  { id:"tarkastaja", label:"Kuntoarvioijat", type:"text" },
+  { id:"pvm", label:"Kiinteistötarkastuksen päivä", type:"date" },
+  { id:"saa", label:"Sääolosuhteet", type:"text" },
+  { id:"lasna", label:"Läsnäolijat (isännöitsijä, huolto ym.)", type:"text", full:true },
+  { id:"lisatiedot", label:"Muita esitietoja / käyttäjäkyselyn ja haastattelun havaintoja", type:"textarea", full:true }
+];
+
+/* =========================================================================
+   TILA (in-memory) — peilaa IndexedDB:tä
+   ========================================================================= */
+let state = {
+  header: {},
+  items: {}   // itemId -> { status, note, action, photos:[{id, blob, url, w, h}] }
+};
+let saveTimer = null;
+
+function allItemIds(){
+  const ids = [];
+  SECTIONS.forEach(sec => sec.items.forEach((_, i) => ids.push(sec.id + "_i" + i)));
+  return ids;
+}
+allItemIds().forEach(id => state.items[id] = { status:"unchecked", note:"", action:"", photos:[] });
+
+/* =========================================================================
+   INDEXEDDB TALLENNUS (localStorage fallback-varoitus, ei kenttädataa varten
+   koska kuvat eivät sovi localStorageen — IndexedDB on ensisijainen ja
+   ainoa tuettu säilö kuville; localStorage kelpaa vain header+status+note
+   -tekstien hätävaraksi jos IndexedDB ei ole käytettävissä)
+   ========================================================================= */
+const DB_NAME = "kuntoarvio_db";
+const DB_VERSION = 1;
+let db = null;
+
+function openDb(){
+  return new Promise((resolve, reject) => {
+    if (!window.indexedDB){ resolve(null); return; }
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = (e) => {
+      const d = e.target.result;
+      if (!d.objectStoreNames.contains("meta")) d.createObjectStore("meta", { keyPath:"key" });
+      if (!d.objectStoreNames.contains("items")) d.createObjectStore("items", { keyPath:"id" });
+      if (!d.objectStoreNames.contains("photos")) d.createObjectStore("photos", { keyPath:"id", autoIncrement:true });
+    };
+    req.onsuccess = (e) => resolve(e.target.result);
+    req.onerror = () => resolve(null);
+  });
+}
+
+function idbPut(storeName, value){
+  return new Promise((resolve) => {
+    if (!db){ resolve(false); return; }
+    try{
+      const tx = db.transaction(storeName, "readwrite");
+      tx.objectStore(storeName).put(value);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => resolve(false);
+    }catch(e){ resolve(false); }
+  });
+}
+function idbDelete(storeName, key){
+  return new Promise((resolve) => {
+    if (!db){ resolve(false); return; }
+    try{
+      const tx = db.transaction(storeName, "readwrite");
+      tx.objectStore(storeName).delete(key);
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => resolve(false);
+    }catch(e){ resolve(false); }
+  });
+}
+function idbGetAll(storeName){
+  return new Promise((resolve) => {
+    if (!db){ resolve([]); return; }
+    try{
+      const tx = db.transaction(storeName, "readonly");
+      const req = tx.objectStore(storeName).getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = () => resolve([]);
+    }catch(e){ resolve([]); }
+  });
+}
+function idbClearAll(){
+  return new Promise((resolve) => {
+    if (!db){ resolve(false); return; }
+    try{
+      const tx = db.transaction(["meta","items","photos"], "readwrite");
+      tx.objectStore("meta").clear();
+      tx.objectStore("items").clear();
+      tx.objectStore("photos").clear();
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => resolve(false);
+    }catch(e){ resolve(false); }
+  });
+}
+
+let lsFallbackWarned = false;
+function saveDebounced(){
+  setSaveIndicator("Tallennetaan…");
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(doSave, 500);
+}
+async function doSave(){
+  if (db){
+    await idbPut("meta", { key:"header", value: state.header });
+    for (const id of Object.keys(state.items)){
+      const it = state.items[id];
+      await idbPut("items", { id, status: it.status, note: it.note, action: it.action });
+    }
+  } else {
+    if (!lsFallbackWarned){
+      lsFallbackWarned = true;
+      showToast("IndexedDB ei käytössä — tekstit tallennetaan varmuuden vuoksi selaimen muistiin, mutta kuvia ei voida tallentaa pysyvästi tällä laitteella.");
+    }
+    try{
+      const lite = { header: state.header, items: {} };
+      Object.keys(state.items).forEach(id => {
+        lite.items[id] = { status: state.items[id].status, note: state.items[id].note, action: state.items[id].action };
+      });
+      localStorage.setItem("kuntoarvio_lite", JSON.stringify(lite));
+    }catch(e){}
+  }
+  setSaveIndicator("Tallennettu");
+}
+
+async function loadFromStorage(){
+  db = await openDb();
+  if (db){
+    const metaRows = await idbGetAll("meta");
+    const headerRow = metaRows.find(r => r.key === "header");
+    if (headerRow) state.header = headerRow.value || {};
+
+    const itemRows = await idbGetAll("items");
+    itemRows.forEach(row => {
+      if (state.items[row.id]){
+        state.items[row.id].status = row.status || "unchecked";
+        state.items[row.id].note = row.note || "";
+        state.items[row.id].action = row.action || "";
+      }
+    });
+
+    const photoRows = await idbGetAll("photos");
+    photoRows.forEach(row => {
+      if (state.items[row.itemId]){
+        const url = URL.createObjectURL(row.blob);
+        state.items[row.itemId].photos.push({ id: row.id, blob: row.blob, url, w: row.w, h: row.h });
+      }
+    });
+  } else {
+    try{
+      const raw = localStorage.getItem("kuntoarvio_lite");
+      if (raw){
+        const lite = JSON.parse(raw);
+        state.header = lite.header || {};
+        Object.keys(lite.items || {}).forEach(id => {
+          if (state.items[id]) Object.assign(state.items[id], lite.items[id]);
+        });
+      }
+    }catch(e){}
+  }
+}
+
+function setSaveIndicator(text){
+  document.getElementById("saveIndicator").textContent = text;
+}
+
+/* =========================================================================
+   KUVAT: kamerasyöte -> canvas-uudelleenpiirto (poistaa EXIF-metadatan) -> Blob
+   ========================================================================= */
+const MAX_DIM = 1600;
+function fileToStrippedBlob(file){
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const reader = new FileReader();
+    reader.onload = () => { img.src = reader.result; };
+    reader.onerror = reject;
+    img.onload = () => {
+      let w = img.naturalWidth, h = img.naturalHeight;
+      if (w > MAX_DIM || h > MAX_DIM){
+        const scale = MAX_DIM / Math.max(w, h);
+        w = Math.round(w * scale);
+        h = Math.round(h * scale);
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, w, h);
+      canvas.toBlob((blob) => {
+        if (blob) resolve({ blob, w, h }); else reject(new Error("toBlob failed"));
+      }, "image/jpeg", 0.82);
+    };
+    img.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+let pendingPhotoItemId = null;
+document.getElementById("cameraInput").addEventListener("change", async (e) => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = "";
+  if (!file || !pendingPhotoItemId) return;
+  const itemId = pendingPhotoItemId;
+  try{
+    const { blob, w, h } = await fileToStrippedBlob(file);
+    let id;
+    if (db){
+      id = await new Promise((resolve) => {
+        const tx = db.transaction("photos", "readwrite");
+        const req = tx.objectStore("photos").add({ itemId, blob, w, h, ts: Date.now() });
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => resolve("local_" + Date.now());
+      });
+    } else {
+      id = "local_" + Date.now();
+    }
+    const url = URL.createObjectURL(blob);
+    state.items[itemId].photos.push({ id, blob, url, w, h });
+    renderSections();
+    saveDebounced();
+  }catch(err){
+    showToast("Kuvan käsittely epäonnistui.");
+  }
+});
+
+function removePhoto(itemId, photoId){
+  const arr = state.items[itemId].photos;
+  const idx = arr.findIndex(p => p.id === photoId);
+  if (idx === -1) return;
+  URL.revokeObjectURL(arr[idx].url);
+  arr.splice(idx, 1);
+  if (db) idbDelete("photos", photoId);
+  renderSections();
+  saveDebounced();
+}
+
+/* =========================================================================
+   RENDERÖINTI
+   ========================================================================= */
+const openSections = new Set(["s1"]);
+
+function renderHeaderFields(){
+  const wrap = document.getElementById("headerFields");
+  wrap.innerHTML = "";
+  HEADER_FIELDS.forEach(f => {
+    const div = document.createElement("div");
+    div.className = "field";
+    const label = document.createElement("label");
+    label.textContent = f.label;
+    label.setAttribute("for", "hf_" + f.id);
+    div.appendChild(label);
+    let input;
+    if (f.type === "textarea"){
+      input = document.createElement("textarea");
+    } else {
+      input = document.createElement("input");
+      input.type = f.type;
+    }
+    input.id = "hf_" + f.id;
+    input.autocomplete = "off";
+    input.value = state.header[f.id] || "";
+    input.addEventListener("input", () => {
+      state.header[f.id] = input.value;
+      saveDebounced();
+    });
+    div.appendChild(input);
+    wrap.appendChild(div);
+  });
+}
+
+function isItemDone(sec, itemId){
+  const it = state.items[itemId];
+  if (sec.notesOnly) return !!(it.note && it.note.trim() !== "");
+  return it.status !== "unchecked";
+}
+
+function itemCounts(sec){
+  let done = 0, notes = 0;
+  sec.items.forEach((_, i) => {
+    const itemId = sec.id + "_i" + i;
+    const st = state.items[itemId].status;
+    if (isItemDone(sec, itemId)) done++;
+    if (st === "kl2" || st === "kl1") notes++;
+  });
+  return { done, total: sec.items.length, notes };
+}
+
+function renderSections(){
+  const main = document.getElementById("sections");
+  main.innerHTML = "";
+  SECTIONS.forEach((sec, secIdx) => {
+    const { done, total, notes } = itemCounts(sec);
+    const secDiv = document.createElement("div");
+    secDiv.className = "section" + (openSections.has(sec.id) ? " open" : "");
+    secDiv.id = "sec_" + sec.id;
+
+    const head = document.createElement("div");
+    head.className = "section-head";
+    head.innerHTML = `
+      <div class="section-title-wrap">
+        <span class="section-num">${secIdx+1}</span>
+        <h2>${escapeHtml(sec.title)}</h2>
+      </div>
+      <span class="section-count ${done===total?'complete':(notes>0?'has-notes':'')}">${done}/${total}</span>
+      <span class="chevron"></span>
+    `;
+    head.addEventListener("click", () => {
+      if (openSections.has(sec.id)) openSections.delete(sec.id); else openSections.add(sec.id);
+      renderSections();
+    });
+    secDiv.appendChild(head);
+
+    const itemsWrap = document.createElement("div");
+    itemsWrap.className = "section-items";
+
+    sec.items.forEach((text, i) => {
+      const itemId = sec.id + "_i" + i;
+      const itState = state.items[itemId];
+      const itemDiv = document.createElement("div");
+      itemDiv.className = "item";
+
+      const textDiv = document.createElement("div");
+      textDiv.className = "item-text";
+      textDiv.textContent = text;
+      itemDiv.appendChild(textDiv);
+
+      if (!sec.notesOnly){
+        const statusRow = document.createElement("div");
+        statusRow.className = "status-row";
+        STATUS_ORDER.forEach(st => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "status-btn" + (itState.status === st ? " active" : "");
+          btn.dataset.status = st;
+          btn.textContent = STATUS_LABELS[st];
+          btn.addEventListener("click", () => {
+            itState.status = st;
+            renderSections();
+            saveDebounced();
+          });
+          statusRow.appendChild(btn);
+        });
+        itemDiv.appendChild(statusRow);
+
+        if (itState.status !== "unchecked" && STATUS_DESC[itState.status]){
+          const descDiv = document.createElement("div");
+          descDiv.style.cssText = "font-size:.74rem;color:var(--ink-soft);margin:-4px 0 8px;";
+          descDiv.textContent = STATUS_DESC[itState.status];
+          itemDiv.appendChild(descDiv);
+        }
+      }
+
+      const noteArea = document.createElement("div");
+      noteArea.className = "note-area show";
+      const noteTextarea = document.createElement("textarea");
+      noteTextarea.placeholder = sec.notesOnly ? "Kirjaa tiedot…" : "Kirjaa havainto, vaurio tai lisätieto…";
+      noteTextarea.autocomplete = "off";
+      noteTextarea.value = itState.note;
+      noteTextarea.addEventListener("input", () => {
+        itState.note = noteTextarea.value;
+        saveDebounced();
+        if (sec.notesOnly){ updateProgress(); renderQuickNav(); }
+      });
+      noteArea.appendChild(noteTextarea);
+      itemDiv.appendChild(noteArea);
+
+      if (!sec.notesOnly){
+        const actionArea = document.createElement("div");
+        actionArea.className = "action-area";
+        const actionLabel = document.createElement("label");
+        actionLabel.textContent = "PTS-suositus (toimenpide ja ajoitus)";
+        const actionInput = document.createElement("input");
+        actionInput.type = "text";
+        actionInput.autocomplete = "off";
+        actionInput.placeholder = "esim. julkisivumaalaus, 2029, n. 15 000 €";
+        actionInput.value = itState.action;
+        actionInput.addEventListener("input", () => {
+          itState.action = actionInput.value;
+          saveDebounced();
+        });
+        actionArea.appendChild(actionLabel);
+        actionArea.appendChild(actionInput);
+        itemDiv.appendChild(actionArea);
+
+        const photoRow = document.createElement("div");
+        photoRow.className = "photo-row";
+        itState.photos.forEach(p => {
+          const thumb = document.createElement("div");
+          thumb.className = "photo-thumb";
+          const img = document.createElement("img");
+          img.src = p.url;
+          img.addEventListener("click", () => openPhotoView(p.url));
+          const rm = document.createElement("button");
+          rm.className = "rm";
+          rm.textContent = "✕";
+          rm.addEventListener("click", (e) => { e.stopPropagation(); removePhoto(itemId, p.id); });
+          thumb.appendChild(img);
+          thumb.appendChild(rm);
+          photoRow.appendChild(thumb);
+        });
+        const addBtn = document.createElement("button");
+        addBtn.className = "add-photo-btn";
+        addBtn.type = "button";
+        addBtn.textContent = "📷";
+        addBtn.addEventListener("click", () => {
+          pendingPhotoItemId = itemId;
+          document.getElementById("cameraInput").click();
+        });
+        photoRow.appendChild(addBtn);
+        itemDiv.appendChild(photoRow);
+      }
+
+      itemsWrap.appendChild(itemDiv);
+    });
+
+    secDiv.appendChild(itemsWrap);
+    main.appendChild(secDiv);
+  });
+
+  updateProgress();
+  renderQuickNav();
+}
+
+function renderQuickNav(){
+  const wrap = document.getElementById("quickNav");
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  SECTIONS.forEach((sec, i) => {
+    const { done, total, notes } = itemCounts(sec);
+    const chip = document.createElement("button");
+    chip.type = "button";
+    let cls = "qn-chip";
+    if (done === total) cls += " qn-complete";
+    else if (done > 0) cls += " qn-partial";
+    if (notes > 0) cls += " qn-attention";
+    if (openSections.has(sec.id)) cls += " qn-active";
+    chip.className = cls;
+    chip.textContent = String(i + 1);
+    chip.title = `${sec.title} (${done}/${total})`;
+    chip.addEventListener("click", () => jumpToSection(sec.id));
+    wrap.appendChild(chip);
+  });
+}
+
+function jumpToSection(id){
+  if (openSections.has(id) && openSections.size === 1){
+    openSections.clear();
+  } else {
+    openSections.clear();
+    openSections.add(id);
+  }
+  renderSections();
+  if (openSections.has(id)){
+    requestAnimationFrame(() => {
+      const el = document.getElementById("sec_" + id);
+      if (el) el.scrollIntoView({ behavior:"smooth", block:"start" });
+    });
+  }
+}
+
+function sectionOfItem(itemId){
+  const secId = itemId.split("_i")[0];
+  return SECTIONS.find(s => s.id === secId);
+}
+
+function updateProgress(){
+  const ids = allItemIds();
+  const done = ids.filter(id => isItemDone(sectionOfItem(id), id)).length;
+  const pct = ids.length ? Math.round((done/ids.length)*100) : 0;
+  document.getElementById("progressBar").style.width = pct + "%";
+  document.getElementById("progressText").textContent = `${done} / ${ids.length} kohtaa käsitelty`;
+}
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+function openPhotoView(url){
+  document.getElementById("photoViewImg").src = url;
+  document.getElementById("photoView").classList.add("show");
+}
+document.getElementById("photoViewClose").addEventListener("click", () => {
+  document.getElementById("photoView").classList.remove("show");
+});
+document.getElementById("photoView").addEventListener("click", (e) => {
+  if (e.target.id === "photoView") document.getElementById("photoView").classList.remove("show");
+});
+
+let toastTimer = null;
+function showToast(msg){
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), 3200);
+}
+
+/* =========================================================================
+   UUSI TARKASTUS / TYHJENNYS (oikea tietojen poisto, ei vain UI-nollaus)
+   ========================================================================= */
+function showConfirm(title, text, onOk){
+  document.getElementById("confirmTitle").textContent = title;
+  document.getElementById("confirmText").textContent = text;
+  const backdrop = document.getElementById("confirmBackdrop");
+  backdrop.classList.add("show");
+  const okBtn = document.getElementById("confirmOk");
+  const cancelBtn = document.getElementById("confirmCancel");
+  const cleanup = () => {
+    backdrop.classList.remove("show");
+    okBtn.removeEventListener("click", onOkHandler);
+    cancelBtn.removeEventListener("click", onCancelHandler);
+  };
+  const onOkHandler = () => { cleanup(); onOk(); };
+  const onCancelHandler = () => { cleanup(); };
+  okBtn.addEventListener("click", onOkHandler);
+  cancelBtn.addEventListener("click", onCancelHandler);
+}
+
+document.getElementById("btnNew").addEventListener("click", () => {
+  showConfirm(
+    "Tyhjennä lomake?",
+    "Kaikki tämänhetkisen kuntoarvion tiedot, merkinnät ja kuvat poistetaan pysyvästi tästä laitteesta. Tätä ei voi perua.",
+    async () => {
+      Object.values(state.items).forEach(it => it.photos.forEach(p => URL.revokeObjectURL(p.url)));
+      if (db) await idbClearAll();
+      try{ localStorage.removeItem("kuntoarvio_lite"); }catch(e){}
+      state = { header:{}, items:{} };
+      allItemIds().forEach(id => state.items[id] = { status:"unchecked", note:"", action:"", photos:[] });
+      renderHeaderFields();
+      renderSections();
+      showToast("Lomake tyhjennetty.");
+    }
+  );
+});
+
+/* =========================================================================
+   .DOCX-VIENTI — aito OOXML JSZipillä (ei HTML-naamioitu .doc)
+   ========================================================================= */
+function xmlEsc(s){
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+function paraXml(text, opts){
+  opts = opts || {};
+  const rPr = [];
+  if (opts.bold) rPr.push("<w:b/>");
+  if (opts.color) rPr.push(`<w:color w:val="${opts.color}"/>`);
+  if (opts.sz) rPr.push(`<w:sz w:val="${opts.sz}"/><w:szCs w:val="${opts.sz}"/>`);
+  const pPr = [];
+  if (opts.before || opts.after){
+    pPr.push(`<w:spacing${opts.before?` w:before="${opts.before}"`:""}${opts.after?` w:after="${opts.after}"`:""}/>`);
+  }
+  const lines = String(text == null ? "" : text).split(/\r?\n/);
+  const runs = lines.map((line, i) =>
+    (i > 0 ? "<w:br/>" : "") + `<w:t xml:space="preserve">${xmlEsc(line)}</w:t>`
+  ).join("");
+  return `<w:p>${pPr.length?`<w:pPr>${pPr.join("")}</w:pPr>`:""}<w:r>${rPr.length?`<w:rPr>${rPr.join("")}</w:rPr>`:""}${runs}</w:r></w:p>`;
+}
+
+function imageXml(rId, cx, cy, docPrId){
+  return `<w:p><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${docPrId}" name="Kuva${docPrId}"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="${docPrId}" name="Kuva${docPrId}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rId${rId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`;
+}
+
+const STATUS_COLOR_DOCX = { kl5:"2F6F4E", kl4:"5C7A3A", kl3:"A1861E", kl2:"A15A1E", kl1:"A13030", unchecked:"8C8676" };
+
+async function buildDocx(){
+  const bodyParts = [];
+  const relParts = [];
+  const mediaFiles = [];
+  let relCounter = 4; // rId1-3 reserved (document/core/app)
+  let docPrCounter = 100;
+
+  bodyParts.push(paraXml("Kiinteistön kuntoarvio", { bold:true, sz:44, after:80 }));
+  bodyParts.push(paraXml("Kenttäraportti — laadittu RT 103002/103003 -suoritusohjeiden ja RT 18-11061 -kuntoluokituksen mukaista tarkistuslistaa käyttäen", { color:"4A5568", sz:18, after:200 }));
+
+  const headerLines = HEADER_FIELDS.map(f => `${f.label}: ${state.header[f.id] || "—"}`).join("\n");
+  bodyParts.push(paraXml(headerLines, { after:240 }));
+
+  for (let secIdx = 0; secIdx < SECTIONS.length; secIdx++){
+    const sec = SECTIONS[secIdx];
+    bodyParts.push(paraXml(`${secIdx+1}. ${sec.title}`, { bold:true, sz:28, before:260, after:120 }));
+
+    for (let i = 0; i < sec.items.length; i++){
+      const itemId = sec.id + "_i" + i;
+      const it = state.items[itemId];
+      const text = sec.items[i];
+      bodyParts.push(paraXml(text, { bold:true, after:20 }));
+      if (sec.notesOnly){
+        if (it.note){
+          bodyParts.push(paraXml(it.note, { after:140 }));
+        }
+        continue;
+      }
+      const statusLine = STATUS_LABELS[it.status] + (STATUS_DESC[it.status] ? " — " + STATUS_DESC[it.status] : "");
+      bodyParts.push(paraXml(statusLine, { color: STATUS_COLOR_DOCX[it.status], bold:true, sz:19, after: (it.note || it.action || it.photos.length) ? 40 : 120 }));
+      if (it.note){
+        bodyParts.push(paraXml(it.note, { after: (it.action || it.photos.length) ? 60 : 140 }));
+      }
+      if (it.action){
+        bodyParts.push(paraXml("PTS-suositus: " + it.action, { color:"33455C", after: it.photos.length ? 60 : 140 }));
+      }
+      for (const p of it.photos){
+        // Scale to max ~5.4in wide (≈4938000 EMU), preserve aspect ratio
+        const maxCx = 4938000;
+        let cx = p.w * 9525, cy = p.h * 9525;
+        if (cx > maxCx){
+          const s = maxCx / cx;
+          cx = Math.round(cx * s);
+          cy = Math.round(cy * s);
+        }
+        const rId = relCounter++;
+        const ext = "jpeg";
+        const mediaName = `image${mediaFiles.length + 1}.${ext}`;
+        mediaFiles.push({ name: mediaName, blob: p.blob });
+        relParts.push(`<Relationship Id="rId${rId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/${mediaName}"/>`);
+        bodyParts.push(imageXml(rId, cx, cy, docPrCounter++));
+      }
+    }
+  }
+
+  const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body>${bodyParts.join("")}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1417" w:right="1417" w:bottom="1417" w:left="1417"/></w:sectPr></w:body></w:document>`;
+
+  const contentTypesXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="jpeg" ContentType="image/jpeg"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>`;
+
+  const rootRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/></Relationships>`;
+
+  const docRelsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${relParts.join("")}</Relationships>`;
+
+  const coreXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>Kiinteistön kuntoarvio</dc:title><dc:creator>${xmlEsc(state.header.tarkastaja || "")}</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">${new Date().toISOString()}</dcterms:created></cp:coreProperties>`;
+
+  const appXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>Kenttalomake</Application></Properties>`;
+
+  const zip = new JSZip();
+  zip.file("[Content_Types].xml", contentTypesXml);
+  zip.folder("_rels").file(".rels", rootRelsXml);
+  const wordFolder = zip.folder("word");
+  wordFolder.file("document.xml", documentXml);
+  wordFolder.folder("_rels").file("document.xml.rels", docRelsXml);
+  const mediaFolder = wordFolder.folder("media");
+  mediaFiles.forEach(m => mediaFolder.file(m.name, m.blob));
+  zip.folder("docProps").file("core.xml", coreXml);
+  zip.folder("docProps").file("app.xml", appXml);
+
+  return zip.generateAsync({
+    type:"blob",
+    mimeType:"application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  });
+}
+
+document.getElementById("btnExport").addEventListener("click", async () => {
+  const btn = document.getElementById("btnExport");
+  btn.disabled = true;
+  const originalText = btn.textContent;
+  btn.textContent = "Kootaan raporttia…";
+  try{
+    const blob = await buildDocx();
+    const addr = (state.header.osoite || "kuntoarvio").replace(/[^a-zA-Z0-9åäöÅÄÖ ]/g, "").trim().replace(/\s+/g, "_") || "kuntoarvio";
+    const dateStr = (state.header.pvm || new Date().toISOString().slice(0,10));
+    const filename = `Kuntoarvio_${addr}_${dateStr}.docx`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    showToast("Raportti viety: " + filename);
+  }catch(err){
+    console.error(err);
+    showToast("Raportin vienti epäonnistui. Yritä uudelleen.");
+  }finally{
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
+});
+
+/* =========================================================================
+   KÄYNNISTYS
+   ========================================================================= */
+(async function init(){
+  await loadFromStorage();
+  renderHeaderFields();
+  renderSections();
+})();
+</script>
+</body>
+</html>

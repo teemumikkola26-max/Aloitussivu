@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>Kenttälomakkeet</title>
+<style>
+  :root{
+    --ink:#1c2430;
+    --ink-soft:#4a5568;
+    --paper:#f7f5f0;
+    --paper-raised:#ffffff;
+    --line:#dcd7cb;
+    --line-strong:#b9b2a0;
+    --brand:#33455c;
+    --brand-deep:#233043;
+    --accent:#8fb79c;
+    --radius:12px;
+    --shadow:0 1px 3px rgba(28,36,48,.08), 0 1px 2px rgba(28,36,48,.06);
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:var(--paper);
+    color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.45;
+    min-height:100vh;
+  }
+  h1{font-family:Georgia,"Iowan Old Style","Times New Roman",serif;margin:0;}
+
+  header.topbar{
+    background:var(--brand-deep);
+    color:#f2efe6;
+    padding:26px 20px 22px;
+  }
+  header.topbar h1{font-size:1.4rem;font-weight:700;letter-spacing:.01em;}
+  header.topbar .sub{font-size:.85rem;color:#c9cfd8;margin-top:6px;max-width:34em;}
+
+  main{
+    max-width:640px;
+    margin:0 auto;
+    padding:16px 14px 40px;
+  }
+
+  .form-card{
+    display:block;
+    background:var(--paper-raised);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    box-shadow:var(--shadow);
+    padding:16px 16px 15px;
+    margin-bottom:12px;
+    text-decoration:none;
+    color:inherit;
+    position:relative;
+  }
+  .form-card:active{background:#f4f2ec;}
+  .fc-top{display:flex;align-items:flex-start;gap:12px;}
+  .fc-icon{
+    flex:0 0 auto;
+    width:42px;height:42px;
+    border-radius:9px;
+    background:var(--brand);
+    color:#fff;
+    display:flex;align-items:center;justify-content:center;
+    font-size:1.3rem;
+  }
+  .fc-body{flex:1;min-width:0;}
+  .fc-title{font-size:1.02rem;font-weight:700;color:var(--brand-deep);margin-bottom:2px;}
+  .fc-tag{
+    display:inline-block;
+    font-size:.68rem;
+    color:var(--ink-soft);
+    background:#eeece5;
+    border-radius:99px;
+    padding:2px 8px;
+    margin-bottom:6px;
+  }
+  .fc-desc{font-size:.86rem;color:var(--ink-soft);}
+  .fc-arrow{
+    flex:0 0 auto;
+    width:9px;height:9px;
+    border-right:2px solid var(--line-strong);
+    border-bottom:2px solid var(--line-strong);
+    transform:rotate(-45deg);
+    margin-top:16px;
+  }
+  .fc-external{
+    font-size:.68rem;
+    color:var(--ink-soft);
+    margin-top:8px;
+    display:flex;
+    align-items:center;
+    gap:4px;
+  }
+
+  .empty-state{
+    text-align:center;
+    color:var(--ink-soft);
+    font-size:.88rem;
+    padding:40px 20px;
+  }
+
+  footer.note{
+    max-width:640px;
+    margin:0 auto;
+    padding:4px 18px 28px;
+    font-size:.76rem;
+    color:var(--ink-soft);
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <h1>Kenttälomakkeet</h1>
+  <div class="sub">Valitse täytettävä lomake. Kaikki lomakkeet toimivat mobiilissa, tallentavat edistymisen laitteelle automaattisesti ja vievät raportin Word-tiedostona (.docx).</div>
+</header>
+
+<main id="formList"></main>
+
+<footer class="note" id="footerNote"></footer>
+
+<script>
+"use strict";
+/* =========================================================================
+   LOMAKEREKISTERI
+   Uuden lomakkeen lisääminen: kopioi yksi objekti alla olevaan FORMS-
+   taulukkoon ja täytä kentät. Ei muita muutoksia tarvita — sivu piirtää
+   kortin automaattisesti taulukon perusteella.
+
+   Kentät:
+     id       - yksilöivä tunniste (ei näy käyttäjälle)
+     title    - lomakkeen nimi
+     tag      - lyhyt standardi-/ohjeviite (esim. RT-kortin numero)
+     desc     - 1-2 lauseen kuvaus siitä, mihin lomake on tarkoitettu
+     icon     - yksi emoji tunnisteeksi
+     url      - polku tai osoite lomakkeeseen. Sama repo -> pelkkä
+                tiedostonimi (esim. "kuntoarvio.html"). Eri repo/sivusto
+                -> täysi osoite (https://...).
+     external - true, jos lomake on julkaistu toisessa sovelluksessa/
+                osoitteessa (näyttää pienen huomautuksen kortissa)
+   ========================================================================= */
+const FORMS = [
+  {
+    id: "kuntotarkastus",
+    title: "Asuntokaupan kuntotarkastus",
+    tag: "RT 103996 (KH 90-00394)",
+    desc: "Kenttälomake asunnon tai pientalon kuntotarkastukseen asuntokaupan yhteydessä.",
+    icon: "🏠",
+    url: "kuntotarkastus.html",
+    external: false
+  },
+  {
+    id: "kuntoarvio",
+    title: "Kiinteistön kuntoarvio",
+    tag: "RT 103002 / 103003",
+    desc: "Kenttälomake taloyhtiön kuntoarvioon: kuntoluokitus (KL 1–5) ja PTS-suositukset rakennusosittain.",
+    icon: "🏢",
+    url: "kuntoarvio.html",
+    external: false
+  },
+  {
+    id: "kuntotutkimus",
+    title: "Kosteus- ja sisäilmatekninen kuntotutkimus",
+    tag: "Kenttätutkimus",
+    desc: "Kenttälomake kosteus- ja sisäilmateknisen kuntotutkimuksen tutkimusmenetelmien (aistinvarainen tarkastelu, pintakosteus, RH, merkkiainekoe, näytteet, lämpökuvaus ym.) kirjaamiseen.",
+    icon: "💧",
+    url: "https://teemumikkola26-max.github.io/Kentt-lomake/",
+    external: true
+  }
+];
+
+function renderForms(){
+  const wrap = document.getElementById("formList");
+  wrap.innerHTML = "";
+
+  if (FORMS.length === 0){
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = "Ei vielä yhtään lomaketta.";
+    wrap.appendChild(empty);
+    return;
+  }
+
+  FORMS.forEach(form => {
+    const a = document.createElement("a");
+    a.className = "form-card";
+    a.href = form.url;
+
+    const top = document.createElement("div");
+    top.className = "fc-top";
+
+    const icon = document.createElement("div");
+    icon.className = "fc-icon";
+    icon.textContent = form.icon || "📋";
+    top.appendChild(icon);
+
+    const body = document.createElement("div");
+    body.className = "fc-body";
+
+    if (form.tag){
+      const tag = document.createElement("span");
+      tag.className = "fc-tag";
+      tag.textContent = form.tag;
+      body.appendChild(tag);
+    }
+
+    const title = document.createElement("div");
+    title.className = "fc-title";
+    title.textContent = form.title;
+    body.appendChild(title);
+
+    const desc = document.createElement("div");
+    desc.className = "fc-desc";
+    desc.textContent = form.desc || "";
+    body.appendChild(desc);
+
+    if (form.external){
+      const ext = document.createElement("div");
+      ext.className = "fc-external";
+      ext.textContent = "↗ Avautuu erillisestä sovelluksesta";
+      body.appendChild(ext);
+    }
+
+    top.appendChild(body);
+
+    const arrow = document.createElement("div");
+    arrow.className = "fc-arrow";
+    top.appendChild(arrow);
+
+    a.appendChild(top);
+    wrap.appendChild(a);
+  });
+}
+
+renderForms();
+document.getElementById("footerNote").textContent =
+  `${FORMS.length} lomake${FORMS.length === 1 ? "" : "tta"} saatavilla.`;
+</script>
+</body>
+</html>
