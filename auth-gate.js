@@ -20,8 +20,8 @@
   "use strict";
 
   // ---- TÄYTÄ NÄMÄ OMAN SUPABASE-PROJEKTISI TIEDOILLA ----
-  const SUPABASE_URL = "https://TÄYTÄ-TÄHÄN.supabase.co";
-  const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_TÄYTÄ_TÄHÄN";
+  const SUPABASE_URL = "https://xuaoqdpmhhpxjcweaauz.supabase.co/rest/v1/";
+  const SUPABASE_PUBLISHABLE_KEY = "sb_publishable__DNdQwFzdfVHqfhmgLvkrA_h_8SIgv2";
   // --------------------------------------------------------
 
   if (!window.supabase || typeof window.supabase.createClient !== "function"){
