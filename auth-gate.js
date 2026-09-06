@@ -24,12 +24,36 @@
   const SUPABASE_PUBLISHABLE_KEY = "sb_publishable__DNdQwFzdfVHqfhmgLvkrA_h_8SIgv2";
   // --------------------------------------------------------
 
+  // Näyttää virheen suoraan ruudulla (punainen palkki ylhäällä) — ei tarvetta
+  // selaimen konsoliin, toimii myös puhelimella.
+  function showFatalError(message){
+    document.documentElement.style.visibility = "visible";
+    if (document.body) document.body.style.overflow = "";
+    const existing = document.getElementById("authFatalError");
+    if (existing) existing.remove();
+    const banner = document.createElement("div");
+    banner.id = "authFatalError";
+    banner.style.cssText =
+      "position:fixed;top:0;left:0;right:0;z-index:999999;" +
+      "background:#a13030;color:#fff;padding:12px 16px;font-size:.85rem;" +
+      "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;" +
+      "box-shadow:0 2px 8px rgba(0,0,0,.3);white-space:pre-wrap;";
+    banner.textContent = "Kirjautumisen virhe: " + message;
+    (document.body || document.documentElement).appendChild(banner);
+  }
+
   if (!window.supabase || typeof window.supabase.createClient !== "function"){
-    console.error("Supabase-js ei latautunut. Tarkista, että supabase-js-CDN-script on ladattu ennen auth-gate.js:ää.");
+    showFatalError("Supabase-js-kirjasto ei latautunut. Tarkista, että CDN-script-rivi on ennen auth-gate.js-riviä <head>issä, ja että laitteella on internetyhteys.");
     return;
   }
 
-  const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+  let supabaseClient;
+  try {
+    supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+  } catch (err){
+    showFatalError("Supabase-clientin luonti epäonnistui: " + (err && err.message ? err.message : err));
+    return;
+  }
   window.__supabaseClient = supabaseClient; // muiden sivujen käyttöön tarvittaessa
 
   function ensureReady(fn){
@@ -84,7 +108,7 @@
       const password = overlay.querySelector("#authPassword").value;
       const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
       if (error){
-        errorBox.textContent = "Kirjautuminen epäonnistui. Tarkista sähköposti ja salasana.";
+        errorBox.textContent = "Kirjautuminen epäonnistui: " + (error.message || "tuntematon virhe") + " (koodi: " + (error.status || "-") + ")";
         errorBox.style.display = "block";
         submitBtn.disabled = false;
         submitBtn.textContent = "Kirjaudu";
@@ -130,14 +154,27 @@
   }
 
   ensureReady(() => {
-    supabaseClient.auth.onAuthStateChange((_event, session) => {
-      if (session) revealContent();
-      else lockContent();
-    });
+    try {
+      supabaseClient.auth.onAuthStateChange((_event, session) => {
+        if (session) revealContent();
+        else lockContent();
+      });
 
-    supabaseClient.auth.getSession().then(({ data }) => {
-      if (data.session) revealContent();
-      else lockContent();
-    });
+      supabaseClient.auth.getSession().then(({ data, error }) => {
+        if (error){
+          showFatalError("Istunnon haku epäonnistui: " + error.message);
+          return;
+        }
+        if (data.session) revealContent();
+        else lockContent();
+      }).catch((err) => {
+        showFatalError("Istunnon haku epäonnistui: " + (err && err.message ? err.message : err));
+      });
+    } catch (err){
+      showFatalError("Odottamaton virhe: " + (err && err.message ? err.message : err));
+    }
   });
 })();
+    
+  
+
