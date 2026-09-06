@@ -20,7 +20,7 @@
   "use strict";
 
   // ---- TÄYTÄ NÄMÄ OMAN SUPABASE-PROJEKTISI TIEDOILLA ----
-  const SUPABASE_URL = "https://xuaoqdpmhhpxjcweaauz.supabase.co/rest/v1/";
+  const SUPABASE_URL = "https://xuaoqdpmhhpxjcweaauz.supabase.co";
   const SUPABASE_PUBLISHABLE_KEY = "sb_publishable__DNdQwFzdfVHqfhmgLvkrA_h_8SIgv2";
   // --------------------------------------------------------
 
