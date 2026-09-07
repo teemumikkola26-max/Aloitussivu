@@ -70,7 +70,7 @@ function showEditView(){
 async function loadFormsList(){
   const wrap = document.getElementById("formsList");
   wrap.innerHTML = '<div style="padding:20px;color:var(--ink-soft);font-size:.85rem;">Ladataan…</div>';
-  const { data, error } = await supabaseClient.from("forms").select("id,title,tag,desc,icon,updated_at").order("updated_at", { ascending:false });
+  const { data, error } = await supabaseClient.from("forms").select("id,title,tag,description,icon,updated_at").order("updated_at", { ascending:false });
   if (error){
     wrap.innerHTML = "";
     fatalError("Lomakkeiden haku epäonnistui: " + error.message);
@@ -129,7 +129,7 @@ async function loadFormForEdit(id){
   }
   editingId = id;
   ed = data.definition;
-  ed.meta = ed.meta || { title:data.title, tag:data.tag, desc:data.desc, icon:data.icon };
+  ed.meta = ed.meta || { title:data.title, tag:data.tag, desc:data.description, icon:data.icon };
   ed.statusScheme = ed.statusScheme || [];
   ed.headerFields = ed.headerFields || [];
   ed.sections = ed.sections || [];
@@ -540,7 +540,7 @@ document.getElementById("btnSaveForm").addEventListener("click", async () => {
   const row = {
     title: ed.meta.title,
     tag: ed.meta.tag || null,
-    desc: ed.meta.desc || null,
+    description: ed.meta.desc || null,
     icon: ed.meta.icon || "📋",
     definition: ed
   };

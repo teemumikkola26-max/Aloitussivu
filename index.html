@@ -285,7 +285,7 @@ function renderCustomForms(rows){
     wrap.appendChild(createFormCard({
       title: row.title,
       tag: row.tag,
-      desc: row.desc,
+      desc: row.description,
       icon: row.icon,
       url: "form.html?id=" + encodeURIComponent(row.id)
     }));
@@ -295,7 +295,7 @@ function renderCustomForms(rows){
 waitForSupabaseClient(async (supabaseClient) => {
   const { data, error } = await supabaseClient
     .from("forms")
-    .select("id,title,tag,desc,icon,updated_at")
+    .select("id,title,tag,description,icon,updated_at")
     .order("updated_at", { ascending:false });
   if (error){
     const wrap = document.getElementById("customFormsList");
