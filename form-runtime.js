@@ -561,102 +561,75 @@ function resetState(){
   allItemIds().forEach(id => state.items[id] = { status:DEFAULT_STATUS, note:"", action:"", value:"", photos:[] });
 }
 
-/* ---------- .DOCX-VIENTI ---------- */
-function xmlEsc(s){
-  return String(s == null ? "" : s)
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;").replace(/'/g, "&apos;");
-}
-function paraXml(text, opts){
-  opts = opts || {};
-  const rPr = [];
-  if (opts.bold) rPr.push("<w:b/>");
-  if (opts.color) rPr.push('<w:color w:val="' + opts.color + '"/>');
-  if (opts.sz) rPr.push('<w:sz w:val="' + opts.sz + '"/><w:szCs w:val="' + opts.sz + '"/>');
-  const pPr = [];
-  if (opts.before || opts.after){
-    pPr.push('<w:spacing' + (opts.before?' w:before="'+opts.before+'"':'') + (opts.after?' w:after="'+opts.after+'"':'') + '/>');
+/* ---------- .DOCX-VIENTI (jaettu DocxStyleEngine) ---------- */
+let loadedDocStyle = null;
+
+async function loadDocStyle(){
+  try{
+    const { data, error } = await window.__supabaseClient
+      .from("doc_styles")
+      .select("style")
+      .eq("form_key", FORM_ID)
+      .maybeSingle();
+    if (error || !data){ loadedDocStyle = window.DocxStyleEngine.defaultStyle(); return; }
+    const d = window.DocxStyleEngine.defaultStyle();
+    const s = data.style || {};
+    loadedDocStyle = {
+      coverPage: Object.assign({}, d.coverPage, s.coverPage || {}),
+      header: Object.assign({}, d.header, s.header || {}),
+      footer: Object.assign({}, d.footer, s.footer || {}),
+      fonts: Object.assign({}, d.fonts, s.fonts || {}),
+      colors: Object.assign({}, d.colors, s.colors || {})
+    };
+  }catch(err){
+    loadedDocStyle = window.DocxStyleEngine.defaultStyle();
   }
-  const lines = String(text == null ? "" : text).split(/\r?\n/);
-  const runs = lines.map((line, i) => (i>0?"<w:br/>":"") + '<w:t xml:space="preserve">' + xmlEsc(line) + '</w:t>').join("");
-  return '<w:p>' + (pPr.length?'<w:pPr>'+pPr.join('')+'</w:pPr>':'') + '<w:r>' + (rPr.length?'<w:rPr>'+rPr.join('')+'</w:rPr>':'') + runs + '</w:r></w:p>';
-}
-function imageXml(rId, cx, cy, docPrId){
-  return '<w:p><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="'+cx+'" cy="'+cy+'"/><wp:docPr id="'+docPrId+'" name="Kuva'+docPrId+'"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="'+docPrId+'" name="Kuva'+docPrId+'"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rId'+rId+'"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="'+cx+'" cy="'+cy+'"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>';
 }
 
 async function buildDocx(){
+  const engine = window.DocxStyleEngine;
+  const s = loadedDocStyle || engine.defaultStyle();
   const bodyParts = [];
-  const relParts = [];
-  const mediaFiles = [];
-  let relCounter = 4;
-  let docPrCounter = 100;
+  const extraMedia = [];
+  let imgRelCounter = 200;   // pidetään selvästi erillään moottorin omista (10-13) rel-id:istä
+  let imgDocPrCounter = 1000;
 
-  bodyParts.push(paraXml(DEF.meta.title || "Lomake", { bold:true, sz:44, after:80 }));
-  if (DEF.meta.desc){
-    bodyParts.push(paraXml(DEF.meta.desc, { color:"4A5568", sz:18, after:200 }));
-  }
   const headerLines = (DEF.headerFields||[]).map(f => f.label + ": " + (state.header[f.id] || "—")).join("\n");
-  bodyParts.push(paraXml(headerLines, { after:240 }));
+  bodyParts.push(engine.paraXml(headerLines, { font:s.fonts.body, after:240 }));
 
   DEF.sections.forEach((sec, secIdx) => {
-    bodyParts.push(paraXml((secIdx+1) + ". " + sec.title, { bold:true, sz:28, before:260, after:120 }));
+    bodyParts.push(engine.paraXml((secIdx+1) + ". " + sec.title, { bold:true, sz:28, font:s.fonts.heading, color:s.colors.heading, before:260, after:120 }));
 
     sec.fields.forEach((field) => {
       const itemId = sec.id + "_" + field.id;
       const it = state.items[itemId];
-      bodyParts.push(paraXml(field.label, { bold:true, after:20 }));
+      bodyParts.push(engine.paraXml(field.label, { bold:true, font:s.fonts.body, after:20 }));
 
       if (field.type === "checklist"){
-        const scheme = (DEF.statusScheme||[]).find(s => s.value === it.status) || { label:it.status, color:"8C8676" };
+        const scheme = (DEF.statusScheme||[]).find(sc => sc.value === it.status) || { label:it.status, color:"8C8676" };
         const statusLine = scheme.label + (scheme.desc ? " — " + scheme.desc : "");
-        bodyParts.push(paraXml(statusLine, { color:(scheme.color||"#8C8676").replace("#",""), bold:true, sz:19, after:(it.note||it.action||it.photos.length)?40:120 }));
-        if (it.note) bodyParts.push(paraXml(it.note, { after:(it.action||it.photos.length)?60:140 }));
-        if (it.action) bodyParts.push(paraXml((field.actionLabel||"Lisätoimenpide") + ": " + it.action, { color:"33455C", after: it.photos.length?60:140 }));
+        bodyParts.push(engine.paraXml(statusLine, { color:(scheme.color||"#8C8676"), bold:true, font:s.fonts.body, sz:19, after:(it.note||it.action||it.photos.length)?40:120 }));
+        if (it.note) bodyParts.push(engine.paraXml(it.note, { font:s.fonts.body, after:(it.action||it.photos.length)?60:140 }));
+        if (it.action) bodyParts.push(engine.paraXml((field.actionLabel||"Lisätoimenpide") + ": " + it.action, { color:"33455C", font:s.fonts.body, after: it.photos.length?60:140 }));
       } else {
         let displayVal = it.value || "—";
         if (field.type === "number" && field.unit && it.value) displayVal = it.value + " " + field.unit;
-        bodyParts.push(paraXml(displayVal, { after: it.photos.length ? 60 : 140 }));
+        bodyParts.push(engine.paraXml(displayVal, { font:s.fonts.body, after: it.photos.length ? 60 : 140 }));
       }
 
       for (const p of it.photos){
-        const maxCx = 4938000;
-        let cx = p.w * 9525, cy = p.h * 9525;
-        if (cx > maxCx){ const s = maxCx/cx; cx = Math.round(cx*s); cy = Math.round(cy*s); }
-        const rId = relCounter++;
-        const mediaName = "image" + (mediaFiles.length+1) + ".jpeg";
-        mediaFiles.push({ name: mediaName, blob: p.blob });
-        relParts.push('<Relationship Id="rId'+rId+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/'+mediaName+'"/>');
-        bodyParts.push(imageXml(rId, cx, cy, docPrCounter++));
+        const { cx, cy } = engine.scaledDims(p.w, p.h, 4938000);
+        const rId = imgRelCounter++;
+        const mediaName = "image" + (extraMedia.length+1) + ".jpeg";
+        extraMedia.push({ rId, name: mediaName, blob: p.blob });
+        bodyParts.push(engine.imageXml(rId, cx, cy, imgDocPrCounter++));
       }
     });
   });
 
-  const documentXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body>'+bodyParts.join('')+'<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1417" w:right="1417" w:bottom="1417" w:left="1417"/></w:sectPr></w:body></w:document>';
-
-  const contentTypesXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="jpeg" ContentType="image/jpeg"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/><Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/></Types>';
-
-  const rootRelsXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/></Relationships>';
-
-  const docRelsXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+relParts.join('')+'</Relationships>';
-
-  const coreXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>'+xmlEsc(DEF.meta.title||"Lomake")+'</dc:title></cp:coreProperties>';
-
-  const appXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties"><Application>Kenttalomake</Application></Properties>';
-
-  const zip = new JSZip();
-  zip.file("[Content_Types].xml", contentTypesXml);
-  zip.folder("_rels").file(".rels", rootRelsXml);
-  const wordFolder = zip.folder("word");
-  wordFolder.file("document.xml", documentXml);
-  wordFolder.folder("_rels").file("document.xml.rels", docRelsXml);
-  const mediaFolder = wordFolder.folder("media");
-  mediaFiles.forEach(m => mediaFolder.file(m.name, m.blob));
-  zip.folder("docProps").file("core.xml", coreXml);
-  zip.folder("docProps").file("app.xml", appXml);
-
-  return zip.generateAsync({ type:"blob", mimeType:"application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+  return engine.assembleDocx({ meta:{ title: DEF.meta.title }, bodyParts, style: s, extraMedia });
 }
+
 
 document.getElementById("btnExport").addEventListener("click", async () => {
   const btn = document.getElementById("btnExport");
@@ -664,6 +637,7 @@ document.getElementById("btnExport").addEventListener("click", async () => {
   const originalText = btn.textContent;
   btn.textContent = "Kootaan raporttia…";
   try{
+    if (!loadedDocStyle) await loadDocStyle();
     const blob = await buildDocx();
     const titleSlug = (DEF.meta.title || "lomake").replace(/[^a-zA-Z0-9åäöÅÄÖ ]/g,"").trim().replace(/\s+/g,"_") || "lomake";
     const dateStr = new Date().toISOString().slice(0,10);
@@ -681,6 +655,13 @@ document.getElementById("btnExport").addEventListener("click", async () => {
     btn.disabled = false;
     btn.textContent = originalText;
   }
+});
+
+document.getElementById("btnStyle").addEventListener("click", () => {
+  const backUrl = "form.html?id=" + encodeURIComponent(FORM_ID);
+  window.location.href = "style-editor.html?form=" + encodeURIComponent(FORM_ID) +
+    "&label=" + encodeURIComponent(DEF.meta.title || "lomake") +
+    "&back=" + encodeURIComponent(backUrl);
 });
 
 /* ---------- Käynnistys ---------- */
