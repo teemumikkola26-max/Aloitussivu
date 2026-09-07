@@ -311,9 +311,18 @@ function waitForSupabaseClient(cb, triesLeft){
     return;
   }
 
+  if (!window.DocxStyleEngine){
+    fatalError("docx-style-engine.js ei latautunut. Tarkista, että script-rivi on lisätty sivun <head>-osioon.");
+    return;
+  }
+
   waitForSupabaseClient(async (client) => {
-    supabaseClient = client;
-    await loadStyle();
-    renderEditor();
+    try{
+      supabaseClient = client;
+      await loadStyle();
+      renderEditor();
+    }catch(err){
+      fatalError("Odottamaton virhe editoria ladatessa: " + (err && err.message ? err.message : err));
+    }
   });
 })();
