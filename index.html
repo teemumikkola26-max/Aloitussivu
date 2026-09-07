@@ -299,7 +299,9 @@ waitForSupabaseClient(async (supabaseClient) => {
     .order("updated_at", { ascending:false });
   if (error){
     const wrap = document.getElementById("customFormsList");
-    wrap.innerHTML = '<div class="empty-state">Omien lomakkeiden haku epäonnistui.</div>';
+    wrap.innerHTML = '<div class="empty-state">Omien lomakkeiden haku epäonnistui: ' +
+      String(error.message || error).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])) +
+      '</div>';
     return;
   }
   renderCustomForms(data);
