@@ -20,8 +20,8 @@
   "use strict";
 
   // ---- TÄYTÄ NÄMÄ OMAN SUPABASE-PROJEKTISI TIEDOILLA ----
-  const SUPABASE_URL = "https://xuaoqdpmhhpxjcweaauz.supabase.co";
-  const SUPABASE_PUBLISHABLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh1YW9xZHBtaGhweGpjd2VhYXV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg1ODg3NzksImV4cCI6MjEwNDE2NDc3OX0.vU_vlkS6WpLQoTaVt5gZTsbsSSJZg-GVnpcCiJxRivw";
+  const SUPABASE_URL = "https://TÄYTÄ-TÄHÄN.supabase.co";
+  const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_TÄYTÄ_TÄHÄN";
   // --------------------------------------------------------
 
   // Näyttää virheen suoraan ruudulla (punainen palkki ylhäällä) — ei tarvetta
@@ -258,7 +258,7 @@
     btn.id = "logoutBtn";
     btn.textContent = "Kirjaudu ulos";
     btn.style.cssText =
-      "position:fixed;bottom:10px;right:10px;z-index:9998;" +
+      "position:fixed;bottom:calc(env(safe-area-inset-bottom) + 66px);right:10px;z-index:9998;" +
       "background:rgba(35,48,67,.85);color:#fff;border:none;" +
       "border-radius:99px;padding:8px 14px;font-size:.75rem;cursor:pointer;" +
       "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;";

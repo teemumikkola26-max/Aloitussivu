@@ -1090,7 +1090,10 @@ async function loadDocStyle(){
       header: Object.assign({}, d.header, s.header || {}),
       footer: Object.assign({}, d.footer, s.footer || {}),
       fonts: Object.assign({}, d.fonts, s.fonts || {}),
-      colors: Object.assign({}, d.colors, s.colors || {})
+      colors: Object.assign({}, d.colors, s.colors || {}),
+      toc: Object.assign({}, d.toc, s.toc || {}),
+      pagesBefore: s.pagesBefore || [],
+      pagesAfter: s.pagesAfter || []
     };
   }catch(err){
     loadedDocStyle = window.DocxStyleEngine.defaultStyle();
@@ -1106,26 +1109,26 @@ async function buildDocx(){
   let imgDocPrCounter = 1000;
 
   const headerLines = HEADER_FIELDS.map(f => `${f.label}: ${state.header[f.id] || "—"}`).join("\n");
-  bodyParts.push(engine.paraXml(headerLines, { font:s.fonts.body, after:240 }));
+  bodyParts.push(engine.paraXml(headerLines, { font:s.fonts.body, sz:engine.pt2hp(s.fonts.bodySize), color:s.colors.body, after:240 }));
 
   for (let secIdx = 0; secIdx < SECTIONS.length; secIdx++){
     const sec = SECTIONS[secIdx];
-    bodyParts.push(engine.paraXml(`${secIdx+1}. ${sec.title}`, { bold:true, sz:28, font:s.fonts.heading, color:s.colors.heading, before:260, after:120 }));
+    bodyParts.push(engine.paraXml(`${secIdx+1}. ${sec.title}`, { bold:true, sz:engine.pt2hp(s.fonts.headingSize), font:s.fonts.heading, color:s.colors.heading, pStyle:"Heading1", before:260, after:120 }));
 
     for (let i = 0; i < sec.items.length; i++){
       const itemId = sec.id + "_i" + i;
       const it = state.items[itemId];
       const text = sec.items[i];
-      bodyParts.push(engine.paraXml(text, { bold:true, font:s.fonts.body, after:20 }));
+      bodyParts.push(engine.paraXml(text, { bold:true, font:s.fonts.body, sz:engine.pt2hp(s.fonts.bodySize), color:s.colors.body, after:20 }));
       if (sec.notesOnly){
         if (it.note){
-          bodyParts.push(engine.paraXml(it.note, { font:s.fonts.body, after:140 }));
+          bodyParts.push(engine.paraXml(it.note, { font:s.fonts.body, sz:engine.pt2hp(s.fonts.bodySize), color:s.colors.body, after:140 }));
         }
         continue;
       }
-      bodyParts.push(engine.paraXml(STATUS_LABELS[it.status], { color: STATUS_COLOR_DOCX[it.status], bold:true, font:s.fonts.body, sz:19, after: (it.note || it.photos.length) ? 40 : 120 }));
+      bodyParts.push(engine.paraXml(STATUS_LABELS[it.status], { color: STATUS_COLOR_DOCX[it.status], bold:true, font:s.fonts.body, sz:engine.pt2hp(s.fonts.bodySize), after: (it.note || it.photos.length) ? 40 : 120 }));
       if (it.note){
-        bodyParts.push(engine.paraXml(it.note, { font:s.fonts.body, after: it.photos.length ? 60 : 140 }));
+        bodyParts.push(engine.paraXml(it.note, { font:s.fonts.body, sz:engine.pt2hp(s.fonts.bodySize), color:s.colors.body, after: it.photos.length ? 60 : 140 }));
       }
       for (const p of it.photos){
         const { cx, cy } = engine.scaledDims(p.w, p.h, 4938000);

@@ -48,6 +48,7 @@ function allItemIds(){
 function isFieldDone(field, itemId){
   const it = state.items[itemId];
   if (field.type === "checklist") return it.status !== DEFAULT_STATUS;
+  if (field.type === "table") return Object.values(it.table || {}).some(v => v && String(v).trim() !== "");
   return !!(it.value && String(it.value).trim() !== "");
 }
 
@@ -135,7 +136,7 @@ async function doSave(){
   await idbPut("meta", { key:"header", value: state.header });
   for (const id of Object.keys(state.items)){
     const it = state.items[id];
-    await idbPut("items", { id, status: it.status, note: it.note, action: it.action, value: it.value });
+    await idbPut("items", { id, status: it.status, note: it.note, action: it.action, value: it.value, table: it.table });
   }
   setSaveIndicator("Tallennettu");
 }
@@ -152,6 +153,7 @@ async function loadFromStorage(){
       state.items[row.id].note = row.note || "";
       state.items[row.id].action = row.action || "";
       state.items[row.id].value = row.value || "";
+      state.items[row.id].table = row.table || {};
     }
   });
 
@@ -376,6 +378,46 @@ function renderSections(){
           actionArea.appendChild(actionInput);
           itemDiv.appendChild(actionArea);
         }
+      } else if (field.type === "table"){
+        if (!itState.table) itState.table = {};
+        const tableWrap = document.createElement("div");
+        tableWrap.style.cssText = "overflow-x:auto;margin-bottom:8px;";
+        const tableEl = document.createElement("table");
+        tableEl.style.cssText = "border-collapse:collapse;width:100%;font-size:.85rem;";
+        const rows = field.tableRows || 3;
+        const cols = field.tableCols || 3;
+        for (let r = 0; r < rows; r++){
+          const tr = document.createElement("tr");
+          for (let c = 0; c < cols; c++){
+            const isHeaderCell = (r === 0 || c === 0);
+            const cell = document.createElement(isHeaderCell ? "th" : "td");
+            cell.style.cssText = "border:1px solid var(--line-strong);padding:6px 8px;text-align:left;" +
+              (isHeaderCell ? "background:#f1efe8;font-weight:600;white-space:nowrap;" : "");
+            if (r === 0 && c === 0){
+              cell.textContent = field.tableCorner || "";
+            } else if (r === 0){
+              cell.textContent = (field.tableColHeaders && field.tableColHeaders[c-1]) || "";
+            } else if (c === 0){
+              cell.textContent = (field.tableRowHeaders && field.tableRowHeaders[r-1]) || "";
+            } else {
+              const key = "r" + r + "_c" + c;
+              const cellInput = document.createElement("input");
+              cellInput.type = "text";
+              cellInput.autocomplete = "off";
+              cellInput.style.cssText = "width:100%;min-width:70px;border:1px solid var(--line-strong);border-radius:5px;padding:5px 6px;font-size:.85rem;box-sizing:border-box;";
+              cellInput.value = itState.table[key] || "";
+              cellInput.addEventListener("input", () => {
+                itState.table[key] = cellInput.value;
+                saveDebounced();
+              });
+              cell.appendChild(cellInput);
+            }
+            tr.appendChild(cell);
+          }
+          tableEl.appendChild(tr);
+        }
+        tableWrap.appendChild(tableEl);
+        itemDiv.appendChild(tableWrap);
       } else {
         const valArea = document.createElement("div");
         valArea.className = "note-area show";
@@ -558,7 +600,7 @@ document.getElementById("btnNew").addEventListener("click", () => {
 
 function resetState(){
   state = { header:{}, items:{} };
-  allItemIds().forEach(id => state.items[id] = { status:DEFAULT_STATUS, note:"", action:"", value:"", photos:[] });
+  allItemIds().forEach(id => state.items[id] = { status:DEFAULT_STATUS, note:"", action:"", value:"", table:{}, photos:[] });
 }
 
 /* ---------- .DOCX-VIENTI (jaettu DocxStyleEngine) ---------- */
@@ -579,7 +621,10 @@ async function loadDocStyle(){
       header: Object.assign({}, d.header, s.header || {}),
       footer: Object.assign({}, d.footer, s.footer || {}),
       fonts: Object.assign({}, d.fonts, s.fonts || {}),
-      colors: Object.assign({}, d.colors, s.colors || {})
+      colors: Object.assign({}, d.colors, s.colors || {}),
+      toc: Object.assign({}, d.toc, s.toc || {}),
+      pagesBefore: s.pagesBefore || [],
+      pagesAfter: s.pagesAfter || []
     };
   }catch(err){
     loadedDocStyle = window.DocxStyleEngine.defaultStyle();
@@ -595,26 +640,42 @@ async function buildDocx(){
   let imgDocPrCounter = 1000;
 
   const headerLines = (DEF.headerFields||[]).map(f => f.label + ": " + (state.header[f.id] || "—")).join("\n");
-  bodyParts.push(engine.paraXml(headerLines, { font:s.fonts.body, after:240 }));
+  bodyParts.push(engine.paraXml(headerLines, { font:s.fonts.body, sz:engine.pt2hp(s.fonts.bodySize), color:s.colors.body, after:240 }));
 
   DEF.sections.forEach((sec, secIdx) => {
-    bodyParts.push(engine.paraXml((secIdx+1) + ". " + sec.title, { bold:true, sz:28, font:s.fonts.heading, color:s.colors.heading, before:260, after:120 }));
+    bodyParts.push(engine.paraXml((secIdx+1) + ". " + sec.title, { bold:true, sz:engine.pt2hp(s.fonts.headingSize), font:s.fonts.heading, color:s.colors.heading, pStyle:"Heading1", before:260, after:120 }));
 
     sec.fields.forEach((field) => {
       const itemId = sec.id + "_" + field.id;
       const it = state.items[itemId];
-      bodyParts.push(engine.paraXml(field.label, { bold:true, font:s.fonts.body, after:20 }));
+      bodyParts.push(engine.paraXml(field.label, { bold:true, font:s.fonts.body, sz:engine.pt2hp(s.fonts.bodySize), color:s.colors.body, after:20 }));
 
       if (field.type === "checklist"){
         const scheme = (DEF.statusScheme||[]).find(sc => sc.value === it.status) || { label:it.status, color:"8C8676" };
         const statusLine = scheme.label + (scheme.desc ? " — " + scheme.desc : "");
-        bodyParts.push(engine.paraXml(statusLine, { color:(scheme.color||"#8C8676"), bold:true, font:s.fonts.body, sz:19, after:(it.note||it.action||it.photos.length)?40:120 }));
-        if (it.note) bodyParts.push(engine.paraXml(it.note, { font:s.fonts.body, after:(it.action||it.photos.length)?60:140 }));
-        if (it.action) bodyParts.push(engine.paraXml((field.actionLabel||"Lisätoimenpide") + ": " + it.action, { color:"33455C", font:s.fonts.body, after: it.photos.length?60:140 }));
+        bodyParts.push(engine.paraXml(statusLine, { color:(scheme.color||"#8C8676"), bold:true, font:s.fonts.body, sz:engine.pt2hp(s.fonts.bodySize), after:(it.note||it.action||it.photos.length)?40:120 }));
+        if (it.note) bodyParts.push(engine.paraXml(it.note, { font:s.fonts.body, sz:engine.pt2hp(s.fonts.bodySize), color:s.colors.body, after:(it.action||it.photos.length)?60:140 }));
+        if (it.action) bodyParts.push(engine.paraXml((field.actionLabel||"Lisätoimenpide") + ": " + it.action, { color:"33455C", font:s.fonts.body, sz:engine.pt2hp(s.fonts.bodySize), after: it.photos.length?60:140 }));
+      } else if (field.type === "table"){
+        const rows = field.tableRows || 3;
+        const cols = field.tableCols || 3;
+        const tableRows2D = [];
+        for (let r = 0; r < rows; r++){
+          const row = [];
+          for (let c = 0; c < cols; c++){
+            if (r === 0 && c === 0) row.push(field.tableCorner || "");
+            else if (r === 0) row.push((field.tableColHeaders && field.tableColHeaders[c-1]) || "");
+            else if (c === 0) row.push((field.tableRowHeaders && field.tableRowHeaders[r-1]) || "");
+            else row.push((it.table && it.table["r"+r+"_c"+c]) || "");
+          }
+          tableRows2D.push(row);
+        }
+        bodyParts.push(engine.tableXml(tableRows2D, { headerRowCount:1, headerColCount:1, font:s.fonts.body, sz:engine.pt2hp(s.fonts.bodySize), color:s.colors.body }));
+        bodyParts.push(engine.paraXml("", { after:140 }));
       } else {
         let displayVal = it.value || "—";
         if (field.type === "number" && field.unit && it.value) displayVal = it.value + " " + field.unit;
-        bodyParts.push(engine.paraXml(displayVal, { font:s.fonts.body, after: it.photos.length ? 60 : 140 }));
+        bodyParts.push(engine.paraXml(displayVal, { font:s.fonts.body, sz:engine.pt2hp(s.fonts.bodySize), color:s.colors.body, after: it.photos.length ? 60 : 140 }));
       }
 
       for (const p of it.photos){
