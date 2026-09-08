@@ -21,7 +21,7 @@
 
   // ---- TÄYTÄ NÄMÄ OMAN SUPABASE-PROJEKTISI TIEDOILLA ----
   const SUPABASE_URL = "https://xuaoqdpmhhpxjcweaauz.supabase.co";
-  const SUPABASE_PUBLISHABLE_KEY = "sb_publishable__DNdQwFzdfVHqfhmgLvkrA_h_8SIgv2";
+  const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_DNdQwFzdfVHqfhmgLvkrA_h_8SIgv2";
   // --------------------------------------------------------
 
   // Näyttää virheen suoraan ruudulla (punainen palkki ylhäällä) — ei tarvetta
