@@ -338,7 +338,8 @@ const FIELD_TYPE_LABELS = {
   text:"Vapaa teksti",
   number:"Numero",
   date:"Päivämäärä",
-  select:"Pudotusvalikko"
+  select:"Pudotusvalikko",
+  table:"Taulukko (vakiotsikot + täytettävät solut)"
 };
 
 function buildSectionsCard(){
@@ -510,6 +511,79 @@ function buildFieldBlock(sec, field, fieldIdx){
       field.options = optionsArea.value.split("\n").map(s => s.trim()).filter(Boolean);
     });
     wrap.appendChild(optionsArea);
+    return wrap;
+  } else if (field.type === "table"){
+    if (!field.tableRows) field.tableRows = 3;
+    if (!field.tableCols) field.tableCols = 3;
+    if (field.tableCorner == null) field.tableCorner = "";
+    if (!field.tableRowHeaders) field.tableRowHeaders = [];
+    if (!field.tableColHeaders) field.tableColHeaders = [];
+    while (field.tableRowHeaders.length < field.tableRows - 1) field.tableRowHeaders.push("");
+    field.tableRowHeaders.length = field.tableRows - 1;
+    while (field.tableColHeaders.length < field.tableCols - 1) field.tableColHeaders.push("");
+    field.tableColHeaders.length = field.tableCols - 1;
+
+    const dimRow = document.createElement("div");
+    dimRow.className = "editor-row-sub";
+
+    const rowsWrap = document.createElement("label");
+    rowsWrap.style.cssText = "display:flex;align-items:center;gap:6px;font-size:.76rem;color:var(--ink-soft);";
+    const rowsInput = document.createElement("input");
+    rowsInput.type = "number"; rowsInput.min = "2"; rowsInput.max = "12";
+    rowsInput.value = field.tableRows;
+    rowsInput.style.cssText = "width:56px;border:1px solid var(--line-strong);border-radius:6px;padding:4px 6px;";
+    rowsInput.addEventListener("change", () => {
+      field.tableRows = Math.max(2, Math.min(12, Number(rowsInput.value) || 3));
+      renderEditor();
+    });
+    rowsWrap.appendChild(document.createTextNode("Rivejä"));
+    rowsWrap.appendChild(rowsInput);
+
+    const colsWrap = document.createElement("label");
+    colsWrap.style.cssText = "display:flex;align-items:center;gap:6px;font-size:.76rem;color:var(--ink-soft);";
+    const colsInput = document.createElement("input");
+    colsInput.type = "number"; colsInput.min = "2"; colsInput.max = "12";
+    colsInput.value = field.tableCols;
+    colsInput.style.cssText = "width:56px;border:1px solid var(--line-strong);border-radius:6px;padding:4px 6px;";
+    colsInput.addEventListener("change", () => {
+      field.tableCols = Math.max(2, Math.min(12, Number(colsInput.value) || 3));
+      renderEditor();
+    });
+    colsWrap.appendChild(document.createTextNode("Sarakkeita"));
+    colsWrap.appendChild(colsInput);
+
+    dimRow.appendChild(rowsWrap);
+    dimRow.appendChild(colsWrap);
+    wrap.appendChild(dimRow);
+
+    const cornerInput = textInput(field.tableCorner, v => field.tableCorner = v, "Vasen yläkulma (valinnainen otsikko)");
+    cornerInput.style.cssText = "width:100%;margin-top:8px;";
+    wrap.appendChild(cornerInput);
+
+    const colHeadersLabel = document.createElement("div");
+    colHeadersLabel.style.cssText = "font-size:.74rem;color:var(--ink-soft);margin-top:8px;margin-bottom:3px;";
+    colHeadersLabel.textContent = "Sarakeotsikot (kiinteät, ensimmäinen rivi):";
+    wrap.appendChild(colHeadersLabel);
+    field.tableColHeaders.forEach((val, i) => {
+      const inp = textInput(val, v => field.tableColHeaders[i] = v, "Sarake " + (i+2));
+      inp.style.cssText = "width:100%;margin-bottom:5px;";
+      wrap.appendChild(inp);
+    });
+
+    const rowHeadersLabel = document.createElement("div");
+    rowHeadersLabel.style.cssText = "font-size:.74rem;color:var(--ink-soft);margin-top:6px;margin-bottom:3px;";
+    rowHeadersLabel.textContent = "Riviotsikot (kiinteät, ensimmäinen sarake):";
+    wrap.appendChild(rowHeadersLabel);
+    field.tableRowHeaders.forEach((val, i) => {
+      const inp = textInput(val, v => field.tableRowHeaders[i] = v, "Rivi " + (i+2));
+      inp.style.cssText = "width:100%;margin-bottom:5px;";
+      wrap.appendChild(inp);
+    });
+
+    const hint = document.createElement("div");
+    hint.style.cssText = "font-size:.74rem;color:var(--ink-soft);margin-top:4px;";
+    hint.textContent = "Muut solut jäävät tyhjiksi lomakkeeseen — kentän täyttäjä kirjoittaa ne itse.";
+    wrap.appendChild(hint);
     return wrap;
   }
 
