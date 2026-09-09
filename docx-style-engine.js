@@ -107,31 +107,41 @@ window.DocxStyleEngine = (function(){
     const headerRowCount = opts.headerRowCount || 0;
     const headerColCount = opts.headerColCount || 0;
     const colCount = rows[0] ? rows[0].length : 0;
-    const colWidth = colCount ? Math.floor(9026 / colCount) : 9026;
+    const totalWidth = 9026;
+    const colWidths = opts.colWidthPercents
+      ? opts.colWidthPercents.map(p => Math.floor(totalWidth * p / 100))
+      : Array.from({length:colCount}, () => Math.floor(totalWidth / (colCount||1)));
 
-    const gridCols = Array.from({length:colCount}, () => '<w:gridCol w:w="'+colWidth+'"/>').join('');
+    const gridCols = colWidths.map(w => '<w:gridCol w:w="'+w+'"/>').join('');
+    const noBorders = !!opts.noBorders;
+    const shade = opts.shadeHeaderCells !== false;
+
+    const borderXml = noBorders
+      ? '<w:tblBorders><w:top w:val="none" w:sz="0"/><w:left w:val="none" w:sz="0"/>' +
+        '<w:bottom w:val="none" w:sz="0"/><w:right w:val="none" w:sz="0"/>' +
+        '<w:insideH w:val="none" w:sz="0"/><w:insideV w:val="none" w:sz="0"/></w:tblBorders>'
+      : '<w:tblBorders><w:top w:val="single" w:sz="4" w:color="B9B2A0"/><w:left w:val="single" w:sz="4" w:color="B9B2A0"/>' +
+        '<w:bottom w:val="single" w:sz="4" w:color="B9B2A0"/><w:right w:val="single" w:sz="4" w:color="B9B2A0"/>' +
+        '<w:insideH w:val="single" w:sz="4" w:color="B9B2A0"/><w:insideV w:val="single" w:sz="4" w:color="B9B2A0"/></w:tblBorders>';
 
     const trXml = rows.map((row, rIdx) => {
       const isHeaderRow = rIdx < headerRowCount;
       const tcXml = row.map((cellText, cIdx) => {
         const isHeaderCol = cIdx < headerColCount;
         const bold = isHeaderRow || isHeaderCol;
+        const w = colWidths[cIdx] || Math.floor(totalWidth / (colCount||1));
         const p = paraXml(cellText || "", {
-          bold, font: opts.font, sz: opts.sz, color: opts.color
+          bold, font: opts.font, sz: opts.sz, color: (isHeaderCol && !isHeaderRow && opts.labelColor) ? opts.labelColor : opts.color
         });
-        return '<w:tc><w:tcPr><w:tcW w:w="'+colWidth+'" w:type="dxa"/>' +
-          (bold ? '<w:shd w:val="clear" w:color="auto" w:fill="F2EFE6"/>' : '') +
+        return '<w:tc><w:tcPr><w:tcW w:w="'+w+'" w:type="dxa"/>' +
+          (bold && shade && !noBorders ? '<w:shd w:val="clear" w:color="auto" w:fill="F2EFE6"/>' : '') +
           '</w:tcPr>' + p + '</w:tc>';
       }).join('');
       return '<w:tr>' + tcXml + '</w:tr>';
     }).join('');
 
     return '<w:tbl>' +
-      '<w:tblPr><w:tblW w:w="0" w:type="auto"/><w:tblBorders>' +
-      '<w:top w:val="single" w:sz="4" w:color="B9B2A0"/><w:left w:val="single" w:sz="4" w:color="B9B2A0"/>' +
-      '<w:bottom w:val="single" w:sz="4" w:color="B9B2A0"/><w:right w:val="single" w:sz="4" w:color="B9B2A0"/>' +
-      '<w:insideH w:val="single" w:sz="4" w:color="B9B2A0"/><w:insideV w:val="single" w:sz="4" w:color="B9B2A0"/>' +
-      '</w:tblBorders></w:tblPr>' +
+      '<w:tblPr><w:tblW w:w="0" w:type="auto"/>' + borderXml + '</w:tblPr>' +
       '<w:tblGrid>' + gridCols + '</w:tblGrid>' +
       trXml + '</w:tbl>';
   }

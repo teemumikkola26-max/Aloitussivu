@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<style>html{visibility:hidden}</style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.4"></script>
+<script src="auth-gate.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="docx-style-engine.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<title>Kenttälomake</title>
+<style>
+:root{--ink:#1c1f1a;--paper:#f2f0e8;--card:#fff;--line:#d8d4c6;--safety:#e8590c;--safety-dark:#c44a08;--ok:#2f6b3a;--mono:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace}
+*{box-sizing:border-box}html,body{margin:0;padding:0}body{background:var(--paper);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;padding-bottom:96px;-webkit-tap-highlight-color:transparent}
+.topbar{background:var(--ink);color:var(--paper);padding:14px 16px 12px;position:sticky;top:0;z-index:20;border-bottom:3px solid var(--safety)}
+.topbar .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#c9c6b8}.topbar h1{margin:2px 0 0;font-size:19px;font-weight:700;letter-spacing:-.01em}
+.wrap{padding:14px 14px 0}.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px}
+.card h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;font-family:var(--mono);color:#66604f;margin:0 0 10px;display:flex;align-items:center;justify-content:space-between}
+label{display:block;font-size:12.5px;font-weight:600;margin:10px 0 4px;color:#3a3a34}label.req::after{content:" *";color:var(--safety)}
+input[type=text],input[type=number],select,textarea{width:100%;font-size:16px;padding:10px;border:1.5px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);font-family:inherit}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--safety)}textarea{min-height:70px;resize:vertical}
+.hint{font-size:11.5px;color:#8a8574;margin-top:3px}.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:none;border-radius:8px;padding:11px 16px;font-size:14.5px;font-weight:700;cursor:pointer;font-family:inherit}
+.btn-primary{background:var(--safety);color:#fff}.btn-primary:active{background:var(--safety-dark)}.btn-outline{background:#fff;color:var(--ink);border:1.5px solid var(--line)}
+.btn-ghost{background:transparent;color:#8a3a15;padding:8px 10px;font-size:13px}.btn-block{width:100%}.btn-sm{padding:7px 10px;font-size:12.5px;border-radius:6px}.btn-danger{background:#fff;color:#a3271b;border:1.5px solid #e3b3ab}
+.method-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.method-tile{border:1.5px solid var(--line);background:#fff;border-radius:10px;padding:12px 10px;text-align:left;cursor:pointer;font-size:13.5px;font-weight:700;line-height:1.25;color:var(--ink)}
+.method-tile .num{font-family:var(--mono);font-size:10.5px;color:var(--safety);display:block;margin-bottom:3px}.method-tile:active{border-color:var(--safety)}
+.entry-card{border:1.5px solid var(--line);border-left:5px solid var(--safety);border-radius:8px;padding:10px 12px;margin-bottom:9px;background:#fffdf9}
+.entry-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}.entry-title{font-weight:700;font-size:14.5px}.entry-sub{font-size:12px;color:#8a8574;margin-top:2px;font-family:var(--mono)}
+.entry-actions{display:flex;gap:6px;margin-top:8px}.thumbs{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.thumb{position:relative;width:56px;height:56px;border-radius:6px;overflow:hidden;border:1px solid var(--line)}.thumb img{width:100%;height:100%;object-fit:cover}
+.thumb .rm{position:absolute;top:1px;right:1px;background:rgba(0,0,0,.65);color:#fff;border:none;width:18px;height:18px;border-radius:50%;font-size:11px;line-height:1}.photo-add{display:flex;align-items:center;justify-content:center;width:56px;height:56px;border-radius:6px;border:1.5px dashed var(--line);color:#8a8574;font-size:22px;background:#fbfaf6}
+.empty{text-align:center;padding:24px 10px;color:#8a8574;font-size:13.5px}.footerbar{position:fixed;bottom:0;left:0;right:0;background:var(--card);border-top:1.5px solid var(--line);padding:10px 14px calc(10px + env(safe-area-inset-bottom));z-index:30}
+.step-back{font-family:var(--mono);font-size:12px;color:#8a8574;display:flex;align-items:center;gap:4px;margin-bottom:10px;cursor:pointer}.badge{display:inline-block;background:var(--ink);color:var(--paper);font-family:var(--mono);font-size:10.5px;padding:2px 6px;border-radius:4px;margin-left:6px}
+select{-webkit-appearance:none;appearance:none;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8'><path d='M1 1l5 5 5-5' stroke='%23666' stroke-width='1.6' fill='none'/></svg>");background-repeat:no-repeat;background-position:right 10px center}
+.toast{position:fixed;bottom:88px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:9px 16px;border-radius:20px;font-size:13px;z-index:50;opacity:0;transition:opacity .25s;pointer-events:none}.toast.show{opacity:1}
+@media(min-width:700px){.wrap{max-width:850px;margin:auto}.method-grid{grid-template-columns:repeat(3,1fr)}}
+</style>
+</head>
+<body>
+<div class="topbar"><div class="eyebrow">Rakennustutkimus · kenttälomake</div><h1 id="topTitle">Kohteen tiedot</h1></div>
+<div class="wrap" id="app"></div><div class="footerbar" id="footer"></div><div class="toast" id="toast"></div>
+<script>
+const METHODS=[
+{id:"aisti",name:"Aistinvarainen tarkastelu",short:"Aistinv. tarkastelu",fields:[
+{id:"havainnot",label:"Silmämääräiset havainnot",type:"textarea",req:true,placeholder:"Pintamateriaalin kunto, näkyvät vauriot, jäljet..."},
+{id:"haju",label:"Hajuhavainto",type:"select",options:["Ei havaittu","Lievä","Selvä, poikkeava"]},
+{id:"hajukuvaus",label:"Hajun kuvaus",type:"text",placeholder:"esim. maakellarimainen, mikrobiperäinen"}]},
+{id:"pintakosteus",name:"Pintakosteuden mittaus",short:"Pintakosteus",fields:[
+{id:"laite",label:"Mittalaite",type:"text",req:true,placeholder:"esim. Gann Hydromette, Tramex"},
+{id:"arvo",label:"Mittausarvo",type:"number",req:true},
+{id:"yksikko",label:"Yksikkö / asteikko",type:"select",options:["Vertailuluku (0–100)","Painoprosenttiarvio","Muu"]},
+{id:"tulkinta",label:"Tulkinta",type:"select",options:["Kuiva","Viitteitä kohonneesta kosteudesta","Kostea"]}]},
+{id:"rh",name:"Rakenteen suht. kosteus (RH)",short:"RH-mittaus",fields:[
+{id:"syvyys",label:"Mittaussyvyys (mm)",type:"number",req:true},{id:"rh",label:"Suhteellinen kosteus RH (%)",type:"number",req:true},
+{id:"lampo",label:"Lämpötila (°C)",type:"number"},{id:"tasaantuminen",label:"Tasaantumisaika (h)",type:"number"},
+{id:"laite",label:"Mittalaite",type:"text",placeholder:"esim. Vaisala HMP"}]},
+{id:"merkkiaine",name:"Merkkiainekoe",short:"Merkkiainekoe",fields:[
+{id:"aine",label:"Merkkiaine",type:"text",req:true,placeholder:"esim. vetykaasu"},{id:"injektio",label:"Injektointikohta",type:"text",req:true},
+{id:"tulos",label:"Tulos",type:"select",options:["Ei havaintoa","Merkkiainetta havaittu"]},{id:"leviaminen",label:"Havaittu leviämisreitti",type:"textarea",placeholder:"Mistä ilmavuoto/reitti kulkee"}]},
+{id:"nayte",name:"Näyte",short:"Näytteenotto",fields:[
+{id:"tyyppi",label:"Näytteen tyyppi",type:"select",req:true,options:["Mikrobimateriaalinäyte", "Mikrobi ilmanäyte","Mikrobi pintasivelynäyte", "VOC materiaalinäyte", "VOC ilmanäyte", "VOC Flec-näyte", "Kuitulaskeumanäyte", "Pölynkoostumusnäyte", "Asbestimateriaalinäyte"]},
+{id:"nro",label:"Näytteen tunnus / numero",type:"text",req:true}]},
+{id:"lampokuvaus",name:"Lämpökuvaus",short:"Lämpökuvaus",fields:[
+{id:"kamera",label:"Kamera / malli",type:"text"},{id:"ulko",label:"Ulkolämpötila (°C)",type:"number"},{id:"sisa",label:"Sisälämpötila (°C)",type:"number"},
+{id:"sisarh",label:"Sisäilman RH (%)",type:"number"},{id:"havainnot",label:"Havainnot",type:"textarea",placeholder:"Kylmäsillat, vuotokohdat..."}]},
+{id:"avaus",name:"Rakenneavaus",short:"Rakenneavaus",fields:[
+{id:"kuvaus",label:"Rakennekerrokset",type:"textarea",placeholder:"esim. Kipsilevy 13 mm, hs-muovi, mineraalivilla 100 mm..."},{id:"kerrokset",label:"Kosteusmittaukset",type:"textarea",placeholder:"Eristekerroksen RH, ao-puun kosteus, sokkelin pko..."},
+{id:"vaurio",label:"Otetut näytteet",type:"textarea",placeholder:"esim. MIK1 eristevilla, MIK2 ao-puu"}]},
+{id:"iv",name:"IV / painesuhdemittaus",short:"IV / paine-ero",fields:[
+{id:"laite",label:"Mittalaite",type:"text"},{id:"paine",label:"Painesuhde (Pa)",type:"number"},{id:"ilmavirta",label:"Ilmavirta (l/s)",type:"number"},{id:"havainnot",label:"Havainnot",type:"textarea"}]},
+{id:"muu",name:"Muu menetelmä",short:"Muu menetelmä",fields:[
+{id:"nimi",label:"Menetelmän nimi",type:"text",req:true},{id:"kuvaus",label:"Kuvaus ja havainnot",type:"textarea",req:true}]}
+];
+const COMMON_FIELDS=[{id:"paikka",label:"Tutkimuskohta / rakenneosa / tila",type:"text",req:true,placeholder:"esim. Kylpyhuone 1. krs, ulkoseinä"}];
+let project={nimi:"",osoite:"",tilaaja:"",tutkija:"",pvm:""};let entries=[];let view="project";let editingEntry=null;let editingIsNew=false;
+const todayISO=new Date().toISOString().slice(0,10);project.pvm=todayISO;
+const DB_NAME='kenttalomakeDB',DB_STORE='state';
+function idbOpen(){return new Promise((resolve,reject)=>{if(!window.indexedDB){reject(new Error('no-idb'));return}const req=indexedDB.open(DB_NAME,1);req.onupgradeneeded=()=>{req.result.createObjectStore(DB_STORE)};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})}
+function idbSet(key,value){return idbOpen().then(db=>new Promise((resolve,reject)=>{const tx=db.transaction(DB_STORE,'readwrite');tx.objectStore(DB_STORE).put(value,key);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error)}))}
+function idbGet(key){return idbOpen().then(db=>new Promise((resolve,reject)=>{const tx=db.transaction(DB_STORE,'readonly');const r=tx.objectStore(DB_STORE).get(key);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)}))}
+function idbDel(key){return idbOpen().then(db=>new Promise((resolve,reject)=>{const tx=db.transaction(DB_STORE,'readwrite');tx.objectStore(DB_STORE).delete(key);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error)})).catch(()=>{})}
+let saveTimer=null,lastSaveFailed=false;
+function scheduleAutosave(){clearTimeout(saveTimer);saveTimer=setTimeout(autosave,350)}
+async function autosave(){
+clearTimeout(saveTimer);
+const state={project,entries,view,editingEntry,editingIsNew};
+try{
+if(window.storage){await window.storage.set('kenttalomake_state',JSON.stringify(state))}
+else{await idbSet('kenttalomake_state',state)}
+lastSaveFailed=false;return
+}catch(e){}
+try{localStorage.setItem('kenttalomake_state',JSON.stringify(state));lastSaveFailed=false}
+catch(e){if(!lastSaveFailed){lastSaveFailed=true;toast('Tallennus epäonnistui – vapauta puhelimen tilaa')}}
+}
+async function loadState(){
+let value=null;
+try{
+if(window.storage){const r=await window.storage.get('kenttalomake_state');value=r&&r.value?JSON.parse(r.value):null}
+else{value=await idbGet('kenttalomake_state')||null}
+}catch(e){}
+if(!value){try{const raw=localStorage.getItem('kenttalomake_state');if(raw)value=JSON.parse(raw)}catch(e){}}
+if(value){
+if(value.project)project=Object.assign(project,value.project);
+if(value.entries)entries=value.entries;
+if(value.view)view=value.view;
+if('editingEntry'in value)editingEntry=value.editingEntry;
+if('editingIsNew'in value)editingIsNew=value.editingIsNew;
+if(view==='entryForm'&&(!editingEntry||!METHODS.find(m=>m.id===editingEntry.methodId))){view='project';editingEntry=null;editingIsNew=false}
+}
+await loadFloorPlan();
+render()
+}
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')autosave()});
+window.addEventListener('pagehide',()=>{autosave()});
+function confirmClearForm(){if(!project.nimi&&!project.tilaaja&&!project.tutkija&&entries.length===0&&!floorPlanBlob){toast("Lomake on jo tyhjä");return}if(confirm("Tyhjennetäänkö koko lomake?\n\nKaikki kohteen tiedot, menetelmät, valokuvat ja pohjakuva poistetaan pysyvästi."))clearForm()}
+async function clearForm(){project={nimi:"",osoite:"",tilaaja:"",tutkija:"",pvm:todayISO};entries=[];editingEntry=null;editingIsNew=false;try{if(window.storage)await window.storage.delete('kenttalomake_state')}catch(e){}try{await idbDel('kenttalomake_state')}catch(e){}try{localStorage.removeItem('kenttalomake_state')}catch(e){}await removeFloorPlanFile();view="project";render();toast("Lomake tyhjennetty")}
+function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1600)}
+function el(html){const d=document.createElement('div');d.innerHTML=html.trim();return d.firstElementChild}
+function render(){
+const app=document.getElementById('app'),footer=document.getElementById('footer'),title=document.getElementById('topTitle');app.innerHTML="";footer.innerHTML="";
+if(view==="project"){title.textContent="Kohteen tiedot";app.appendChild(renderProjectCard());app.appendChild(renderFloorPlanCard());app.appendChild(renderEntriesCard());footer.innerHTML='<button class="btn btn-primary btn-block" id="btnAddMethod">+ Lisää menetelmä</button><button class="btn btn-ghost btn-block" id="btnClearForm" style="margin-top:6px;">Tyhjennä lomake</button>';document.getElementById('btnAddMethod').onclick=()=>{view="methodSelect";render()};document.getElementById('btnClearForm').onclick=confirmClearForm}
+if(view==="methodSelect"){title.textContent="Valitse menetelmä";app.appendChild(renderBack(()=>{view="project";render()}));app.appendChild(renderMethodGrid())}
+if(view==="entryForm"){const m=METHODS.find(x=>x.id===editingEntry.methodId);title.textContent=m.name;app.appendChild(renderBack(()=>{view=editingIsNew?"methodSelect":"project";if(editingIsNew){editingEntry=null;editingIsNew=false}autosave();render()},editingIsNew?"Vaihda menetelmä":"Takaisin"));app.appendChild(renderEntryForm());footer.innerHTML=(editingIsNew?"":'<button class="btn btn-danger btn-block" id="btnDeleteEntry" style="margin-bottom:8px;">Poista tämä menetelmä</button>')+'<button class="btn btn-primary btn-block" id="btnSaveEntry">Tallenna menetelmä</button>';document.getElementById('btnSaveEntry').onclick=saveEntryForm;if(!editingIsNew)document.getElementById('btnDeleteEntry').onclick=()=>{entries=entries.filter(e=>e.id!==editingEntry.id);autosave();view="project";render()}}
+}
+function renderBack(fn,label){const d=el(`<div class="step-back">‹ ${label||"Takaisin"}</div>`);d.onclick=fn;return d}
+function renderProjectCard(){const c=el(`<div class="card"><h2>Kohde</h2><label class="req">Kohteen nimi / osoite</label><input type="text" id="p_nimi" autocomplete="off" placeholder="esim. Asunto Oy Kotikuja 3"><label>Tilaaja</label><input type="text" id="p_tilaaja" autocomplete="off" placeholder="Tilaajan nimi"><label class="req">Tutkijan nimi</label><input type="text" id="p_tutkija" autocomplete="off" placeholder="Tutkimuksen tekijä"><label>Päivämäärä</label><input type="text" id="p_pvm" autocomplete="off" placeholder="VVVV-KK-PP"></div>`);[['p_nimi','nimi'],['p_tilaaja','tilaaja'],['p_tutkija','tutkija'],['p_pvm','pvm']].forEach(([id,k])=>{c.querySelector('#'+id).value=project[k];c.querySelector('#'+id).oninput=e=>{project[k]=e.target.value;scheduleAutosave()}});return c}
+function renderEntriesCard(){const c=el(`<div class="card"><h2>Tehdyt menetelmät <span class="badge">${entries.length}</span></h2></div>`);if(!entries.length)c.appendChild(el(`<div class="empty">Ei vielä lisättyjä menetelmiä.<br>Aloita painamalla "+ Lisää menetelmä" alta.</div>`));else{entries.forEach((entry,idx)=>{const m=METHODS.find(x=>x.id===entry.methodId),card=el(`<div class="entry-card"><div class="entry-top"><div><div class="entry-title">${idx+1}. ${escapeHtml(m.name)}</div><div class="entry-sub">${escapeHtml(entry.values.paikka||"Ei paikkaa merkitty")}</div></div></div><div class="entry-actions"><button class="btn btn-outline btn-sm">Muokkaa</button></div></div>`);if(entry.photos?.length){const thumbs=el('<div class="thumbs"></div>');entry.photos.forEach(src=>thumbs.appendChild(el(`<div class="thumb"><img src="${src}"></div>`)));card.appendChild(thumbs)}card.querySelector('button').onclick=()=>{editingEntry=entry;editingIsNew=false;view="entryForm";render()};c.appendChild(card)})}
+if(entries.length){const r=el('<div style="margin-top:12px;display:flex;gap:8px;"><button class="btn btn-outline btn-block" id="btnExport">Muodosta kenttämuistiinpano (Word)</button><button class="btn btn-outline" id="btnStyle" style="flex:0 0 auto;">🎨</button></div>');c.appendChild(r);setTimeout(()=>{const b=document.getElementById('btnExport');if(b)b.onclick=exportWord;const sb=document.getElementById('btnStyle');if(sb)sb.onclick=()=>{window.location.href="style-editor.html?form="+encodeURIComponent(FORM_KEY)+"&label="+encodeURIComponent(FORM_LABEL)+"&back="+encodeURIComponent("kenttalomake.html")}},0)}return c}
+function renderMethodGrid(){const w=el('<div class="method-grid"></div>');METHODS.forEach((m,i)=>{const t=el(`<button class="method-tile"><span class="num">${String(i+1).padStart(2,'0')}</span>${escapeHtml(m.short)}</button>`);t.onclick=()=>{editingEntry={id:'e'+Date.now(),methodId:m.id,values:{},photos:[]};editingIsNew=true;view="entryForm";autosave();render()};w.appendChild(t)});return w}
+function renderEntryForm(){const m=METHODS.find(x=>x.id===editingEntry.methodId),container=el('<div></div>'),common=el('<div class="card"></div>');COMMON_FIELDS.forEach(f=>common.appendChild(renderField(f,editingEntry.values)));container.appendChild(common);const spec=el(`<div class="card"><h2>${escapeHtml(m.name)}</h2></div>`);m.fields.forEach(f=>spec.appendChild(renderField(f,editingEntry.values)));container.appendChild(spec);const note=el('<div class="card"><h2>Lisähuomiot</h2></div>');note.appendChild(renderField({id:"huomiot",label:"Vapaa huomio (valinnainen)",type:"textarea"},editingEntry.values));container.appendChild(note);const pc=el(`<div class="card"><h2>Valokuvat <span class="badge">${editingEntry.photos.length}</span></h2></div>`),thumbs=el('<div class="thumbs"></div>');editingEntry.photos.forEach((src,i)=>{const t=el(`<div class="thumb"><img src="${src}"><button class="rm">×</button></div>`);t.querySelector('.rm').onclick=()=>{editingEntry.photos.splice(i,1);autosave();render()};thumbs.appendChild(t)});const add=el('<label class="photo-add">+<input type="file" accept="image/*" capture="environment" multiple style="display:none;"></label>');add.querySelector('input').onchange=e=>{const fs=[...e.target.files||[]];let p=fs.length;if(!p)return;fs.forEach(f=>{const r=new FileReader();r.onload=x=>{editingEntry.photos.push(x.target.result);if(!--p){autosave();render()}};r.readAsDataURL(f)})};thumbs.appendChild(add);pc.appendChild(thumbs);pc.appendChild(el('<div class="hint">Kuvat liitetään suoraan kenttämuistiinpanoon.</div>'));container.appendChild(pc);const loc=el('<div class="card"><h2>Sijainti pohjakuvalla</h2></div>');if(!floorPlanBlob){loc.appendChild(el('<div class="hint">Lataa ensin pohjakuva kohteen tietoihin, niin voit merkitä tämän menetelmän sijainnin siihen.</div>'))}else{const btn=el(`<button class="btn btn-outline btn-block">${editingEntry.marker?'Muokkaa sijaintimerkintää':'Merkitse sijainti pohjakuvaan'}</button>`);btn.onclick=()=>openMarkerEditor(editingEntry);loc.appendChild(btn);if(editingEntry.marker)loc.appendChild(el('<div class="hint" style="margin-top:6px;">Sijainti merkitty ✓</div>'))}container.appendChild(loc);return container}
+function renderField(f,values){const val=values[f.id]||"";let ih;if(f.type==="textarea")ih=`<textarea id="fld_${f.id}" autocomplete="off" placeholder="${escapeHtml(f.placeholder||"")}">${escapeHtml(val)}</textarea>`;else if(f.type==="select")ih=`<select id="fld_${f.id}"><option value="">Valitse...</option>${f.options.map(o=>`<option value="${escapeHtml(o)}" ${o===val?"selected":""}>${escapeHtml(o)}</option>`).join("")}</select>`;else ih=`<input type="${f.type}" id="fld_${f.id}" autocomplete="off" placeholder="${escapeHtml(f.placeholder||"")}" value="${escapeHtml(val)}">`;const w=el(`<div><label class="${f.req?"req":""}">${escapeHtml(f.label)}</label>${ih}</div>`),input=w.querySelector(`#fld_${f.id}`);input.oninput=e=>{values[f.id]=e.target.value;scheduleAutosave()};input.onchange=e=>{values[f.id]=e.target.value;scheduleAutosave()};return w}
+function saveEntryForm(){const m=METHODS.find(x=>x.id===editingEntry.methodId),req=[...COMMON_FIELDS,...m.fields].filter(f=>f.req),missing=req.filter(f=>!editingEntry.values[f.id]);if(missing.length){toast("Täytä pakolliset kentät: "+missing.map(f=>f.label).join(", "));return}if(editingIsNew)entries.push(editingEntry);autosave();toast("Menetelmä tallennettu");view="project";render()}
+function escapeHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+function dataUrlToBlob(dataUrl){const parts=dataUrl.split(',');const mime=(parts[0].match(/:(.*?);/)||[,'image/jpeg'])[1];const bin=atob(parts[1]||'');const bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);return new Blob([bytes],{type:mime})}
+function normalizeImageOrientation(dataUrl){return new Promise(resolve=>{const img=new Image();img.onload=()=>{const canvas=document.createElement('canvas');canvas.width=img.naturalWidth||1;canvas.height=img.naturalHeight||1;canvas.getContext('2d').drawImage(img,0,0);resolve({dataUrl:canvas.toDataURL('image/jpeg',.85),width:canvas.width,height:canvas.height})};img.onerror=()=>resolve({dataUrl,width:1,height:1});img.src=dataUrl})}
+
+/* ---------- Word-ulkoasu (jaettu DocxStyleEngine) ---------- */
+const FORM_KEY="kenttalomake";
+const FORM_LABEL="Kosteus- ja sisäilmatekninen kuntotutkimus";
+let loadedDocStyle=null;
+async function loadDocStyle(){
+  try{
+    const {data,error}=await window.__supabaseClient.from("doc_styles").select("style").eq("form_key",FORM_KEY).maybeSingle();
+    if(error||!data){loadedDocStyle=window.DocxStyleEngine.defaultStyle();return}
+    const d=window.DocxStyleEngine.defaultStyle(),s=data.style||{};
+    loadedDocStyle={
+      coverPage:Object.assign({},d.coverPage,s.coverPage||{}),
+      header:Object.assign({},d.header,s.header||{}),
+      footer:Object.assign({},d.footer,s.footer||{}),
+      fonts:Object.assign({},d.fonts,s.fonts||{}),
+      colors:Object.assign({},d.colors,s.colors||{}),
+      toc:Object.assign({},d.toc,s.toc||{}),
+      pagesBefore:s.pagesBefore||[],
+      pagesAfter:s.pagesAfter||[]
+    };
+  }catch(err){loadedDocStyle=window.DocxStyleEngine.defaultStyle()}
+}
+
+async function exportWord(){
+  if(!project.nimi||!project.tutkija){view="project";render();toast("Täytä kohteen nimi ja tutkijan nimi ennen vientiä");return}
+  if(!window.DocxStyleEngine){toast("Vientimoottoria ei saatu ladattua. Tarkista verkkoyhteys ja yritä uudelleen.");return}
+  toast("Muodostetaan Word-tiedostoa...");
+  if(!loadedDocStyle) await loadDocStyle();
+  const engine=window.DocxStyleEngine,s=loadedDocStyle;
+  const bodyParts=[],extraMedia=[];let imgRelCounter=200,imgDocPrCounter=1000;
+
+  function fieldRows(rows){
+    bodyParts.push(engine.tableXml(rows,{
+      headerColCount:1, noBorders:true, colWidthPercents:[28,72],
+      font:s.fonts.body, sz:engine.pt2hp(s.fonts.bodySize), color:s.colors.body, labelColor:"666666"
+    }));
+    bodyParts.push(engine.paraXml("",{after:120}));
+  }
+
+  bodyParts.push(engine.paraXml("Kenttämuistiinpano",{bold:true,sz:engine.pt2hp(s.fonts.headingSize+6),font:s.fonts.heading,color:s.colors.heading,pStyle:"Heading1",after:160}));
+  fieldRows([["Kohde",project.nimi],["Tilaaja",project.tilaaja||"-"],["Tutkija",project.tutkija],["Päivämäärä",project.pvm]]);
+
+  for(let i=0;i<entries.length;i++){
+    const e=entries[i],m=METHODS.find(x=>x.id===e.methodId);
+    bodyParts.push(engine.paraXml(`Menetelmä ${i+1}: ${m.name}`,{bold:true,sz:engine.pt2hp(s.fonts.headingSize),font:s.fonts.heading,color:s.colors.heading,pStyle:"Heading1",before:280,after:100}));
+    const rows=[];
+    [...COMMON_FIELDS,...m.fields].forEach(f=>{const v=e.values[f.id];if(v)rows.push([f.label,v])});
+    if(e.values.huomiot)rows.push(["Lisähuomiot",e.values.huomiot]);
+    if(e.marker)rows.push(["Sijainti pohjakuvalla","Merkitty pohjakuvaan (katso liite, merkintä nro "+(i+1)+")"]);
+    if(rows.length)fieldRows(rows);
+    if(e.photos&&e.photos.length){
+      bodyParts.push(engine.paraXml(`Valokuvat (${e.photos.length})`,{color:"666666",font:s.fonts.body,sz:18,after:80}));
+      for(const src of e.photos){
+        const n=await normalizeImageOrientation(src);
+        const blob=dataUrlToBlob(n.dataUrl);
+        const maxCx=4200000,{cx,cy}=engine.scaledDims(n.width,n.height,maxCx);
+        const rId=imgRelCounter++,mediaName="image"+(extraMedia.length+1)+".jpeg";
+        extraMedia.push({rId,name:mediaName,blob});
+        bodyParts.push(engine.imageXml(rId,cx,cy,imgDocPrCounter++,"center"));
+      }
+      bodyParts.push(engine.paraXml("",{after:100}));
+    }
+  }
+
+  try{
+    const blob=await engine.assembleDocx({meta:{title:FORM_LABEL},bodyParts,style:s,extraMedia});
+    const url=URL.createObjectURL(blob),safe=(project.nimi||"kohde").replace(/[^a-z0-9äöå]+/gi,"_"),a=document.createElement('a');
+    a.href=url;a.download=`Kenttamuistiinpano_${safe}_${project.pvm}.docx`;document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),4000);
+    toast("Word-tiedosto (.docx) ladattu")
+  }catch(err){console.error(err);toast("Word-tiedoston muodostus epäonnistui")}
+}
+
+/* ---------- Pohjakuva (PDF) ja sijaintimerkinnät ---------- */
+let floorPlanBlob=null;
+if(window.pdfjsLib){pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"}
+
+async function saveFloorPlan(blob){
+  floorPlanBlob=blob;
+  try{await idbSet('kenttalomake_floorplan',blob)}catch(e){toast('Pohjakuvan tallennus epäonnistui')}
+}
+async function loadFloorPlan(){
+  try{floorPlanBlob=await idbGet('kenttalomake_floorplan')||null}catch(e){floorPlanBlob=null}
+}
+async function removeFloorPlanFile(){
+  floorPlanBlob=null;
+  entries.forEach(e=>{delete e.marker});
+  try{await idbDel('kenttalomake_floorplan')}catch(e){}
+  autosave();
+}
+
+async function renderPdfPageToCanvas(blob,canvas,maxWidth,maxHeight){
+  const buf=await blob.arrayBuffer();
+  const pdf=await pdfjsLib.getDocument({data:buf}).promise;
+  const page=await pdf.getPage(1);
+  const baseViewport=page.getViewport({scale:1});
+  const scale=Math.min(maxWidth/baseViewport.width,maxHeight/baseViewport.height,3);
+  const viewport=page.getViewport({scale});
+  canvas.width=viewport.width;canvas.height=viewport.height;
+  await page.render({canvasContext:canvas.getContext('2d'),viewport}).promise;
+  return {width:viewport.width,height:viewport.height};
+}
+
+function renderFloorPlanCard(){
+  const c=el(`<div class="card"><h2>Pohjakuva (PDF)</h2></div>`);
+  if(!floorPlanBlob){
+    c.appendChild(el('<div class="hint" style="margin-bottom:8px;">Lataa kohteen pohjakuva PDF-muodossa. Voit sen jälkeen merkitä kunkin menetelmän sijainnin kuvaan.</div>'));
+    const lbl=el('<label class="btn btn-outline btn-block" style="cursor:pointer;">Valitse PDF<input type="file" accept="application/pdf" style="display:none;"></label>');
+    lbl.querySelector('input').onchange=async e=>{
+      const f=e.target.files&&e.target.files[0];if(!f)return;
+      if(f.type!=='application/pdf'){toast('Valitse PDF-tiedosto');return}
+      await saveFloorPlan(f);render();toast('Pohjakuva ladattu');
+    };
+    c.appendChild(lbl);
+  }else{
+    const previewWrap=el('<div style="border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-bottom:8px;background:#faf9f5;display:flex;justify-content:center;"></div>');
+    const canvas=document.createElement('canvas');canvas.style.maxWidth='100%';canvas.style.display='block';
+    previewWrap.appendChild(canvas);
+    c.appendChild(previewWrap);
+    renderPdfPageToCanvas(floorPlanBlob,canvas,600,500).catch(()=>{previewWrap.innerHTML='<div class="hint">Esikatselua ei saatu ladattua.</div>'});
+    const markedCount=entries.filter(e=>e.marker).length;
+    c.appendChild(el(`<div class="hint" style="margin-bottom:8px;">${markedCount} / ${entries.length} menetelmää merkitty pohjakuvaan.</div>`));
+    const row=el('<div style="display:flex;gap:8px;"></div>');
+    const lbl=el('<label class="btn btn-outline" style="cursor:pointer;flex:1;">Vaihda PDF<input type="file" accept="application/pdf" style="display:none;"></label>');
+    lbl.querySelector('input').onchange=async e=>{
+      const f=e.target.files&&e.target.files[0];if(!f)return;
+      if(f.type!=='application/pdf'){toast('Valitse PDF-tiedosto');return}
+      await saveFloorPlan(f);render();toast('Pohjakuva vaihdettu');
+    };
+    const rmBtn=el('<button class="btn btn-danger" style="flex:0 0 auto;">Poista</button>');
+    rmBtn.onclick=()=>{if(confirm('Poistetaanko pohjakuva? Kaikki sijaintimerkinnät häviävät.')){removeFloorPlanFile().then(()=>{render();toast('Pohjakuva poistettu')})}};
+    row.appendChild(lbl);row.appendChild(rmBtn);
+    c.appendChild(row);
+    if(markedCount>0){
+      const expBtn=el('<button class="btn btn-primary btn-block" style="margin-top:8px;" id="btnExportFloorPlan">Vie pohjakuva merkinnöin (PDF)</button>');
+      expBtn.onclick=exportFloorPlanPdf;
+      c.appendChild(expBtn);
+    }
+  }
+  return c;
+}
+
+function openMarkerEditor(entry){
+  const overlay=el('<div style="position:fixed;inset:0;background:#000;z-index:200;display:flex;flex-direction:column;"></div>');
+  const top=el('<div style="background:var(--ink);color:#fff;padding:12px 14px;font-size:13.5px;font-weight:700;display:flex;justify-content:space-between;align-items:center;">Napauta pohjakuvasta sijainti<button style="background:none;border:none;color:#fff;font-size:20px;">✕</button></div>');
+  top.querySelector('button').onclick=()=>overlay.remove();
+  overlay.appendChild(top);
+  const stage=el('<div style="flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;position:relative;background:#2a2a26;"></div>');
+  const canvasWrap=el('<div style="position:relative;"></div>');
+  const canvas=document.createElement('canvas');canvasWrap.appendChild(canvas);
+  const dot=el('<div style="position:absolute;width:22px;height:22px;border-radius:50%;background:var(--safety);border:3px solid #fff;transform:translate(-50%,-50%);display:none;box-shadow:0 0 0 2px rgba(0,0,0,.4);"></div>');
+  canvasWrap.appendChild(dot);
+  stage.appendChild(canvasWrap);
+  overlay.appendChild(stage);
+  const bottom=el('<div style="background:var(--card);padding:10px 14px calc(10px + env(safe-area-inset-bottom));display:flex;gap:8px;"></div>');
+  const cancelBtn=el('<button class="btn btn-outline btn-block">Peruuta</button>');
+  const clearBtn=el('<button class="btn btn-danger">Poista merkintä</button>');
+  const saveBtn=el('<button class="btn btn-primary btn-block">Tallenna sijainti</button>');
+  bottom.appendChild(cancelBtn);if(entry.marker)bottom.appendChild(clearBtn);bottom.appendChild(saveBtn);
+  overlay.appendChild(bottom);
+  document.body.appendChild(overlay);
+
+  let pending=entry.marker?{...entry.marker}:null;
+  function placeDot(){
+    if(!pending){dot.style.display='none';return}
+    dot.style.display='block';
+    dot.style.left=(pending.x*canvas.width)+'px';
+    dot.style.top=(pending.y*canvas.height)+'px';
+  }
+  renderPdfPageToCanvas(floorPlanBlob,canvas,window.innerWidth-24,window.innerHeight-160).then(()=>{placeDot()}).catch(()=>{toast('Pohjakuvan renderöinti epäonnistui');overlay.remove()});
+  canvas.addEventListener('click',ev=>{
+    const rect=canvas.getBoundingClientRect();
+    const x=(ev.clientX-rect.left)/rect.width,y=(ev.clientY-rect.top)/rect.height;
+    pending={x:Math.min(1,Math.max(0,x)),y:Math.min(1,Math.max(0,y))};
+    placeDot();
+  });
+  cancelBtn.onclick=()=>overlay.remove();
+  clearBtn.onclick=()=>{delete entry.marker;autosave();overlay.remove();render();toast('Merkintä poistettu')};
+  saveBtn.onclick=()=>{
+    if(!pending){toast('Napauta ensin sijainti kuvasta');return}
+    entry.marker=pending;autosave();overlay.remove();render();toast('Sijainti tallennettu');
+  };
+}
+
+async function exportFloorPlanPdf(){
+  if(!floorPlanBlob||!window.PDFLib){toast('Pohjakuvaa tai PDF-kirjastoa ei saatu ladattua');return}
+  toast('Muodostetaan pohjakuvaa merkinnöin...');
+  try{
+    const {PDFDocument,rgb,StandardFonts}=PDFLib;
+    const bytes=new Uint8Array(await floorPlanBlob.arrayBuffer());
+    const pdfDoc=await PDFDocument.load(bytes);
+    const page=pdfDoc.getPages()[0];
+    const {width,height}=page.getSize();
+    const font=await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    entries.forEach((e,idx)=>{
+      if(!e.marker)return;
+      const x=e.marker.x*width,y=height-(e.marker.y*height);
+      const r=11;
+      page.drawCircle({x,y,size:r,color:rgb(0.910,0.349,0.008),borderColor:rgb(1,1,1),borderWidth:2});
+      const label=String(idx+1);
+      const tw=font.widthOfTextAtSize(label,11);
+      page.drawText(label,{x:x-tw/2,y:y-4,size:11,font,color:rgb(1,1,1)});
+    });
+    const outBytes=await pdfDoc.save();
+    const blob=new Blob([outBytes],{type:'application/pdf'});
+    const url=URL.createObjectURL(blob),safe=(project.nimi||"kohde").replace(/[^a-z0-9äöå]+/gi,"_"),a=document.createElement('a');
+    a.href=url;a.download=`Pohjakuva_merkinnoin_${safe}_${project.pvm}.pdf`;document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),4000);
+    toast('Pohjakuva (PDF) ladattu');
+  }catch(err){console.error(err);toast('Pohjakuvan vienti epäonnistui')}
+}
+
+loadState();
+</script>
+</body>
+</html>
