@@ -182,7 +182,11 @@ async function exportWord(){
     const rows=[];
     [...COMMON_FIELDS,...m.fields].forEach(f=>{const v=e.values[f.id];if(v)rows.push([f.label,v])});
     if(e.values.huomiot)rows.push(["Lisähuomiot",e.values.huomiot]);
-    if(e.marker)rows.push(["Sijainti pohjakuvalla","Merkitty pohjakuvaan (katso liite, merkintä nro "+(i+1)+")"]);
+    if(e.marker){
+      const pgTxt=(e.marker.page&&e.marker.page>1)?(" sivu "+e.marker.page+","):"";
+      const idTxt=(e.marker.label&&e.marker.label.trim())?("tunniste "+e.marker.label.trim()):("merkintä nro "+(i+1));
+      rows.push(["Sijainti pohjakuvalla","Merkitty pohjakuvaan (katso liite,"+pgTxt+" "+idTxt+")"]);
+    }
     if(rows.length)fieldRows(rows);
     if(e.photos&&e.photos.length){
       bodyParts.push(engine.paraXml(`Valokuvat (${e.photos.length})`,{color:"666666",font:s.fonts.body,sz:18,after:80}));
@@ -209,10 +213,14 @@ async function exportWord(){
 
 /* ---------- Pohjakuva (PDF) ja sijaintimerkinnät ---------- */
 let floorPlanBlob=null;
+let floorPlanPreviewPage=1;
+const MARKER_COLORS=['#e85908','#1c64f2','#16a34a','#dc2626','#7c3aed','#111111'];
 if(window.pdfjsLib){pdfjsLib.GlobalWorkerOptions.workerSrc="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"}
 
 async function saveFloorPlan(blob){
   floorPlanBlob=blob;
+  floorPlanPreviewPage=1;
+  _pdfDocCache=null;_pdfDocCacheBlob=null;
   try{await idbSet('kenttalomake_floorplan',blob)}catch(e){toast('Pohjakuvan tallennus epäonnistui')}
 }
 async function loadFloorPlan(){
@@ -220,24 +228,55 @@ async function loadFloorPlan(){
 }
 async function removeFloorPlanFile(){
   floorPlanBlob=null;
+  floorPlanPreviewPage=1;
+  _pdfDocCache=null;_pdfDocCacheBlob=null;
   entries.forEach(e=>{delete e.marker});
   try{await idbDel('kenttalomake_floorplan')}catch(e){}
   autosave();
 }
 
-async function renderPdfPageToCanvas(blob,canvas,maxWidth,maxHeight){
+let _pdfDocCache=null,_pdfDocCacheBlob=null;
+async function getPdfDocument(blob){
+  if(_pdfDocCache&&_pdfDocCacheBlob===blob)return _pdfDocCache;
   const buf=await blob.arrayBuffer();
-  const pdf=await pdfjsLib.getDocument({data:buf}).promise;
-  const page=await pdf.getPage(1);
+  _pdfDocCache=await pdfjsLib.getDocument({data:buf}).promise;
+  _pdfDocCacheBlob=blob;
+  return _pdfDocCache;
+}
+
+/* Renderöi valitun sivun annettuun laatikkoon sovitettuna (esikatselut). Palauttaa myös sivumäärän. */
+async function renderPdfPageToCanvas(blob,canvas,maxWidth,maxHeight,pageNum){
+  const pdf=await getPdfDocument(blob);
+  const numPages=pdf.numPages;
+  pageNum=Math.min(Math.max(1,pageNum||1),numPages);
+  const page=await pdf.getPage(pageNum);
   const baseViewport=page.getViewport({scale:1});
   const dpr=window.devicePixelRatio||1;
-  const scale=Math.min(maxWidth/baseViewport.width,maxHeight/baseViewport.height,3);
+  const scale=Math.min(maxWidth/baseViewport.width,maxHeight/baseViewport.height,8);
   const viewport=page.getViewport({scale:scale*dpr});
-  canvas.width=viewport.width;canvas.height=viewport.height;
+  canvas.width=Math.round(viewport.width);canvas.height=Math.round(viewport.height);
   canvas.style.width=(viewport.width/dpr)+'px';
   canvas.style.height=(viewport.height/dpr)+'px';
   await page.render({canvasContext:canvas.getContext('2d'),viewport}).promise;
-  return {width:viewport.width/dpr,height:viewport.height/dpr};
+  return {width:viewport.width/dpr,height:viewport.height/dpr,numPages,pageNum};
+}
+
+/* Renderöi sivun tarkalla CSS-leveydellä zoomausta varten. Piirtää PDF:n aina uudelleen suoraan vektorista kyseiseen mittakaavaan, joten tarkkuus pysyy terävänä myös lähelle zoomattaessa – toisin kuin kiinteän bittikartan venyttäminen. */
+async function renderPdfPageAtCssWidth(blob,canvas,cssWidth,pageNum){
+  const pdf=await getPdfDocument(blob);
+  const numPages=pdf.numPages;
+  pageNum=Math.min(Math.max(1,pageNum||1),numPages);
+  const page=await pdf.getPage(pageNum);
+  const baseViewport=page.getViewport({scale:1});
+  const dpr=window.devicePixelRatio||1;
+  const scale=(cssWidth/baseViewport.width)*dpr;
+  const viewport=page.getViewport({scale});
+  canvas.width=Math.round(viewport.width);canvas.height=Math.round(viewport.height);
+  const cssHeight=cssWidth*(baseViewport.height/baseViewport.width);
+  canvas.style.width=cssWidth+'px';
+  canvas.style.height=cssHeight+'px';
+  await page.render({canvasContext:canvas.getContext('2d'),viewport}).promise;
+  return {width:cssWidth,height:cssHeight,numPages,pageNum};
 }
 
 function renderFloorPlanCard(){
@@ -252,11 +291,20 @@ function renderFloorPlanCard(){
     };
     c.appendChild(lbl);
   }else{
-    const previewWrap=el('<div style="border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-bottom:8px;background:#faf9f5;display:flex;justify-content:center;"></div>');
+    const previewWrap=el('<div style="border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-bottom:6px;background:#faf9f5;display:flex;justify-content:center;"></div>');
     const canvas=document.createElement('canvas');canvas.style.maxWidth='100%';canvas.style.display='block';
     previewWrap.appendChild(canvas);
     c.appendChild(previewWrap);
-    renderPdfPageToCanvas(floorPlanBlob,canvas,600,500).catch(()=>{previewWrap.innerHTML='<div class="hint">Esikatselua ei saatu ladattua.</div>'});
+    const navHolder=el('<div></div>');
+    c.appendChild(navHolder);
+    renderPdfPageToCanvas(floorPlanBlob,canvas,600,500,floorPlanPreviewPage).then(res=>{
+      if(res.numPages>1){
+        const nav=el(`<div style="display:flex;align-items:center;justify-content:center;gap:14px;margin-bottom:8px;font-family:var(--mono);font-size:12.5px;color:#66604f;"><button class="btn btn-sm btn-outline" id="fpPrev">‹</button><span>Sivu ${res.pageNum} / ${res.numPages}</span><button class="btn btn-sm btn-outline" id="fpNext">›</button></div>`);
+        navHolder.appendChild(nav);
+        nav.querySelector('#fpPrev').onclick=()=>{if(floorPlanPreviewPage>1){floorPlanPreviewPage--;render()}};
+        nav.querySelector('#fpNext').onclick=()=>{if(floorPlanPreviewPage<res.numPages){floorPlanPreviewPage++;render()}};
+      }
+    }).catch(()=>{previewWrap.innerHTML='<div class="hint">Esikatselua ei saatu ladattua.</div>'});
     const markedCount=entries.filter(e=>e.marker).length;
     c.appendChild(el(`<div class="hint" style="margin-bottom:8px;">${markedCount} / ${entries.length} menetelmää merkitty pohjakuvaan.</div>`));
     const row=el('<div style="display:flex;gap:8px;"></div>');
@@ -284,13 +332,38 @@ function openMarkerEditor(entry){
   const top=el('<div style="background:var(--ink);color:#fff;padding:12px 14px;font-size:13.5px;font-weight:700;display:flex;justify-content:space-between;align-items:center;">Napauta pohjakuvasta sijainti<button style="background:none;border:none;color:#fff;font-size:20px;">✕</button></div>');
   top.querySelector('button').onclick=()=>overlay.remove();
   overlay.appendChild(top);
+
+  const pageBar=el('<div style="display:none;background:#151512;color:#fff;align-items:center;justify-content:center;gap:16px;padding:6px 14px;font-family:var(--mono);font-size:13px;"></div>');
+  const prevPageBtn=el('<button style="background:none;border:1px solid #555;color:#fff;border-radius:6px;font-size:15px;padding:2px 10px;">‹</button>');
+  const pageLabelSpan=el('<span></span>');
+  const nextPageBtn=el('<button style="background:none;border:1px solid #555;color:#fff;border-radius:6px;font-size:15px;padding:2px 10px;">›</button>');
+  pageBar.appendChild(prevPageBtn);pageBar.appendChild(pageLabelSpan);pageBar.appendChild(nextPageBtn);
+  overlay.appendChild(pageBar);
+
   const stage=el('<div style="flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;position:relative;background:#2a2a26;"></div>');
-  const canvasWrap=el('<div style="position:relative;"></div>');
+  const canvasWrap=el('<div style="position:relative;transform-origin:center center;"></div>');
   const canvas=document.createElement('canvas');canvasWrap.appendChild(canvas);
-  const dot=el('<div style="position:absolute;width:22px;height:22px;border-radius:50%;background:var(--safety);border:3px solid #fff;transform:translate(-50%,-50%);display:none;box-shadow:0 0 0 2px rgba(0,0,0,.4);"></div>');
+  const dot=el('<div style="position:absolute;width:22px;height:22px;border-radius:50%;border:3px solid #fff;transform:translate(-50%,-50%);display:none;box-shadow:0 0 0 2px rgba(0,0,0,.4);"></div>');
   canvasWrap.appendChild(dot);
   stage.appendChild(canvasWrap);
   overlay.appendChild(stage);
+
+  const zoomBar=el('<div style="display:flex;align-items:center;justify-content:center;gap:10px;padding:6px 14px;background:#151512;"></div>');
+  const zoomOutBtn=el('<button style="background:none;border:1px solid #555;color:#fff;border-radius:6px;font-size:17px;width:34px;height:30px;">−</button>');
+  const zoomLabel=el('<span style="color:#fff;font-family:var(--mono);font-size:12.5px;min-width:44px;text-align:center;">100%</span>');
+  const zoomInBtn=el('<button style="background:none;border:1px solid #555;color:#fff;border-radius:6px;font-size:17px;width:34px;height:30px;">+</button>');
+  const zoomFitBtn=el('<button style="background:none;border:1px solid #555;color:#fff;border-radius:6px;font-size:12px;padding:0 10px;height:30px;">Sovita</button>');
+  zoomBar.appendChild(zoomOutBtn);zoomBar.appendChild(zoomLabel);zoomBar.appendChild(zoomInBtn);zoomBar.appendChild(zoomFitBtn);
+  overlay.appendChild(zoomBar);
+
+  const markBar=el('<div style="background:var(--card);padding:10px 14px 0;"></div>');
+  const swatchRow=el('<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;"></div>');
+  swatchRow.appendChild(el('<span style="font-size:12px;font-weight:700;color:#3a3a34;flex:0 0 auto;">Väri</span>'));
+  markBar.appendChild(swatchRow);
+  const labelInput=el('<input type="text" placeholder="Tunniste, esim. RA1 (valinnainen)" autocomplete="off" style="margin:0;">');
+  markBar.appendChild(labelInput);
+  overlay.appendChild(markBar);
+
   const bottom=el('<div style="background:var(--card);padding:10px 14px calc(10px + env(safe-area-inset-bottom));display:flex;gap:8px;"></div>');
   const cancelBtn=el('<button class="btn btn-outline btn-block">Peruuta</button>');
   const clearBtn=el('<button class="btn btn-danger">Poista merkintä</button>');
@@ -299,27 +372,111 @@ function openMarkerEditor(entry){
   overlay.appendChild(bottom);
   document.body.appendChild(overlay);
 
-  let pending=entry.marker?{...entry.marker}:null;
+  let pending=entry.marker?{x:entry.marker.x,y:entry.marker.y,page:entry.marker.page||1}:null;
+  let currentPage=pending?pending.page:(floorPlanPreviewPage||1);
+  let pendingColor=(entry.marker&&entry.marker.color)||MARKER_COLORS[0];
+  labelInput.value=(entry.marker&&entry.marker.label)||'';
+
+  MARKER_COLORS.forEach(cVal=>{
+    const sw=el(`<button style="width:26px;height:26px;border-radius:50%;background:${cVal};border:2px solid ${cVal===pendingColor?'#000':'#fff'};box-shadow:0 0 0 1px var(--line);flex:0 0 auto;padding:0;"></button>`);
+    sw.onclick=()=>{
+      pendingColor=cVal;
+      [...swatchRow.querySelectorAll('button')].forEach(b=>b.style.border='2px solid #fff');
+      sw.style.border='2px solid #000';
+      dot.style.background=pendingColor;
+    };
+    swatchRow.appendChild(sw);
+  });
+  dot.style.background=pendingColor;
+
+  let baseCssWidth=0,numPages=1,zoomLevel=1;
+  const MAX_ZOOM=6;
+
   function placeDot(){
-    if(!pending){dot.style.display='none';return}
+    if(!pending||pending.page!==currentPage){dot.style.display='none';return}
     dot.style.display='block';
     const w=canvas.clientWidth||canvas.width,h=canvas.clientHeight||canvas.height;
     dot.style.left=(pending.x*w)+'px';
     dot.style.top=(pending.y*h)+'px';
   }
-  renderPdfPageToCanvas(floorPlanBlob,canvas,window.innerWidth-24,window.innerHeight-160).then(()=>{placeDot()}).catch(()=>{toast('Pohjakuvan renderöinti epäonnistui');overlay.remove()});
+
+  function centerScroll(){
+    stage.scrollLeft=Math.max(0,(canvas.clientWidth-stage.clientWidth)/2);
+    stage.scrollTop=Math.max(0,(canvas.clientHeight-stage.clientHeight)/2);
+  }
+
+  async function doRenderFit(){
+    try{
+      const fit=await renderPdfPageToCanvas(floorPlanBlob,canvas,window.innerWidth-24,window.innerHeight-320,currentPage);
+      baseCssWidth=fit.width;numPages=fit.numPages;zoomLevel=1;
+      zoomLabel.textContent='100%';
+      pageBar.style.display=numPages>1?'flex':'none';
+      pageLabelSpan.textContent=`Sivu ${currentPage} / ${numPages}`;
+      placeDot();
+    }catch(err){toast('Pohjakuvan renderöinti epäonnistui');overlay.remove()}
+  }
+
+  async function renderAtZoom(z){
+    zoomLevel=Math.min(MAX_ZOOM,Math.max(1,z));
+    canvasWrap.style.transform='';
+    const cssW=baseCssWidth*zoomLevel;
+    await renderPdfPageAtCssWidth(floorPlanBlob,canvas,cssW,currentPage);
+    zoomLabel.textContent=Math.round(zoomLevel*100)+'%';
+    placeDot();
+    centerScroll();
+  }
+
+  doRenderFit();
+
+  prevPageBtn.onclick=()=>{if(currentPage>1){currentPage--;doRenderFit()}};
+  nextPageBtn.onclick=()=>{if(currentPage<numPages){currentPage++;doRenderFit()}};
+  zoomOutBtn.onclick=()=>renderAtZoom(zoomLevel-0.75);
+  zoomInBtn.onclick=()=>renderAtZoom(zoomLevel+0.75);
+  zoomFitBtn.onclick=()=>doRenderFit();
+
+  let isPinching=false,pinchStartDist=0,pinchStartZoom=1;
+  function touchDist(t0,t1){return Math.hypot(t1.clientX-t0.clientX,t1.clientY-t0.clientY)}
+  stage.addEventListener('touchstart',ev=>{
+    if(ev.touches.length===2){isPinching=true;pinchStartDist=touchDist(ev.touches[0],ev.touches[1]);pinchStartZoom=zoomLevel}
+  },{passive:true});
+  stage.addEventListener('touchmove',ev=>{
+    if(isPinching&&ev.touches.length===2){
+      ev.preventDefault();
+      const d=touchDist(ev.touches[0],ev.touches[1]);
+      const live=Math.min(MAX_ZOOM,Math.max(1,pinchStartZoom*(d/pinchStartDist)));
+      canvasWrap.style.transform=`scale(${live/zoomLevel})`;
+    }
+  },{passive:false});
+  stage.addEventListener('touchend',ev=>{
+    if(isPinching&&ev.touches.length<2){
+      isPinching=false;
+      const m=/scale\(([\d.]+)\)/.exec(canvasWrap.style.transform||'');
+      const factor=m?parseFloat(m[1]):1;
+      renderAtZoom(zoomLevel*factor);
+    }
+  });
+
   canvas.addEventListener('click',ev=>{
     const rect=canvas.getBoundingClientRect();
     const x=(ev.clientX-rect.left)/rect.width,y=(ev.clientY-rect.top)/rect.height;
-    pending={x:Math.min(1,Math.max(0,x)),y:Math.min(1,Math.max(0,y))};
+    pending={x:Math.min(1,Math.max(0,x)),y:Math.min(1,Math.max(0,y)),page:currentPage};
     placeDot();
   });
   cancelBtn.onclick=()=>overlay.remove();
   clearBtn.onclick=()=>{delete entry.marker;autosave();overlay.remove();render();toast('Merkintä poistettu')};
   saveBtn.onclick=()=>{
     if(!pending){toast('Napauta ensin sijainti kuvasta');return}
-    entry.marker=pending;autosave();overlay.remove();render();toast('Sijainti tallennettu');
+    entry.marker={x:pending.x,y:pending.y,page:pending.page,color:pendingColor,label:labelInput.value.trim()};
+    autosave();overlay.remove();render();toast('Sijainti tallennettu');
   };
+}
+
+function hexToRgb01(hex){
+  hex=(hex||'#e85908').replace('#','');
+  if(hex.length===3)hex=hex.split('').map(ch=>ch+ch).join('');
+  const num=parseInt(hex,16);
+  const n=isNaN(num)?0xe85908:num;
+  return {r:((n>>16)&255)/255,g:((n>>8)&255)/255,b:(n&255)/255};
 }
 
 async function exportFloorPlanPdf(){
@@ -329,17 +486,31 @@ async function exportFloorPlanPdf(){
     const {PDFDocument,rgb,StandardFonts}=PDFLib;
     const bytes=new Uint8Array(await floorPlanBlob.arrayBuffer());
     const pdfDoc=await PDFDocument.load(bytes);
-    const page=pdfDoc.getPages()[0];
-    const {width,height}=page.getSize();
+    const pages=pdfDoc.getPages();
     const font=await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-    entries.forEach((e,idx)=>{
-      if(!e.marker)return;
-      const x=e.marker.x*width,y=height-(e.marker.y*height);
-      const r=11;
-      page.drawCircle({x,y,size:r,color:rgb(0.910,0.349,0.008),borderColor:rgb(1,1,1),borderWidth:2});
-      const label=String(idx+1);
-      const tw=font.widthOfTextAtSize(label,11);
-      page.drawText(label,{x:x-tw/2,y:y-4,size:11,font,color:rgb(1,1,1)});
+    pages.forEach((page,pIdx)=>{
+      const {width,height}=page.getSize();
+      entries.forEach((e,idx)=>{
+        if(!e.marker)return;
+        const markerPageIdx=(e.marker.page||1)-1;
+        if(markerPageIdx!==pIdx)return;
+        const x=e.marker.x*width,y=height-(e.marker.y*height);
+        const r=10;
+        const col=hexToRgb01(e.marker.color);
+        const color=rgb(col.r,col.g,col.b);
+        page.drawCircle({x,y,size:r,color,borderColor:rgb(1,1,1),borderWidth:1.6});
+        const customLabel=(e.marker.label||'').trim();
+        if(customLabel){
+          const fs=9,pad=4,tw=font.widthOfTextAtSize(customLabel,fs),boxW=tw+pad*2,boxH=fs+pad*2;
+          const bx=x+r+7,by=y-boxH/2;
+          page.drawLine({start:{x:x+r*0.6,y},end:{x:bx,y},thickness:1.2,color});
+          page.drawRectangle({x:bx,y:by,width:boxW,height:boxH,color:rgb(1,1,1),borderColor:color,borderWidth:1.2});
+          page.drawText(customLabel,{x:bx+pad,y:by+pad-1,size:fs,font,color:rgb(0.12,0.12,0.12)});
+        }else{
+          const label=String(idx+1),fs=11,tw=font.widthOfTextAtSize(label,fs);
+          page.drawText(label,{x:x-tw/2,y:y-fs*0.36,size:fs,font,color:rgb(1,1,1)});
+        }
+      });
     });
     const outBytes=await pdfDoc.save();
     const blob=new Blob([outBytes],{type:'application/pdf'});
