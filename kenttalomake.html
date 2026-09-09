@@ -230,11 +230,14 @@ async function renderPdfPageToCanvas(blob,canvas,maxWidth,maxHeight){
   const pdf=await pdfjsLib.getDocument({data:buf}).promise;
   const page=await pdf.getPage(1);
   const baseViewport=page.getViewport({scale:1});
+  const dpr=window.devicePixelRatio||1;
   const scale=Math.min(maxWidth/baseViewport.width,maxHeight/baseViewport.height,3);
-  const viewport=page.getViewport({scale});
+  const viewport=page.getViewport({scale:scale*dpr});
   canvas.width=viewport.width;canvas.height=viewport.height;
+  canvas.style.width=(viewport.width/dpr)+'px';
+  canvas.style.height=(viewport.height/dpr)+'px';
   await page.render({canvasContext:canvas.getContext('2d'),viewport}).promise;
-  return {width:viewport.width,height:viewport.height};
+  return {width:viewport.width/dpr,height:viewport.height/dpr};
 }
 
 function renderFloorPlanCard(){
@@ -300,8 +303,9 @@ function openMarkerEditor(entry){
   function placeDot(){
     if(!pending){dot.style.display='none';return}
     dot.style.display='block';
-    dot.style.left=(pending.x*canvas.width)+'px';
-    dot.style.top=(pending.y*canvas.height)+'px';
+    const w=canvas.clientWidth||canvas.width,h=canvas.clientHeight||canvas.height;
+    dot.style.left=(pending.x*w)+'px';
+    dot.style.top=(pending.y*h)+'px';
   }
   renderPdfPageToCanvas(floorPlanBlob,canvas,window.innerWidth-24,window.innerHeight-160).then(()=>{placeDot()}).catch(()=>{toast('Pohjakuvan renderöinti epäonnistui');overlay.remove()});
   canvas.addEventListener('click',ev=>{
