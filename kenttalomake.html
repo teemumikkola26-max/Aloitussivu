@@ -435,8 +435,8 @@ function openMarkerEditor(entry){
   pageBar.appendChild(prevPageBtn);pageBar.appendChild(pageLabelSpan);pageBar.appendChild(nextPageBtn);
   overlay.appendChild(pageBar);
 
-  const stage=el('<div style="flex:1;overflow:auto;display:flex;align-items:flex-start;justify-content:flex-start;position:relative;background:#2a2a26;"></div>');
-  const canvasWrap=el('<div style="position:relative;transform-origin:center center;margin:auto;"></div>');
+  const stage=el('<div style="flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;position:relative;background:#2a2a26;"></div>');
+  const canvasWrap=el('<div style="position:relative;transform-origin:center center;"></div>');
   const canvas=document.createElement('canvas');canvasWrap.appendChild(canvas);
   const dot=el('<div style="position:absolute;width:22px;height:22px;border-radius:50%;border:3px solid #fff;transform:translate(-50%,-50%);display:none;box-shadow:0 0 0 2px rgba(0,0,0,.4);"></div>');
   canvasWrap.appendChild(dot);
@@ -495,6 +495,14 @@ function openMarkerEditor(entry){
     dot.style.top=(pending.y*h)+'px';
   }
 
+  /* Flexboxin center-keskitys yhdessä overflow:auto:n kanssa estää selaimissa vierittämisen ylivuotavan sisällön "alkupäähän" (yleinen selainbugi). Siksi keskitys kytketään pois akselilta heti kun kuva ei enää mahdu näkyviin sillä akselilla, jolloin koko kuva pysyy aidosti vieritettävissä. */
+  function layoutStage(){
+    const overflowsX=canvas.clientWidth>stage.clientWidth;
+    const overflowsY=canvas.clientHeight>stage.clientHeight;
+    stage.style.justifyContent=overflowsX?'flex-start':'center';
+    stage.style.alignItems=overflowsY?'flex-start':'center';
+  }
+
   function centerScroll(){
     stage.scrollLeft=Math.max(0,(canvas.clientWidth-stage.clientWidth)/2);
     stage.scrollTop=Math.max(0,(canvas.clientHeight-stage.clientHeight)/2);
@@ -507,6 +515,7 @@ function openMarkerEditor(entry){
       zoomLabel.textContent='100%';
       pageBar.style.display=numPages>1?'flex':'none';
       pageLabelSpan.textContent=`Sivu ${currentPage} / ${numPages}`;
+      layoutStage();
       placeDot();
     }catch(err){toast('Pohjakuvan renderöinti epäonnistui');overlay.remove()}
   }
@@ -517,6 +526,7 @@ function openMarkerEditor(entry){
     const cssW=baseCssWidth*zoomLevel;
     await renderPdfPageAtCssWidth(floorPlanBlob,canvas,cssW,currentPage);
     zoomLabel.textContent=Math.round(zoomLevel*100)+'%';
+    layoutStage();
     placeDot();
     centerScroll();
   }
