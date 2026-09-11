@@ -435,8 +435,8 @@ function openMarkerEditor(entry){
   pageBar.appendChild(prevPageBtn);pageBar.appendChild(pageLabelSpan);pageBar.appendChild(nextPageBtn);
   overlay.appendChild(pageBar);
 
-  const stage=el('<div style="flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;position:relative;background:#2a2a26;"></div>');
-  const canvasWrap=el('<div style="position:relative;transform-origin:center center;"></div>');
+  const stage=el('<div style="flex:1;overflow:auto;display:flex;align-items:flex-start;justify-content:flex-start;position:relative;background:#2a2a26;"></div>');
+  const canvasWrap=el('<div style="position:relative;transform-origin:center center;margin:auto;"></div>');
   const canvas=document.createElement('canvas');canvasWrap.appendChild(canvas);
   const dot=el('<div style="position:absolute;width:22px;height:22px;border-radius:50%;border:3px solid #fff;transform:translate(-50%,-50%);display:none;box-shadow:0 0 0 2px rgba(0,0,0,.4);"></div>');
   canvasWrap.appendChild(dot);
