@@ -23,6 +23,7 @@
 
 let DEF = null;
 let FORM_ID = null;
+let SUBMISSION_ID = null;
 let DEFAULT_STATUS = "unchecked";
 let state = { header:{}, items:{} };
 let saveTimer = null;
@@ -127,6 +128,12 @@ function setSaveIndicator(text){
   const el = document.getElementById("saveIndicator");
   if (el) el.textContent = text;
 }
+function deriveTitle(){
+  const firstVal = Object.values(state.header).find(v => v && String(v).trim());
+  return firstVal || (DEF && DEF.meta && DEF.meta.title) || "(nimetön kohde)";
+}
+
+let cloudSyncInFlight = false;
 function saveDebounced(){
   setSaveIndicator("Tallennetaan…");
   clearTimeout(saveTimer);
@@ -138,32 +145,95 @@ async function doSave(){
     const it = state.items[id];
     await idbPut("items", { id, status: it.status, note: it.note, action: it.action, value: it.value, table: it.table });
   }
-  setSaveIndicator("Tallennettu");
+  setSaveIndicator("Tallennettu laitteelle…");
+  syncToCloud();
+}
+
+async function syncToCloud(){
+  if (cloudSyncInFlight) return;
+  cloudSyncInFlight = true;
+  try{
+    for (const id of Object.keys(state.items)){
+      const it = state.items[id];
+      for (const p of it.photos){
+        if (!p.path && p.blob){
+          try{ p.path = await window.SubmissionSync.uploadPhoto(SUBMISSION_ID, "p" + p.id + ".jpg", p.blob); }catch(e){}
+        }
+      }
+    }
+    const cloudItems = {};
+    Object.keys(state.items).forEach(id => {
+      const it = state.items[id];
+      cloudItems[id] = {
+        status: it.status, note: it.note, action: it.action, value: it.value, table: it.table,
+        photos: it.photos.filter(p => p.path).map(p => ({ id:p.id, path:p.path, w:p.w, h:p.h }))
+      };
+    });
+    await window.SubmissionSync.saveSubmission({
+      id: SUBMISSION_ID, formKey: FORM_ID, formLabel: (DEF && DEF.meta && DEF.meta.title) || "Lomake",
+      title: deriveTitle(), data: { header: state.header, items: cloudItems }
+    });
+    setSaveIndicator("Tallennettu pilveen");
+  }catch(e){
+    setSaveIndicator("Tallennettu laitteelle (ei pilviyhteyttä)");
+  }finally{
+    cloudSyncInFlight = false;
+  }
 }
 
 async function loadFromStorage(){
-  const metaRows = await idbGetAll("meta");
-  const headerRow = metaRows.find(r => r.key === "header");
-  if (headerRow) state.header = headerRow.value || {};
-
-  const itemRows = await idbGetAll("items");
-  itemRows.forEach(row => {
-    if (state.items[row.id]){
-      state.items[row.id].status = row.status || DEFAULT_STATUS;
-      state.items[row.id].note = row.note || "";
-      state.items[row.id].action = row.action || "";
-      state.items[row.id].value = row.value || "";
-      state.items[row.id].table = row.table || {};
+  let loadedFromCloud = false;
+  try{
+    const sub = await window.SubmissionSync.loadSubmission(SUBMISSION_ID);
+    if (sub && sub.data){
+      state.header = sub.data.header || {};
+      const items = sub.data.items || {};
+      for (const id of Object.keys(items)){
+        if (!state.items[id]) continue;
+        state.items[id].status = items[id].status || DEFAULT_STATUS;
+        state.items[id].note = items[id].note || "";
+        state.items[id].action = items[id].action || "";
+        state.items[id].value = items[id].value || "";
+        state.items[id].table = items[id].table || {};
+        for (const p of (items[id].photos || [])){
+          try{
+            const blob = await window.SubmissionSync.downloadPhoto(p.path);
+            const url = URL.createObjectURL(blob);
+            state.items[id].photos.push({ id:p.id, path:p.path, blob, url, w:p.w, h:p.h });
+          }catch(e){ /* yksittäisen kuvan lataus epäonnistui -- jatketaan muilla */ }
+        }
+      }
+      loadedFromCloud = true;
     }
-  });
+  }catch(e){ /* ei pilviyhteyttä -- jatketaan paikallisella kopiolla alla */ }
 
-  const photoRows = await idbGetAll("photos");
-  photoRows.forEach(row => {
-    if (state.items[row.itemId]){
-      const url = URL.createObjectURL(row.blob);
-      state.items[row.itemId].photos.push({ id: row.id, blob: row.blob, url, w: row.w, h: row.h });
+  if (!loadedFromCloud){
+    const metaRows = await idbGetAll("meta");
+    const headerRow = metaRows.find(r => r.key === "header");
+    if (headerRow) state.header = headerRow.value || {};
+
+    const itemRows = await idbGetAll("items");
+    itemRows.forEach(row => {
+      if (state.items[row.id]){
+        state.items[row.id].status = row.status || DEFAULT_STATUS;
+        state.items[row.id].note = row.note || "";
+        state.items[row.id].action = row.action || "";
+        state.items[row.id].value = row.value || "";
+        state.items[row.id].table = row.table || {};
+      }
+    });
+
+    const photoRows = await idbGetAll("photos");
+    photoRows.forEach(row => {
+      if (state.items[row.itemId]){
+        const url = URL.createObjectURL(row.blob);
+        state.items[row.itemId].photos.push({ id: row.id, blob: row.blob, url, w: row.w, h: row.h });
+      }
+    });
+    if (headerRow || itemRows.length){
+      showToast("Ei pilviyhteyttä juuri nyt — näytetään laitteelle tallennettu kopio.");
     }
-  });
+  }
 }
 
 /* ---------- Kuvat: kamera -> canvas-uudelleenpiirto (poistaa EXIFin) -> Blob ---------- */
@@ -227,8 +297,10 @@ function removePhoto(itemId, photoId){
   const idx = arr.findIndex(p => p.id === photoId);
   if (idx === -1) return;
   URL.revokeObjectURL(arr[idx].url);
+  const removedPath = arr[idx].path;
   arr.splice(idx, 1);
   if (db) idbDelete("photos", photoId);
+  if (removedPath) window.SubmissionSync.deletePhotoFile(removedPath).catch(()=>{});
   renderSections();
   saveDebounced();
 }
@@ -586,14 +658,22 @@ function showConfirm(title, text, onOk){
 document.getElementById("btnNew").addEventListener("click", () => {
   showConfirm(
     "Tyhjennä lomake?",
-    "Kaikki tämänhetkiset tiedot, merkinnät ja kuvat poistetaan pysyvästi tästä laitteesta. Tätä ei voi perua.",
+    "Kaikki tämänhetkiset tiedot, merkinnät ja kuvat poistetaan pysyvästi — myös pilvestä. Tätä ei voi perua.",
     async () => {
       Object.values(state.items).forEach(it => it.photos.forEach(p => URL.revokeObjectURL(p.url)));
       if (db) await idbClearAll();
+      try{ await window.SubmissionSync.deleteSubmission(SUBMISSION_ID); }catch(e){}
+
+      SUBMISSION_ID = window.SubmissionSync.newId();
+      const params = new URLSearchParams(window.location.search);
+      params.set("submission", SUBMISSION_ID);
+      window.history.replaceState(null, "", window.location.pathname + "?" + params.toString());
+
       resetState();
+      db = await openDb("dynsub_" + SUBMISSION_ID.replace(/-/g,"") + "_db");
       renderHeaderFields();
       renderSections();
-      showToast("Lomake tyhjennetty.");
+      showToast("Lomake tyhjennetty. Uusi täyttö aloitettu.");
     }
   );
 });
@@ -733,6 +813,18 @@ function waitForSupabaseClient(cb, triesLeft){
   setTimeout(() => waitForSupabaseClient(cb, triesLeft - 1), 50);
 }
 
+function initSubmissionId(){
+  const params = new URLSearchParams(window.location.search);
+  let id = params.get("submission");
+  if (!id){
+    id = window.SubmissionSync.newId();
+    params.set("submission", id);
+    const newUrl = window.location.pathname + "?" + params.toString();
+    window.history.replaceState(null, "", newUrl);
+  }
+  return id;
+}
+
 (async function init(){
   FORM_ID = new URLSearchParams(window.location.search).get("id");
   if (!FORM_ID){
@@ -760,7 +852,8 @@ function waitForSupabaseClient(cb, triesLeft){
 
       resetState();
 
-      db = await openDb("dynform_" + FORM_ID.replace(/-/g,"") + "_db");
+      SUBMISSION_ID = initSubmissionId();
+      db = await openDb("dynsub_" + SUBMISSION_ID.replace(/-/g,"") + "_db");
       await loadFromStorage();
 
       renderHeaderFields();
