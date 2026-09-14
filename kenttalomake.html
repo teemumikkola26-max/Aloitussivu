@@ -128,7 +128,13 @@ try{
   }
   const cloudEntries=entries.map(e=>({
     id:e.id, methodId:e.methodId, values:e.values, marker:e.marker||null,
-    photos:(e.photos||[]).filter(p=>p.path).map(p=>({id:p.id,path:p.path}))
+    photos:(e.photos||[])
+.filter(p=>p.path)
+.map(p=>({
+    id:p.id,
+    path:p.path,
+    caption:p.caption || ""
+}))
   }));
   await window.SubmissionSync.saveSubmission({
     id:SUBMISSION_ID, formKey:FORM_KEY, formLabel:FORM_LABEL, title:deriveTitle(),
@@ -154,7 +160,7 @@ try{
         try{
           const blob=await window.SubmissionSync.downloadPhoto(p.path);
           const url=URL.createObjectURL(blob);
-          photos.push({id:p.id,path:p.path,url,blob});
+          photos.push({id:p.id,path:p.path,url,blob,caption:p.caption||""});
         }catch(err){ /* yksittäisen kuvan lataus epäonnistui -- jatketaan muilla */ }
       }
       entries.push({ id:ce.id, methodId:ce.methodId, values:ce.values||{}, marker:ce.marker||null, photos });
@@ -215,13 +221,15 @@ if(view==="entryForm"){const m=METHODS.find(x=>x.id===editingEntry.methodId);tit
 }
 function renderBack(fn,label){const d=el(`<div class="step-back">‹ ${label||"Takaisin"}</div>`);d.onclick=fn;return d}
 function renderProjectCard(){const c=el(`<div class="card"><h2>Kohde</h2><label class="req">Kohteen nimi / osoite</label><input type="text" id="p_nimi" autocomplete="off" placeholder="esim. Asunto Oy Kotikuja 3"><label>Tilaaja</label><input type="text" id="p_tilaaja" autocomplete="off" placeholder="Tilaajan nimi"><label class="req">Tutkijan nimi</label><input type="text" id="p_tutkija" autocomplete="off" placeholder="Tutkimuksen tekijä"><label>Päivämäärä</label><input type="text" id="p_pvm" autocomplete="off" placeholder="VVVV-KK-PP"></div>`);[['p_nimi','nimi'],['p_tilaaja','tilaaja'],['p_tutkija','tutkija'],['p_pvm','pvm']].forEach(([id,k])=>{c.querySelector('#'+id).value=project[k];c.querySelector('#'+id).oninput=e=>{project[k]=e.target.value;scheduleAutosave()}});return c}
-function renderEntriesCard(){const c=el(`<div class="card"><h2>Tehdyt menetelmät <span class="badge">${entries.length}</span></h2></div>`);if(!entries.length)c.appendChild(el(`<div class="empty">Ei vielä lisättyjä menetelmiä.<br>Aloita painamalla "+ Lisää menetelmä" alta.</div>`));else{entries.forEach((entry,idx)=>{const m=METHODS.find(x=>x.id===entry.methodId),card=el(`<div class="entry-card"><div class="entry-top"><div><div class="entry-title">${idx+1}. ${escapeHtml(m.name)}</div><div class="entry-sub">${escapeHtml(entry.values.paikka||"Ei paikkaa merkitty")}</div></div></div><div class="entry-actions"><button class="btn btn-outline btn-sm">Muokkaa</button></div></div>`);if(entry.photos?.length){const thumbs=el('<div class="thumbs"></div>');entry.photos.forEach(p=>thumbs.appendChild(el(`<div class="thumb"><img src="${p.url}"></div>`)));card.appendChild(thumbs)}card.querySelector('button').onclick=()=>{editingEntry=entry;editingIsNew=false;view="entryForm";render()};c.appendChild(card)})}
+function renderEntriesCard(){const c=el(`<div class="card"><h2>Tehdyt menetelmät <span class="badge">${entries.length}</span></h2></div>`);if(!entries.length)c.appendChild(el(`<div class="empty">Ei vielä lisättyjä menetelmiä.<br>Aloita painamalla "+ Lisää menetelmä" alta.</div>`));else{entries.forEach((entry,idx)=>{const m=METHODS.find(x=>x.id===entry.methodId),card=el(`<div class="entry-card"><div class="entry-top"><div><div class="entry-title">${idx+1}. ${escapeHtml(m.name)}</div><div class="entry-sub">${escapeHtml(entry.values.paikka||"Ei paikkaa merkitty")}</div></div></div><div class="entry-actions"><button class="btn btn-outline btn-sm">Muokkaa</button></div></div>`);if(entry.photos?.length){const thumbs=el('<div class="thumbs"></div>');entry.photos.forEach(p=>thumbs.appendChild(el(`<div style="display:flex;flex-direction:column;align-items:center;width:56px;"><div class="thumb">
+  ${p.url}
+</div><divstyle="font-size:9px;color:#666;text-align:center;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:56px;">${escapeHtml(p.caption||'')}</div></div>`));card.appendChild(thumbs)}card.querySelector('button').onclick=()=>{editingEntry=entry;editingIsNew=false;view="entryForm";render()};c.appendChild(card)})}
 if(entries.length){const r=el('<div style="margin-top:12px;display:flex;gap:8px;"><button class="btn btn-outline btn-block" id="btnExport">Muodosta kenttämuistiinpano (Word)</button><button class="btn btn-outline" id="btnStyle" style="flex:0 0 auto;">🎨</button></div>');c.appendChild(r);setTimeout(()=>{const b=document.getElementById('btnExport');if(b)b.onclick=exportWord;const sb=document.getElementById('btnStyle');if(sb)sb.onclick=()=>{window.location.href="style-editor.html?form="+encodeURIComponent(FORM_KEY)+"&label="+encodeURIComponent(FORM_LABEL)+"&back="+encodeURIComponent("kenttalomake.html")}},0)}return c}
 function renderMethodGrid(){const w=el('<div class="method-grid"></div>');METHODS.forEach((m,i)=>{const t=el(`<button class="method-tile"><span class="num">${String(i+1).padStart(2,'0')}</span>${escapeHtml(m.short)}</button>`);t.onclick=()=>{editingEntry={id:'e'+Date.now(),methodId:m.id,values:{},photos:[]};editingIsNew=true;view="entryForm";autosave();render()};w.appendChild(t)});return w}
-function renderEntryForm(){const m=METHODS.find(x=>x.id===editingEntry.methodId),container=el('<div></div>'),common=el('<div class="card"></div>');COMMON_FIELDS.forEach(f=>common.appendChild(renderField(f,editingEntry.values)));container.appendChild(common);const spec=el(`<div class="card"><h2>${escapeHtml(m.name)}</h2></div>`);m.fields.forEach(f=>spec.appendChild(renderField(f,editingEntry.values)));container.appendChild(spec);const note=el('<div class="card"><h2>Lisähuomiot</h2></div>');note.appendChild(renderField({id:"huomiot",label:"Vapaa huomio (valinnainen)",type:"textarea"},editingEntry.values));container.appendChild(note);const pc=el(`<div class="card"><h2>Valokuvat <span class="badge">${editingEntry.photos.length}</span></h2></div>`),thumbs=el('<div class="thumbs"></div>');editingEntry.photos.forEach((p,i)=>{const t=el(`<div class="thumb"><img src="${p.url}"><button class="rm">×</button></div>`);t.querySelector('.rm').onclick=()=>{const removed=editingEntry.photos.splice(i,1)[0];if(removed&&removed.path){window.SubmissionSync.deletePhotoFile(removed.path).catch(()=>{})}autosave();render()};thumbs.appendChild(t)});const add=el('<label class="photo-add">+<input type="file" accept="image/*" capture="environment" multiple style="display:none;"></label>');add.querySelector('input').onchange=e=>{const fs=[...e.target.files||[]];let p=fs.length;if(!p)return;fs.forEach(f=>{const r=new FileReader();r.onload=x=>{const dataUrl=x.target.result;const id='ph'+Date.now()+Math.random().toString(36).slice(2,6);editingEntry.photos.push({id,url:dataUrl,blob:dataUrlToBlob(dataUrl),path:null});if(!--p){autosave();render()}};r.readAsDataURL(f)})};thumbs.appendChild(add);pc.appendChild(thumbs);pc.appendChild(el('<div class="hint">Kuvat liitetään suoraan kenttämuistiinpanoon.</div>'));container.appendChild(pc);const loc=el('<div class="card"><h2>Sijainti pohjakuvalla</h2></div>');if(!floorPlanBlob){loc.appendChild(el('<div class="hint">Lataa ensin pohjakuva kohteen tietoihin, niin voit merkitä tämän menetelmän sijainnin siihen.</div>'))}else{const btn=el(`<button class="btn btn-outline btn-block">${editingEntry.marker?'Muokkaa sijaintimerkintää':'Merkitse sijainti pohjakuvaan'}</button>`);btn.onclick=()=>openMarkerEditor(editingEntry);loc.appendChild(btn);if(editingEntry.marker)loc.appendChild(el('<div class="hint" style="margin-top:6px;">Sijainti merkitty ✓</div>'))}container.appendChild(loc);return container}
+function renderEntryForm(){const m=METHODS.find(x=>x.id===editingEntry.methodId),container=el('<div></div>'),common=el('<div class="card"></div>');COMMON_FIELDS.forEach(f=>common.appendChild(renderField(f,editingEntry.values)));container.appendChild(common);const spec=el(`<div class="card"><h2>${escapeHtml(m.name)}</h2></div>`);m.fields.forEach(f=>spec.appendChild(renderField(f,editingEntry.values)));container.appendChild(spec);const note=el('<div class="card"><h2>Lisähuomiot</h2></div>');note.appendChild(renderField({id:"huomiot",label:"Vapaa huomio (valinnainen)",type:"textarea"},editingEntry.values));container.appendChild(note);const pc=el(`<div class="card"><h2>Valokuvat <span class="badge">${editingEntry.photos.length}</span></h2></div>`),thumbs=el('<div class="thumbs"></div>');editingEntry.photos.forEach((p,i)=>{const t=el(`<div style="display:flex;flex-direction:column;gap:4px;width:90px;"><div class="thumb">${p.url}<button class="rm">×</button></div><inputtype="text"class="photo-caption"placeholder="Kuvateksti"value="${escapeHtml(p.caption||'')}"style="width:100%;font-size:11px;padding:4px;border:1px solid var(--line);border-radius:4px;"></div>`);t.querySelector('.rm').onclick=()=>{const removed=editingEntry.photos.splice(i,1)[0];if(removed&&removed.path){window.SubmissionSync.deletePhotoFile(removed.path).catch(()=>{})}autosave();render();};t.querySelector('.photo-caption').oninput=(e)=>{p.caption=e.target.value;scheduleAutosave();};thumbs.appendChild(t);});const add=el('<label class="photo-add">+<input type="file" accept="image/*" capture="environment" multiple style="display:none;"></label>');add.querySelector('input').onchange=e=>{const fs=[...e.target.files||[]];let p=fs.length;if(!p)return;fs.forEach(f=>{const r=new FileReader();r.onload=x=>{const dataUrl=x.target.result;const id='ph'+Date.now()+Math.random().toString(36).slice(2,6);editingEntry.photos.push({id,url:dataUrl,blob:dataUrlToBlob(dataUrl),path:null,caption:""});if(!--p){autosave();render()}};r.readAsDataURL(f)})};thumbs.appendChild(add);pc.appendChild(thumbs);pc.appendChild(el('<div class="hint">Kuvat liitetään suoraan kenttämuistiinpanoon.</div>'));container.appendChild(pc);const loc=el('<div class="card"><h2>Sijainti pohjakuvalla</h2></div>');if(!floorPlanBlob){loc.appendChild(el('<div class="hint">Lataa ensin pohjakuva kohteen tietoihin, niin voit merkitä tämän menetelmän sijainnin siihen.</div>'))}else{const btn=el(`<button class="btn btn-outline btn-block">${editingEntry.marker?'Muokkaa sijaintimerkintää':'Merkitse sijainti pohjakuvaan'}</button>`);btn.onclick=()=>openMarkerEditor(editingEntry);loc.appendChild(btn);if(editingEntry.marker)loc.appendChild(el('<div class="hint" style="margin-top:6px;">Sijainti merkitty ✓</div>'))}container.appendChild(loc);return container}
 function renderField(f,values){const val=values[f.id]||"";let ih;if(f.type==="textarea")ih=`<textarea id="fld_${f.id}" autocomplete="off" placeholder="${escapeHtml(f.placeholder||"")}">${escapeHtml(val)}</textarea>`;else if(f.type==="select")ih=`<select id="fld_${f.id}"><option value="">Valitse...</option>${f.options.map(o=>`<option value="${escapeHtml(o)}" ${o===val?"selected":""}>${escapeHtml(o)}</option>`).join("")}</select>`;else ih=`<input type="${f.type}" id="fld_${f.id}" autocomplete="off" placeholder="${escapeHtml(f.placeholder||"")}" value="${escapeHtml(val)}">`;const w=el(`<div><label class="${f.req?"req":""}">${escapeHtml(f.label)}</label>${ih}</div>`),input=w.querySelector(`#fld_${f.id}`);input.oninput=e=>{values[f.id]=e.target.value;scheduleAutosave()};input.onchange=e=>{values[f.id]=e.target.value;scheduleAutosave()};return w}
 function saveEntryForm(){const m=METHODS.find(x=>x.id===editingEntry.methodId),req=[...COMMON_FIELDS,...m.fields].filter(f=>f.req),missing=req.filter(f=>!editingEntry.values[f.id]);if(missing.length){toast("Täytä pakolliset kentät: "+missing.map(f=>f.label).join(", "));return}if(editingIsNew)entries.push(editingEntry);autosave();toast("Menetelmä tallennettu");view="project";render()}
-function escapeHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+function escapeHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 function dataUrlToBlob(dataUrl){const parts=dataUrl.split(',');const mime=(parts[0].match(/:(.*?);/)||[,'image/jpeg'])[1];const bin=atob(parts[1]||'');const bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);return new Blob([bytes],{type:mime})}
 function normalizeImageOrientation(dataUrl){return new Promise(resolve=>{const img=new Image();img.onload=()=>{const canvas=document.createElement('canvas');canvas.width=img.naturalWidth||1;canvas.height=img.naturalHeight||1;canvas.getContext('2d').drawImage(img,0,0);resolve({dataUrl:canvas.toDataURL('image/jpeg',.85),width:canvas.width,height:canvas.height})};img.onerror=()=>resolve({dataUrl,width:1,height:1});img.src=dataUrl})}
 
@@ -287,7 +295,26 @@ async function exportWord(){
         const rId=imgRelCounter++,mediaName="image"+(extraMedia.length+1)+".jpeg";
         extraMedia.push({rId,name:mediaName,blob});
         bodyParts.push(engine.imageXml(rId,cx,cy,imgDocPrCounter++,"center"));
+        if(p.caption && p.caption.trim()){
+  bodyParts.push(
+    engine.paraXml(
+      p.caption.trim(),
+      {
+        italic:true,
+        align:"center",
+        font:s.fonts.body,
+        sz:engine.pt2hp(
+          Math.max(
+            9,
+            s.fonts.bodySize-1
+          )
+        ),
+        color:"666666",
+        after:160
       }
+    )
+  );
+}
       bodyParts.push(engine.paraXml("",{after:100}));
     }
   }
