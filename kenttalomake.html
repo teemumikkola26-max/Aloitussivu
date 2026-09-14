@@ -7,11 +7,10 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.4"></script>
 <script src="auth-gate.js" defer></script>
-<script src="submission-sync.js"></script>
+<script src="submission-sync.js" defer></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-<script src="docx-style-engine.js"></script>
+<script src="docx-style-engine.js" defer></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 
 <title>Kenttälomake</title>
 
@@ -479,8 +478,8 @@ select{
   <h1 id="topTitle">Kohteen tiedot</h1>
 </div>
 
-<div class="sync-status" id="syncStatus">Tallennetaan...</div>
-<div class="wrap" id="app"></div>
+<div class="sync-status" id="syncStatus">Käynnistetään...</div>
+<div class="wrap" id="app"><div class="loading">Ladataan lomaketta...</div></div>
 <div class="footerbar" id="footer"></div>
 <div class="toast" id="toast"></div>
 
@@ -816,6 +815,14 @@ let floorPlanBlob=null;
 let floorPlanPath=null;
 let floorPlanPreviewPage=1;
 
+/*
+ * KORJAUS: vanhaa pilvipohjakuvaa ei enää poisteta heti kun
+ * uusi tiedosto valitaan. Poisto tehdään vasta sitten kun uusi
+ * pohjakuva on varmasti tallentunut pilveen (ks. syncToCloud()),
+ * jotta yhteysongelma ei voi hävittää pohjakuvaa kokonaan.
+ */
+let pendingOldFloorPlanPath=null;
+
 const MARKER_COLORS=[
   "#e85908",
   "#1c64f2",
@@ -824,6 +831,55 @@ const MARKER_COLORS=[
   "#7c3aed",
   "#111111"
 ];
+
+/*
+ * KORJAUS: aikakatkaisu pilvikutsuille, jotta hidas tai jumiutunut
+ * verkkopyyntö ei voi jättää koko sovellusta ikuisesti "Ladataan"-tilaan
+ * (tästä johtui tyhjä näkymä).
+ */
+const CLOUD_TIMEOUT_MS=8000;
+
+function withTimeout(promise,ms,label){
+
+  return new Promise((resolve,reject)=>{
+
+    let settled=false;
+
+    const timer=setTimeout(()=>{
+
+      if(settled)return;
+
+      settled=true;
+
+      reject(new Error("timeout:"+(label||"")));
+
+    },ms);
+
+
+    Promise.resolve(promise).then(
+      value=>{
+
+        if(settled)return;
+
+        settled=true;
+
+        clearTimeout(timer);
+
+        resolve(value);
+      },
+      err=>{
+
+        if(settled)return;
+
+        settled=true;
+
+        clearTimeout(timer);
+
+        reject(err);
+      }
+    );
+  });
+}
 
 
 /* ============================================================
@@ -854,7 +910,10 @@ function initSubmissionId(){
   let id=params.get("submission");
 
   if(!id){
-    id=window.SubmissionSync.newId();
+
+    id=(window.SubmissionSync && window.SubmissionSync.newId)
+      ? window.SubmissionSync.newId()
+      : ("local-"+Date.now()+"-"+Math.random().toString(36).slice(2,10));
 
     params.set("submission",id);
 
@@ -977,6 +1036,35 @@ function idbDel(key){
   }));
 }
 
+/*
+ * KORJAUS: kokonaisen submission-kohtaisen IndexedDB-tietokannan
+ * poisto. Aiemmin clearForm() tyhjensi vain avaimet mutta jätti
+ * tyhjän tietokannan roikkumaan selaimen tallennustilaan pysyvästi.
+ */
+function idbDeleteDatabase(name){
+
+  return new Promise((resolve)=>{
+
+    if(!window.indexedDB || !name){
+      resolve();
+      return;
+    }
+
+    try{
+
+      const req=indexedDB.deleteDatabase(name);
+
+      req.onsuccess=()=>resolve();
+      req.onerror=()=>resolve();
+      req.onblocked=()=>resolve();
+
+    }catch(err){
+
+      resolve();
+    }
+  });
+}
+
 
 /* ============================================================
    TALLENNUS JA SYNKRONOINTI
@@ -1058,6 +1146,18 @@ function createIndexedDbState(){
   };
 }
 
+/*
+ * KORJAUS: varoitus jos joudutaan turvautumaan JSON-varmuuskopioon
+ * ja osalla valokuvista ei vielä ole pilvipolkua — nämä kuvat
+ * katoaisivat, jos IndexedDB ei ole käytettävissä sivun uudelleenlatauksessa.
+ */
+function hasUnsyncedLocalOnlyPhotos(){
+
+  return entries.some(e=>
+    (e.photos||[]).some(p=>!p.path && p.blob instanceof Blob)
+  );
+}
+
 async function autosave(){
 
   if(autosaveInProgress)return;
@@ -1071,6 +1171,7 @@ async function autosave(){
   const portableState=createPortableState();
 
   let localSaved=false;
+  let indexedDbSaved=false;
 
   /*
    * IndexedDB on ensisijainen paikallinen tallennus.
@@ -1084,6 +1185,7 @@ async function autosave(){
     );
 
     localSaved=true;
+    indexedDbSaved=true;
 
   }catch(err){
 
@@ -1134,7 +1236,27 @@ async function autosave(){
   if(localSaved){
 
     lastSaveFailed=false;
-    setSyncStatus("Tallennettu laitteelle","ok");
+
+    if(indexedDbSaved){
+
+      setSyncStatus("Tallennettu laitteelle","ok");
+
+    }else{
+
+      /*
+       * IndexedDB ei toiminut: kuvat, joita ei ole vielä
+       * synkronoitu pilveen, voivat kadota sivun sulkeutuessa.
+       */
+      setSyncStatus("Tallennettu (rajoitetusti)","warn");
+
+      if(hasUnsyncedLocalOnlyPhotos()){
+
+        toast(
+          "Huom: osaa valokuvista ei ole vielä varmuuskopioitu pilveen. "+
+          "Pidä sivu auki kunnes synkronointi valmistuu."
+        );
+      }
+    }
 
   }else{
 
@@ -1190,8 +1312,6 @@ async function syncToCloud(){
 
   setSyncStatus("Synkronoidaan...");
 
-  let syncSuccessful=false;
-
   try{
 
     /*
@@ -1246,6 +1366,32 @@ async function syncToCloud(){
             floorPlanBlob
           );
 
+
+        /*
+         * KORJAUS: vasta kun uusi pohjakuva on varmasti tallentunut
+         * pilveen, poistetaan mahdollinen vanha pohjakuva. Aiemmin
+         * vanha tiedosto poistettiin heti kuvan valinnan yhteydessä,
+         * jolloin yhteysongelma saattoi hävittää pohjakuvan kokonaan.
+         */
+        if(floorPlanPath && pendingOldFloorPlanPath){
+
+          const toDelete=pendingOldFloorPlanPath;
+
+          pendingOldFloorPlanPath=null;
+
+          try{
+
+            await window.SubmissionSync.deletePhotoFile(toDelete);
+
+          }catch(err){
+
+            console.warn(
+              "Vanhan pohjakuvan poisto epäonnistui",
+              err
+            );
+          }
+        }
+
       }catch(err){
 
         console.warn(
@@ -1297,8 +1443,6 @@ async function syncToCloud(){
       }
     });
 
-
-    syncSuccessful=true;
 
     setSyncStatus(
       "Synkronoitu pilveen",
@@ -1355,13 +1499,22 @@ async function loadState(){
 
 
   /*
-   * Ensin pilvi.
+   * Ensin pilvi — mutta aikakatkaisulla. Jos pilvipyyntö ei
+   * vastaa kohtuullisessa ajassa (esim. huono verkko tai
+   * auth-viive), jatketaan paikallisella datalla sen sijaan
+   * että sovellus jää ikuisesti tyhjäksi lataamaan.
    */
   try{
 
+    if(!window.SubmissionSync){
+      throw new Error("SubmissionSync ei ole käytettävissä");
+    }
+
     const sub=
-      await window.SubmissionSync.loadSubmission(
-        SUBMISSION_ID
+      await withTimeout(
+        window.SubmissionSync.loadSubmission(SUBMISSION_ID),
+        CLOUD_TIMEOUT_MS,
+        "loadSubmission"
       );
 
     if(sub && sub.data){
@@ -1490,7 +1643,7 @@ async function loadState(){
   }catch(err){
 
     console.warn(
-      "Pilvilataus epäonnistui",
+      "Pilvilataus epäonnistui tai aikakatkaistiin",
       err
     );
   }
@@ -1611,7 +1764,7 @@ async function loadState(){
               p.url=URL.createObjectURL(p.blob);
             }
 
-          }else if(p.path){
+          }else if(p.path && window.SubmissionSync){
 
             try{
 
@@ -1812,6 +1965,17 @@ async function clearForm(){
   }
 
 
+  /*
+   * KORJAUS: poistetaan koko vanhan submissionin IndexedDB-tietokanta,
+   * jotta tyhjiä tietokantoja ei jää roikkumaan selaimen tallennustilaan.
+   */
+  try{
+    await idbDeleteDatabase(oldDbName);
+  }catch(err){
+    console.warn(err);
+  }
+
+
   try{
 
     if(window.storage){
@@ -1842,18 +2006,21 @@ async function clearForm(){
   /*
    * Pilvestä poistetaan submission.
    */
-  try{
+  if(window.SubmissionSync){
 
-    await window.SubmissionSync.deleteSubmission(
-      oldSubmissionId
-    );
+    try{
 
-  }catch(err){
+      await window.SubmissionSync.deleteSubmission(
+        oldSubmissionId
+      );
 
-    console.warn(
-      "Pilvisubmissionin poisto epäonnistui",
-      err
-    );
+    }catch(err){
+
+      console.warn(
+        "Pilvisubmissionin poisto epäonnistui",
+        err
+      );
+    }
   }
 
 
@@ -1861,7 +2028,9 @@ async function clearForm(){
    * Uusi submission.
    */
   SUBMISSION_ID=
-    window.SubmissionSync.newId();
+    (window.SubmissionSync && window.SubmissionSync.newId)
+      ? window.SubmissionSync.newId()
+      : ("local-"+Date.now()+"-"+Math.random().toString(36).slice(2,10));
 
 
   const params=
@@ -1906,8 +2075,7 @@ async function clearForm(){
   floorPlanBlob=null;
   floorPlanPath=null;
   floorPlanPreviewPage=1;
-
-  view="project";
+  pendingOldFloorPlanPath=null;
 
 
   _pdfDocCache=null;
@@ -2815,6 +2983,12 @@ function renderEntryForm(){
 
   /*
    * Kuvien lisääminen.
+   *
+   * KORJAUS: aiemmin input-elementissä oli sekä `capture="environment"`
+   * että `multiple`, mikä toimii epäluotettavasti monilla mobiiliselaimilla
+   * (osa laitteista avaa suoraan kameran eikä salli monivalintaa).
+   * `capture`-määre poistettu, jolloin käyttöjärjestelmän oma valitsin
+   * tarjoaa sekä kameran että galleria-/monivalinnan luotettavasti.
    */
   const add=
     el(`
@@ -2826,7 +3000,6 @@ function renderEntryForm(){
         <input
           type="file"
           accept="image/*"
-          capture="environment"
           multiple
           style="display:none;"
         >
@@ -3305,6 +3478,12 @@ function dataUrlToBlob(dataUrl){
  * - ei turhaa 4K/6K-kuvaa
  * - säilytetään riittävä tutkimuskuvan tarkkuus
  * - pienennetään selaimen muistinkulutusta
+ *
+ * Huom: nykyselaimet dekoodaavat kuvan EXIF-orientaation
+ * automaattisesti <img>-elementtiin, joten canvasille piirto
+ * säilyttää oikean suunnan käytännössä kaikissa ajantasaisissa
+ * selaimissa. Jos tuki laajennetaan vanhempiin selaimiin,
+ * EXIF-orientaatio tulee lukea ja kiertää erikseen.
  */
 async function processImageFile(
   file,
@@ -3323,12 +3502,6 @@ async function processImageFile(
   }
 
 
-  /*
-   * Jos tiedosto on jo pieni,
-   * sitä ei tarvitse välttämättä käsitellä
-   * uudelleen. Kuvan orientaation vuoksi
-   * käsitellään kuitenkin normaalisti.
-   */
   const dataUrl=
     await readFileAsDataUrl(file);
 
@@ -3623,6 +3796,17 @@ let loadedDocStyle=null;
 async function loadDocStyle(){
 
   try{
+
+    if(
+      !window.__supabaseClient
+    ){
+
+      loadedDocStyle=
+        window.DocxStyleEngine.defaultStyle();
+
+      return;
+    }
+
 
     const {
       data,
@@ -4186,15 +4370,30 @@ async function saveFloorPlan(blob){
     )
   ){
 
+    /*
+     * KORJAUS: aiemmin peruutus ei antanut mitään palautetta
+     * käyttäjälle, jolloin jäi epäselväksi tapahtuiko mitään.
+     */
+    toast(
+      "Pohjakuvan vaihto peruutettu"
+    );
+
     return;
   }
 
 
   /*
-   * Vanhan pilvipohjakuvan poisto.
+   * KORJAUS: vanhaa pilvitiedostoa ei poisteta enää tässä
+   * vaiheessa. Sen sijaan se merkitään "odottavaksi poistoksi"
+   * ja poistetaan vasta kun uusi pohjakuva on varmasti
+   * tallentunut pilveen (ks. syncToCloud()). Näin verkkokatko
+   * ei voi hävittää pohjakuvaa kokonaan.
    */
-  const oldPath=
-    floorPlanPath;
+  if(floorPlanPath){
+
+    pendingOldFloorPlanPath=
+      floorPlanPath;
+  }
 
 
   floorPlanBlob=blob;
@@ -4239,31 +4438,6 @@ async function saveFloorPlan(blob){
   }
 
 
-  /*
-   * Vanha pilvitiedosto poistetaan vasta uuden
-   * tallennuksen jälkeen.
-   */
-  if(
-    oldPath &&
-    window.SubmissionSync
-  ){
-
-    try{
-
-      await window.SubmissionSync.deletePhotoFile(
-        oldPath
-      );
-
-    }catch(err){
-
-      console.warn(
-        "Vanhan pohjakuvan poisto epäonnistui",
-        err
-      );
-    }
-  }
-
-
   autosave();
 }
 
@@ -4298,7 +4472,7 @@ async function removeFloorPlanFile(){
   floorPlanBlob=null;
 
 
-  if(oldPath){
+  if(oldPath && window.SubmissionSync){
 
     try{
 
@@ -4318,6 +4492,7 @@ async function removeFloorPlanFile(){
 
   floorPlanPath=null;
   floorPlanPreviewPage=1;
+  pendingOldFloorPlanPath=null;
 
 
   _pdfDocCache=null;
@@ -4963,6 +5138,12 @@ function renderFloorPlanCard(){
               "Pohjakuva poistettu"
             );
           });
+
+      }else{
+
+        toast(
+          "Pohjakuvan poisto peruutettu"
+        );
       }
     };
 
@@ -5006,7 +5187,7 @@ function renderFloorPlanCard(){
    MERKKIENNIN EDITORI
    ============================================================ */
 
-function openMarkerEditor(entry){
+async function openMarkerEditor(entry){
 
   const overlay=
     el(`
@@ -6451,25 +6632,16 @@ function waitForSupabaseClient(
     triesLeft<=0
   ){
 
-    document.documentElement.style.visibility=
-      "visible";
-
+    /*
+     * KORJAUS: ei jäädä odottamaan Supabase-yhteyttä loputtomiin.
+     * Näytetään lomake paikallisilla tiedoilla sen sijaan, että
+     * sivu jää tyhjäksi.
+     */
     toast(
-      "Supabase-yhteyttä ei saatu muodostettua."
+      "Kirjautumistietoja ei saatu, jatketaan paikallisella lomakkeella."
     );
 
-    /*
-     * Näytetään silti paikallinen lomake,
-     * jos sellainen voidaan avata.
-     */
-    try{
-
-      loadState();
-
-    }catch(err){
-
-      console.error(err);
-    }
+    cb();
 
     return;
   }
@@ -6493,6 +6665,34 @@ function waitForSupabaseClient(
 
 (async function bootstrap(){
 
+  /*
+   * KORJAUS: varmistetaan, että sivu näytetään (visibility:visible)
+   * ja render() suoritetaan AINA, riippumatta siitä onnistuuko
+   * kirjautumisen tai pilven odotus. Aiemmin sivu saattoi jäädä
+   * pysyvästi tyhjäksi, jos jokin näistä vaiheista jäi jumiin.
+   */
+
+  let renderedOnce=false;
+
+  const safetyTimer=setTimeout(()=>{
+
+    if(!renderedOnce){
+
+      console.warn(
+        "Käynnistys kesti liian kauan – näytetään lomake paikallisilla tiedoilla."
+      );
+
+      document.documentElement.style.visibility=
+        "visible";
+
+      loadState().catch(err=>{
+        console.error(err);
+      });
+    }
+
+  },12000);
+
+
   try{
 
     await new Promise(
@@ -6506,6 +6706,8 @@ function waitForSupabaseClient(
 
     await loadState();
 
+    renderedOnce=true;
+
   }catch(err){
 
     console.error(
@@ -6515,10 +6717,27 @@ function waitForSupabaseClient(
 
 
     toast(
-      "Lomakkeen käynnistys epäonnistui."
+      "Lomakkeen käynnistys epäonnistui, näytetään mitä saatiin ladattua."
     );
 
+    /*
+     * Varmistetaan, että näkymä ei jää tyhjäksi vaikka
+     * käynnistys epäonnistuisi.
+     */
+    try{
+
+      render();
+
+    }catch(renderErr){
+
+      console.error(renderErr);
+    }
+
+    renderedOnce=true;
+
   }finally{
+
+    clearTimeout(safetyTimer);
 
     /*
      * Auth-gate voi hallita tätä myös itse.
