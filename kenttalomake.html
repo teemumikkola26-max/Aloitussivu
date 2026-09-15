@@ -4206,7 +4206,7 @@ async function exportWord(){
             cx,
             cy,
             imgDocPrCounter++,
-            "left"
+            "center"
           )
         );
 
@@ -4221,7 +4221,7 @@ async function exportWord(){
               p.caption.trim(),
               {
                 italic:true,
-                align:"left",
+                align:"center",
                 font:s.fonts.body,
                 sz:engine.pt2hp(
                   Math.max(
@@ -6203,6 +6203,395 @@ async function openMarkerEditor(entry){
    PDF-VIENTI MERKINNÖILLÄ
    ============================================================ */
 
+/*
+ * KORJAUS/UUSI OMINAISUUS: pohjakuvan merkinnät viedään nyt oikeina
+ * PDF-annotaatioina (Circle/FreeText/Line + Popup) eikä sivun sisältöön
+ * "poltettuna" grafiikkana. Tämä mahdollistaa merkintöjen jälkikäteisen
+ * siirtämisen, muokkaamisen ja poistamisen esim. Adobe Acrobatissa.
+ */
+
+function pdfDateString(){
+
+  const d=new Date();
+
+  const p=n=>String(n).padStart(2,"0");
+
+  return (
+    "D:"+
+    d.getFullYear()+
+    p(d.getMonth()+1)+
+    p(d.getDate())+
+    p(d.getHours())+
+    p(d.getMinutes())+
+    p(d.getSeconds())
+  );
+}
+
+
+function pdfAddAnnotToPage(context,page,ref){
+
+  const PDFName=PDFLib.PDFName;
+  const PDFArray=PDFLib.PDFArray;
+
+  let annots=
+    page.node.lookupMaybe(
+      PDFName.of("Annots"),
+      PDFArray
+    );
+
+  if(!annots){
+
+    annots=context.obj([]);
+
+    page.node.set(
+      PDFName.of("Annots"),
+      annots
+    );
+  }
+
+  annots.push(ref);
+}
+
+
+/*
+ * Piirtää täytetyn + ääriviivallisen ympyrän polkuna (Bezier-approksimaatio)
+ * annotaation appearance streamiin (AP/N). Koordinaatit ovat lomakkeen
+ * omassa, paikallisessa (0,0)-(size,size) -koordinaatistossa.
+ */
+function pdfCircleAppearanceOps(size,radius,fillCol,borderW){
+
+  const cx=size/2;
+  const cy=size/2;
+  const k=0.5523;
+
+  return [
+    "q",
+    `${fillCol.r.toFixed(3)} ${fillCol.g.toFixed(3)} ${fillCol.b.toFixed(3)} rg`,
+    "1 1 1 RG",
+    `${borderW} w`,
+    `${(cx+radius).toFixed(2)} ${cy.toFixed(2)} m`,
+    `${(cx+radius).toFixed(2)} ${(cy+radius*k).toFixed(2)} ${(cx+radius*k).toFixed(2)} ${(cy+radius).toFixed(2)} ${cx.toFixed(2)} ${(cy+radius).toFixed(2)} c`,
+    `${(cx-radius*k).toFixed(2)} ${(cy+radius).toFixed(2)} ${(cx-radius).toFixed(2)} ${(cy+radius*k).toFixed(2)} ${(cx-radius).toFixed(2)} ${cy.toFixed(2)} c`,
+    `${(cx-radius).toFixed(2)} ${(cy-radius*k).toFixed(2)} ${(cx-radius*k).toFixed(2)} ${(cy-radius).toFixed(2)} ${cx.toFixed(2)} ${(cy-radius).toFixed(2)} c`,
+    `${(cx+radius*k).toFixed(2)} ${(cy-radius).toFixed(2)} ${(cx+radius).toFixed(2)} ${(cy-radius*k).toFixed(2)} ${(cx+radius).toFixed(2)} ${cy.toFixed(2)} c`,
+    "b",
+    "Q"
+  ].join("\n");
+}
+
+
+/*
+ * Lisää sijaintimerkinnän ympyrän Circle-annotaationa (aidosti muokattava
+ * Acrobatissa) + siihen liitetyn Popup-annotaation, jonka Contents-kenttä
+ * kertoo mihin menetelmään merkintä liittyy.
+ */
+function pdfAddCircleMarker(pdfDoc,page,opts){
+
+  const context=pdfDoc.context;
+  const PDFName=PDFLib.PDFName;
+  const PDFString=PDFLib.PDFString;
+
+  const borderW=1.6;
+  const pad=borderW+2;
+  const size=2*(opts.radius+pad);
+
+  const ops=
+    pdfCircleAppearanceOps(
+      size,
+      opts.radius,
+      opts.color,
+      borderW
+    );
+
+  const apRef=
+    context.register(
+      context.stream(ops,{
+        Type:"XObject",
+        Subtype:"Form",
+        FormType:1,
+        BBox:[0,0,size,size],
+        Matrix:[1,0,0,1,0,0],
+        Resources:{}
+      })
+    );
+
+  const rect=[
+    opts.x-size/2,
+    opts.y-size/2,
+    opts.x+size/2,
+    opts.y+size/2
+  ];
+
+  const annotDict=
+    context.obj({
+      Type:"Annot",
+      Subtype:"Circle",
+      Rect:rect,
+      C:[1,1,1],
+      IC:[opts.color.r,opts.color.g,opts.color.b],
+      CA:1,
+      BS:{W:borderW},
+      F:4,
+      Contents:PDFString.of(opts.contents||""),
+      T:PDFString.of("Kenttälomake"),
+      M:PDFString.of(pdfDateString()),
+      NM:PDFString.of(opts.nameId),
+      AP:{N:apRef}
+    });
+
+  const ref=
+    context.register(annotDict);
+
+  pdfAddAnnotToPage(context,page,ref);
+
+
+  /*
+   * Popup-annotaatio helpottaa merkinnän tietojen lukemista
+   * Acrobatin kommenttipaneelista.
+   */
+  const popupDict=
+    context.obj({
+      Type:"Annot",
+      Subtype:"Popup",
+      Rect:[
+        rect[2]+10,
+        rect[1],
+        rect[2]+220,
+        rect[1]+90
+      ],
+      Parent:ref,
+      Open:false
+    });
+
+  const popupRef=
+    context.register(popupDict);
+
+  pdfAddAnnotToPage(context,page,popupRef);
+
+  annotDict.set(
+    PDFName.of("Popup"),
+    popupRef
+  );
+
+  return {rect,size};
+}
+
+
+/*
+ * Lisää vapaasti muokattavan tekstilaatikon (FreeText-annotaatio),
+ * jossa on valkoinen tausta, värillinen reunus ja tunnisteteksti.
+ * Käytetään kun käyttäjä on antanut merkinnälle oman tunnisteen.
+ */
+function pdfAddLabelBox(pdfDoc,page,font,opts){
+
+  const context=pdfDoc.context;
+  const PDFString=PDFLib.PDFString;
+
+  const fs=9;
+  const boxPad=4;
+
+  const encoded=
+    font.encodeText(opts.text);
+
+  const tw=
+    font.widthOfTextAtSize(
+      opts.text,
+      fs
+    );
+
+  const boxW=tw+boxPad*2;
+  const boxH=fs+boxPad*2;
+
+  const ops=[
+    "q",
+    "1 1 1 rg",
+    `0 0 ${boxW.toFixed(2)} ${boxH.toFixed(2)} re`,
+    "f",
+    `${opts.color.r.toFixed(3)} ${opts.color.g.toFixed(3)} ${opts.color.b.toFixed(3)} RG`,
+    "1.2 w",
+    `0.6 0.6 ${(boxW-1.2).toFixed(2)} ${(boxH-1.2).toFixed(2)} re`,
+    "S",
+    "BT",
+    `/F1 ${fs} Tf`,
+    "0.12 0.12 0.12 rg",
+    `${boxPad.toFixed(2)} ${(boxPad-1).toFixed(2)} Td`,
+    `${encoded.toString()} Tj`,
+    "ET",
+    "Q"
+  ].join("\n");
+
+  const apRef=
+    context.register(
+      context.stream(ops,{
+        Type:"XObject",
+        Subtype:"Form",
+        FormType:1,
+        BBox:[0,0,boxW,boxH],
+        Matrix:[1,0,0,1,0,0],
+        Resources:{Font:{F1:font.ref}}
+      })
+    );
+
+  const rect=[
+    opts.x,
+    opts.y,
+    opts.x+boxW,
+    opts.y+boxH
+  ];
+
+  const annotDict=
+    context.obj({
+      Type:"Annot",
+      Subtype:"FreeText",
+      Rect:rect,
+      Contents:PDFString.of(opts.text),
+      DA:PDFString.of(
+        "0.12 0.12 0.12 rg /Helv "+fs+" Tf"
+      ),
+      C:[opts.color.r,opts.color.g,opts.color.b],
+      CA:1,
+      F:4,
+      NM:PDFString.of(opts.nameId),
+      AP:{N:apRef}
+    });
+
+  pdfAddAnnotToPage(
+    context,
+    page,
+    context.register(annotDict)
+  );
+
+  return {boxW,boxH};
+}
+
+
+/*
+ * Numeroitu merkintä (kun tunnistetta ei ole annettu): valkoinen
+ * lihavoitu numero ympyrän päällä, ilman taustaa/reunusta. Myös tämä
+ * on FreeText-annotaatio, joten se pysyy erikseen muokattavana.
+ */
+function pdfAddNumberOverlay(pdfDoc,page,font,opts){
+
+  const context=pdfDoc.context;
+  const PDFString=PDFLib.PDFString;
+
+  const fs=11;
+
+  const encoded=
+    font.encodeText(opts.text);
+
+  const tw=
+    font.widthOfTextAtSize(
+      opts.text,
+      fs
+    );
+
+  const boxW=tw+2;
+  const boxH=fs+2;
+
+  const ops=
+    `BT\n/F1 ${fs} Tf\n1 1 1 rg\n1 1 Td\n${encoded.toString()} Tj\nET`;
+
+  const apRef=
+    context.register(
+      context.stream(ops,{
+        Type:"XObject",
+        Subtype:"Form",
+        FormType:1,
+        BBox:[0,0,boxW,boxH],
+        Matrix:[1,0,0,1,0,0],
+        Resources:{Font:{F1:font.ref}}
+      })
+    );
+
+  const rect=[
+    opts.x-boxW/2,
+    opts.y-boxH/2,
+    opts.x+boxW/2,
+    opts.y+boxH/2
+  ];
+
+  const annotDict=
+    context.obj({
+      Type:"Annot",
+      Subtype:"FreeText",
+      Rect:rect,
+      Contents:PDFString.of(opts.text),
+      DA:PDFString.of(
+        "1 1 1 rg /Helv "+fs+" Tf"
+      ),
+      CA:1,
+      F:4,
+      NM:PDFString.of(opts.nameId),
+      AP:{N:apRef}
+    });
+
+  pdfAddAnnotToPage(
+    context,
+    page,
+    context.register(annotDict)
+  );
+}
+
+
+/*
+ * Yhdysviiva ympyrän reunasta tunnistelaatikkoon, myös omana
+ * Line-annotaationaan (muokattava/siirrettävä erikseen).
+ */
+function pdfAddConnectorLine(pdfDoc,page,opts){
+
+  const context=pdfDoc.context;
+  const PDFString=PDFLib.PDFString;
+
+  const lpad=2;
+
+  const minX=Math.min(opts.x1,opts.x2)-lpad;
+  const maxX=Math.max(opts.x1,opts.x2)+lpad;
+  const minY=Math.min(opts.y1,opts.y2)-lpad;
+  const maxY=Math.max(opts.y1,opts.y2)+lpad;
+
+  const ops=[
+    "q",
+    `${opts.color.r.toFixed(3)} ${opts.color.g.toFixed(3)} ${opts.color.b.toFixed(3)} RG`,
+    "1.2 w",
+    `${(opts.x1-minX).toFixed(2)} ${(opts.y1-minY).toFixed(2)} m`,
+    `${(opts.x2-minX).toFixed(2)} ${(opts.y2-minY).toFixed(2)} l`,
+    "S",
+    "Q"
+  ].join("\n");
+
+  const apRef=
+    context.register(
+      context.stream(ops,{
+        Type:"XObject",
+        Subtype:"Form",
+        FormType:1,
+        BBox:[0,0,maxX-minX,maxY-minY],
+        Matrix:[1,0,0,1,0,0],
+        Resources:{}
+      })
+    );
+
+  const annotDict=
+    context.obj({
+      Type:"Annot",
+      Subtype:"Line",
+      Rect:[minX,minY,maxX,maxY],
+      L:[opts.x1,opts.y1,opts.x2,opts.y2],
+      C:[opts.color.r,opts.color.g,opts.color.b],
+      F:4,
+      NM:PDFString.of(opts.nameId),
+      AP:{N:apRef}
+    });
+
+  pdfAddAnnotToPage(
+    context,
+    page,
+    context.register(annotDict)
+  );
+}
+
+
 function hexToRgb01(hex){
 
   hex=
@@ -6271,7 +6660,6 @@ async function exportFloorPlanPdf(){
 
     const {
       PDFDocument,
-      rgb,
       StandardFonts
     }=
       PDFLib;
@@ -6299,6 +6687,13 @@ async function exportFloorPlanPdf(){
       );
 
 
+    /*
+     * KORJAUS/UUSI OMINAISUUS: merkinnät lisätään nyt oikeina
+     * PDF-annotaatioina (Circle/FreeText/Line + Popup), jotka Adobe
+     * Acrobat (ja muut annotaatioita tukevat PDF-työkalut) tunnistaa
+     * erillisiksi, siirrettäviksi, muokattaviksi ja poistettaviksi
+     * kommenttiobjekteiksi — ei enää sivun sisältöön poltettua grafiikkaa.
+     */
     pages.forEach(
       (page,pIdx)=>{
 
@@ -6351,31 +6746,21 @@ async function exportFloorPlanPdf(){
               );
 
 
-            const color=
-              rgb(
-                col.r,
-                col.g,
-                col.b
+            const m=
+              METHODS.find(
+                mm=>mm.id===e.methodId
               );
 
 
-            page.drawCircle({
+            const methodName=
+              m ? m.name : "Menetelmä";
 
-              x,
-              y,
-              size:r,
 
-              color,
-
-              borderColor:
-                rgb(
-                  1,
-                  1,
-                  1
-                ),
-
-              borderWidth:1.6
-            });
+            const placeTxt=
+              (
+                e.values &&
+                e.values.paikka
+              ) || "";
 
 
             const customLabel=
@@ -6385,142 +6770,90 @@ async function exportFloorPlanPdf(){
               ).trim();
 
 
+            const contentsInfo=
+              `Menetelmä ${idx+1}: ${methodName}`+
+              (placeTxt?` - ${placeTxt}`:"")+
+              (customLabel?` (tunniste ${customLabel})`:"");
+
+
+            const idBase=
+              (e.id||("entry"+idx))+
+              "-p"+pIdx;
+
+
+            const circleInfo=
+              pdfAddCircleMarker(
+                pdfDoc,
+                page,
+                {
+                  x,
+                  y,
+                  radius:r,
+                  color:col,
+                  contents:contentsInfo,
+                  nameId:idBase+"-circle"
+                }
+              );
+
+
             if(customLabel){
-
-              const fs=9;
-              const pad=4;
-
-
-              const tw=
-                font.widthOfTextAtSize(
-                  customLabel,
-                  fs
-                );
-
-
-              const boxW=
-                tw+
-                pad*2;
-
-
-              const boxH=
-                fs+
-                pad*2;
-
 
               const bx=
                 x+
                 r+
                 7;
 
+              /*
+               * Tekstilaatikon korkeus (fonttikoko 9 + pehmuste 4x2=8)
+               * lasketaan etukäteen, jotta laatikko voidaan keskittää
+               * pystysuunnassa ympyrän kanssa ennen sen luomista.
+               */
+              const labelBoxH=
+                9+4*2;
 
               const by=
                 y-
-                boxH/2;
+                labelBoxH/2;
 
 
-              page.drawLine({
-
-                start:{
-                  x:x+r*.6,
-                  y
-                },
-
-                end:{
-                  x:bx,
-                  y
-                },
-
-                thickness:1.2,
-
-                color
-              });
-
-
-              page.drawRectangle({
-
-                x:bx,
-                y:by,
-
-                width:boxW,
-                height:boxH,
-
-                color:
-                  rgb(
-                    1,
-                    1,
-                    1
-                  ),
-
-                borderColor:color,
-
-                borderWidth:1.2
-              });
-
-
-              page.drawText(
-                customLabel,
+              pdfAddLabelBox(
+                pdfDoc,
+                page,
+                font,
                 {
-                  x:bx+pad,
+                  x:bx,
+                  y:by,
+                  text:customLabel,
+                  color:col,
+                  nameId:idBase+"-label"
+                }
+              );
 
-                  y:
-                    by+
-                    pad-
-                    1,
 
-                  size:fs,
-
-                  font,
-
-                  color:
-                    rgb(
-                      .12,
-                      .12,
-                      .12
-                    )
+              pdfAddConnectorLine(
+                pdfDoc,
+                page,
+                {
+                  x1:x+r*.6,
+                  y1:y,
+                  x2:bx,
+                  y2:y,
+                  color:col,
+                  nameId:idBase+"-line"
                 }
               );
 
             }else{
 
-              const label=
-                String(
-                  idx+1
-                );
-
-
-              const fs=11;
-
-
-              const tw=
-                font.widthOfTextAtSize(
-                  label,
-                  fs
-                );
-
-
-              page.drawText(
-                label,
+              pdfAddNumberOverlay(
+                pdfDoc,
+                page,
+                font,
                 {
-
-                  x:
-                    x-
-                    tw/2,
-
-                  y:
-                    y-
-                    fs*.36,
-
-                  size:fs,
-
-                  font,
-
-                  color:
-                    rgb(
-                      1,
-                      1,
-                      1
-                    )
+                  x,
+                  y,
+                  text:String(idx+1),
+                  nameId:idBase+"-num"
                 }
               );
             }
