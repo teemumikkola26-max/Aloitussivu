@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<style>html{visibility:hidden}</style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.4"></script>
+<script src="auth-gate.js" defer></script>
+<title>Lomakkeiden siirto</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+  .status-line{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid var(--line);}
+  .status-line:last-child{border-bottom:none;}
+  .status-pill{font-size:.78rem;padding:3px 10px;border-radius:99px;font-weight:600;}
+  .status-pill.missing{background:#f7e9dc;color:var(--note);}
+  .status-pill.done{background:var(--ok-bg);color:var(--ok);}
+  .log{font-size:.82rem;color:var(--ink-soft);white-space:pre-wrap;margin-top:10px;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:10px 12px;max-height:260px;overflow:auto;}
+  a.result-link{display:block;margin-top:4px;font-size:.85rem;}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <a href="index.html" style="color:#c9cfd8;font-size:.78rem;text-decoration:none;display:inline-block;margin-bottom:4px;">← Omat lomakkeet</a>
+  <h1>Lomakkeiden siirto</h1>
+  <div class="sub">Kertakäyttöinen työkalu: tuo Kuntoarvio ja Kuntotarkastus dynaamiseen lomakemoottoriin</div>
+</header>
+
+<div class="wrap">
+
+  <section class="card">
+    <h2>Mitä tämä tekee</h2>
+    <div class="hint">
+      Tämä työkalu lisää kaksi valmiiksi rakennettua lomakepohjaa
+      (Kiinteistön kuntoarvio ja Asuntokaupan kuntotarkastus)
+      <code>forms</code>-tauluun, jotta niitä voi käyttää yleiskäyttöisen
+      lomakemoottorin (<code>form.html</code>) kautta samalla tavalla kuin
+      editorilla luotuja lomakkeita. Kenttien tunnisteet on säilytetty
+      täysin samoina kuin vanhoissa <code>kuntoarvio.html</code>/
+      <code>kuntotarkastus.html</code> -sivuilla, joten aiemmin
+      tallennetut, vielä keskeneräiset lomaketäytöt avautuvat ja näyttävät
+      vastaukset oikein myös uuden moottorin kautta.
+      <br><br>
+      Työkalun voi ajaa turvallisesti useamman kerran — jo tuotu lomake
+      ei tuoda uudelleen.
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Tila</h2>
+    <div id="statusList">
+      <div class="status-line"><span>Tarkistetaan…</span></div>
+    </div>
+    <button class="btn btn-primary btn-block" id="btnImport" style="margin-top:14px;" disabled>
+      Tuo puuttuvat lomakkeet
+    </button>
+  </section>
+
+  <section class="card" id="logCard" style="display:none;">
+    <h2>Loki</h2>
+    <div class="log" id="log"></div>
+  </section>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+
+const KA_DEF = {"meta": {"title": "Kiinteistön kuntoarvio", "tag": "RT 103002/103003", "desc": "Kenttälomake — RT 103002/103003 -suoritusohjeen ja kuntoluokituksen (RT 18-11061) mukainen arviointi", "icon": "🏢", "legacySlug": "kuntoarvio"}, "statusScheme": [{"id": "st_kl5", "value": "kl5", "label": "KL 5 – Uusi", "color": "#2F6F4E", "desc": "Ei toimenpiteitä seuraavien 10 vuoden aikana", "isDefault": false, "attention": false}, {"id": "st_kl4", "value": "kl4", "label": "KL 4 – Hyvä", "color": "#5C7A3A", "desc": "Kevyt huoltokorjaus 6–10 vuoden kuluessa", "isDefault": false, "attention": false}, {"id": "st_kl3", "value": "kl3", "label": "KL 3 – Tyydyttävä", "color": "#A1861E", "desc": "Kevyt huoltokorjaus 1–5 v tai peruskorjaus 6–10 v kuluessa", "isDefault": false, "attention": false}, {"id": "st_kl2", "value": "kl2", "label": "KL 2 – Välttävä", "color": "#A15A1E", "desc": "Peruskorjaus 1–5 v tai uusiminen 6–10 v kuluessa", "isDefault": false, "attention": true}, {"id": "st_kl1", "value": "kl1", "label": "KL 1 – Heikko", "color": "#A13030", "desc": "Uusiminen 1–5 vuoden kuluessa", "isDefault": false, "attention": true}, {"id": "st_unchecked", "value": "unchecked", "label": "Ei arvioitu", "color": "#8C8676", "desc": "", "isDefault": true, "attention": false}], "headerFields": [{"id": "osoite", "label": "Kiinteistön nimi ja osoite", "type": "text", "full": true}, {"id": "rtype", "label": "Rakennustyyppi", "type": "text"}, {"id": "vuosi", "label": "Rakennusvuosi", "type": "text"}, {"id": "laajuus", "label": "Laajuus (kerrosala/huoneistot)", "type": "text"}, {"id": "tilaaja", "label": "Tilaaja (esim. taloyhtiö)", "type": "text"}, {"id": "tarkastaja", "label": "Kuntoarvioijat", "type": "text"}, {"id": "pvm", "label": "Kiinteistötarkastuksen päivä", "type": "date"}, {"id": "saa", "label": "Sääolosuhteet", "type": "text"}, {"id": "lasna", "label": "Läsnäolijat (isännöitsijä, huolto ym.)", "type": "text", "full": true}, {"id": "lisatiedot", "label": "Muita esitietoja / käyttäjäkyselyn ja haastattelun havaintoja", "type": "textarea", "full": true}], "sections": [{"id": "s1", "title": "Yleistiedot ja lähtötiedot", "fields": [{"id": "i0", "type": "checklist", "label": "Kiinteistön perustiedot (rakennusvuosi, laajuus, huoneistomäärä, rakennustyyppi)", "allowPhoto": false}, {"id": "i1", "type": "checklist", "label": "Käytettävissä olleet asiakirjat (pohjapiirustukset, rakennepiirustukset, huoltokirja, aiemmat kuntoarviot/-tutkimukset)", "allowPhoto": false}, {"id": "i2", "type": "checklist", "label": "Korjaushistoria (linjasaneeraukset, julkisivu-, katto- ja ikkunaremontit ym.)", "allowPhoto": false}, {"id": "i3", "type": "checklist", "label": "Käyttäjäkyselyn/asukaskyselyn tulokset tai kyselyn toteutus", "allowPhoto": false}, {"id": "i4", "type": "checklist", "label": "Isännöitsijän/huoltoyhtiön haastattelu (havaitut ongelmat, toistuvat vikailmoitukset)", "allowPhoto": false}, {"id": "i5", "type": "checklist", "label": "Sääolosuhteet ja vuodenaika", "allowPhoto": false}, {"id": "i6", "type": "checklist", "label": "Kiinteistötarkastuksen laajuus ja rajaukset (mihin tiloihin/rakenteisiin päästiin)", "allowPhoto": false}]}, {"id": "s2", "title": "Piha-alueet ja aluerakenteet", "fields": [{"id": "i0", "type": "checklist", "label": "Kulkuväylien, pysäköintialueiden ja piha-kansien pintakunto ja kallistukset", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i1", "type": "checklist", "label": "Aitojen, tukimuurien ja portaiden kunto", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i2", "type": "checklist", "label": "Leikki- ja oleskelualueiden sekä -välineiden kunto ja turvallisuus", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i3", "type": "checklist", "label": "Ulkovalaistuksen kattavuus ja kunto", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i4", "type": "checklist", "label": "Jätehuollon tilat ja järjestelyt", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i5", "type": "checklist", "label": "Sadevesijärjestelmän toimivuus ja purkupaikat", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i6", "type": "checklist", "label": "Salaojajärjestelmän olemassaolo, ikä ja tarkastuskaivojen kunto", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i7", "type": "checklist", "label": "Istutusten ja kasvillisuuden sijainti suhteessa rakennuksen vaippaan", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}]}, {"id": "s3", "title": "Rakennuksen ulkopuoliset osat", "fields": [{"id": "i0", "type": "checklist", "label": "Julkisivumateriaalien ja -pintojen yleiskunto rakennuksittain", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i1", "type": "checklist", "label": "Julkisivujen halkeamat, maalipinnan hilseily tai muu vaurioituminen", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i2", "type": "checklist", "label": "Ikkunoiden ja ulko-ovien ikä, tyyppi ja yleiskunto", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i3", "type": "checklist", "label": "Parvekkeiden, terassien ja katosten rakenteellinen kunto ja vedeneristys", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i4", "type": "checklist", "label": "Räystäiden, pellitysten ja sadevesijärjestelmän kunto", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i5", "type": "checklist", "label": "Vesikatteen materiaali, ikä ja yleiskunto", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i6", "type": "checklist", "label": "Vesikaton läpivientien, saumojen ja liittymien tiiveys", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}]}, {"id": "s4", "title": "Kantavat rakenteet ja rakennustekniikka", "fields": [{"id": "i0", "type": "checklist", "label": "Perustamistapa ja perustusten yleiskunto", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i1", "type": "checklist", "label": "Sokkelin halkeamat, painumat ja kosteustekninen liitos maanpintaan", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i2", "type": "checklist", "label": "Alapohjarakenteen tyyppi ja kunto (maanvarainen/ryömintätila/kellari)", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i3", "type": "checklist", "label": "Ryömintätilan tuuletus, kosteus ja puhtaus (jos päästään tarkastamaan)", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i4", "type": "checklist", "label": "Kantavan rungon silmämääräinen kunto", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i5", "type": "checklist", "label": "Yläpohjan lämmöneristyksen kunto, paksuus ja tuuletus", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i6", "type": "checklist", "label": "Valesokkeli- tai muun ikäkaudelle tyypillisen riskirakenteen mahdollisuus arvioitu", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}]}, {"id": "s5", "title": "Yleiset sisätilat", "fields": [{"id": "i0", "type": "checklist", "label": "Porrashuoneiden ja käytävien yleiskunto sekä pintamateriaalit", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i1", "type": "checklist", "label": "Kellari- ja varastotilojen kunto, kosteus ja tuuletus", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i2", "type": "checklist", "label": "Väestönsuojan kunto ja varusteet (jos on)", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i3", "type": "checklist", "label": "Teknisten tilojen (lämmönjako, IV-konehuone) yleiskunto ja siisteys", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i4", "type": "checklist", "label": "Yhteisten saunatilojen ja pesuhuoneiden kunto", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i5", "type": "checklist", "label": "Kulunvalvonnan ja ovipuhelinjärjestelmän toimivuus", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}]}, {"id": "s6", "title": "Huonetilat (pistokoetarkastelu asunnoista)", "fields": [{"id": "i0", "type": "checklist", "label": "Otanta tarkastettavista huoneistoista sovittu ja kirjattu", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i1", "type": "checklist", "label": "Pintamateriaalien yleiskunto tarkastelluissa huoneistoissa", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i2", "type": "checklist", "label": "Kosteus- tai valumajälkiä katoissa, seinissä tai lattioissa", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i3", "type": "checklist", "label": "Märkätilojen vedeneristyksen ikä ja pintakosteusmittaukset tarkastelluissa huoneistoissa", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i4", "type": "checklist", "label": "Asukkailta saadut havainnot yksittäisistä ongelmakohdista", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}]}, {"id": "s7", "title": "Lämmitysjärjestelmä", "fields": [{"id": "i0", "type": "checklist", "label": "Lämmitysmuoto, -laitteisto ja arvioitu ikä", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i1", "type": "checklist", "label": "Lämmönjakokeskuksen/-huoneen yleiskunto", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i2", "type": "checklist", "label": "Patteriverkoston ja säätölaitteiden toimivuus", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i3", "type": "checklist", "label": "Lämmönjaon tasapainotus ja huoltohistoria", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i4", "type": "checklist", "label": "Energiatehokkuuteen liittyvät havainnot (esim. säätöautomaation ikä)", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}]}, {"id": "s8", "title": "Vesi- ja viemärijärjestelmät", "fields": [{"id": "i0", "type": "checklist", "label": "Käyttövesiputkiston materiaali, ikä ja kunto", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i1", "type": "checklist", "label": "Viemäriputkiston materiaali, ikä ja kunto", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i2", "type": "checklist", "label": "Aiemmat linjasaneeraukset tai osauusinnat selvitetty", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i3", "type": "checklist", "label": "Vesikalusteiden ja hanojen yleiskunto sekä tunnetut vuodot", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i4", "type": "checklist", "label": "Putkistojen kuntotutkimustarve arvioitu", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}]}, {"id": "s9", "title": "Ilmanvaihtojärjestelmä", "fields": [{"id": "i0", "type": "checklist", "label": "Ilmanvaihdon tyyppi (painovoimainen/koneellinen tulo-poisto) ja ikä", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i1", "type": "checklist", "label": "IV-konehuoneen ja laitteiston yleiskunto", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i2", "type": "checklist", "label": "Kanavien, venttiilien ja päätelaitteiden puhtaus ja toimivuus", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i3", "type": "checklist", "label": "Ilmanvaihdon huoltohistoria ja säätöjen ajantasaisuus", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i4", "type": "checklist", "label": "Sisäilman laatuun viittaavat havainnot ilmanvaihdon toiminnassa", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}]}, {"id": "s10", "title": "Sähkö- ja tietojärjestelmät", "fields": [{"id": "i0", "type": "checklist", "label": "Pääkeskuksen ja nousujohtojen ikä ja yleiskunto", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i1", "type": "checklist", "label": "Ryhmäkeskusten ja johdotustyypin ikä huoneistoissa (esim. alumiini-/kuparijohdot)", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i2", "type": "checklist", "label": "Vikavirtasuojien kattavuus", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i3", "type": "checklist", "label": "Antenni-, tietoliikenne- ja turvajärjestelmien kunto", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i4", "type": "checklist", "label": "Ulkovalaistuksen ja -pistorasioiden kunto", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i5", "type": "checklist", "label": "Sähköjärjestelmän kuntotutkimustarve arvioitu", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}]}, {"id": "s11", "title": "Hissit (jos on)", "fields": [{"id": "i0", "type": "checklist", "label": "Hissien lukumäärä, ikä ja käyttötarkoitus", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i1", "type": "checklist", "label": "Hissien viimeisin määräaikaistarkastus ja sen huomautukset", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i2", "type": "checklist", "label": "Hissikorin ja -konehuoneen yleiskunto", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i3", "type": "checklist", "label": "Esteettömyys ja saavutettavuus (kynnykset, kutsupainikkeet, ovileveys)", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}]}, {"id": "s12", "title": "Paloturvallisuus ja poistumistiet", "fields": [{"id": "i0", "type": "checklist", "label": "Poistumisteiden merkinnät, esteettömyys ja valaistus", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i1", "type": "checklist", "label": "Palo-ovien ja osastoivien rakenteiden kunto", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i2", "type": "checklist", "label": "Alkusammutuskaluston ja palovaroitinjärjestelmän olemassaolo", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i3", "type": "checklist", "label": "Pelastustien merkintä ja käytettävyys", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i4", "type": "checklist", "label": "Viimeisimmän palotarkastuksen huomautukset selvitetty", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}]}, {"id": "s13", "title": "Sisäolosuhteet, turvallisuus ja terveellisyys", "fields": [{"id": "i0", "type": "checklist", "label": "Sisäilman laatuun viittaavat havainnot ja asukaspalaute käyty läpi", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i1", "type": "checklist", "label": "Kosteusvaurioepäilyt ja niiden laajuuden alustava arviointi", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i2", "type": "checklist", "label": "Radonhavainnot tai -mittaustieto selvitetty, jos saatavilla", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i3", "type": "checklist", "label": "Epäily haitta-aineista (esim. asbesti, PAH-yhdisteet) kirjattu, jos aihetta", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}, {"id": "i4", "type": "checklist", "label": "Putoamissuojauksen ja yleisen turvallisuuden havainnot yhteisissä tiloissa ja pihalla", "allowPhoto": true, "allowAction": true, "actionLabel": "PTS-suositus (toimenpide ja ajoitus)"}]}]};
+const KT_DEF = {"meta": {"title": "Asuntokaupan kuntotarkastus", "tag": "RT 103996 / KH 90-00394", "desc": "Kenttälomake — RT 103996 (KH 90-00394) -suoritusohjeen mukainen tarkistus", "icon": "🔍", "legacySlug": "kuntotarkastus"}, "statusScheme": [{"id": "st_ok", "value": "ok", "label": "Kunnossa", "color": "#2F6F4E", "desc": "", "isDefault": false, "attention": false}, {"id": "st_note", "value": "note", "label": "Huomautettavaa", "color": "#A15A1E", "desc": "", "isDefault": false, "attention": true}, {"id": "st_skip", "value": "skip", "label": "Ei koske", "color": "#7A7566", "desc": "", "isDefault": false, "attention": false}, {"id": "st_unchecked", "value": "unchecked", "label": "Ei tarkastettu", "color": "#8C8676", "desc": "", "isDefault": true, "attention": false}], "headerFields": [{"id": "osoite", "label": "Kohteen osoite", "type": "text", "full": true}, {"id": "rtype", "label": "Rakennustyyppi", "type": "text"}, {"id": "vuosi", "label": "Rakennusvuosi", "type": "text"}, {"id": "tilaaja", "label": "Tilaaja", "type": "text"}, {"id": "tarkastaja", "label": "Tarkastaja", "type": "text"}, {"id": "pvm", "label": "Tarkastuspäivä", "type": "date"}, {"id": "saa", "label": "Sääolosuhteet", "type": "text"}, {"id": "lasna", "label": "Läsnäolijat tarkastuksessa", "type": "text", "full": true}, {"id": "lisatiedot", "label": "Muita esitietoja / haastattelun havaintoja", "type": "textarea", "full": true}], "sections": [{"id": "s1", "title": "Yleistiedot ja esitiedot", "fields": [{"id": "i0", "type": "checklist", "label": "Kohteen perustiedot (rakennusvuosi, tyyppi, kerrosala, perustamistapa)", "allowPhoto": false}, {"id": "i1", "type": "checklist", "label": "Käytettävissä olleet asiakirjat (pohjapiirustukset, rakennepiirustukset, huoltokirja, energiatodistus)", "allowPhoto": false}, {"id": "i2", "type": "checklist", "label": "Aiemmat kunto- tai kosteustutkimukset ja korjaushistoria", "allowPhoto": false}, {"id": "i3", "type": "checklist", "label": "Omistajan/käyttäjän haastattelu (havaitut ongelmat, hajut, vuodot, korjaukset)", "allowPhoto": false}, {"id": "i4", "type": "checklist", "label": "Sääolosuhteet ja vuodenaika", "allowPhoto": false}, {"id": "i5", "type": "checklist", "label": "Tarkastuksen laajuus ja rajaukset (mihin tiloihin/rakenteisiin ei päästy)", "allowPhoto": false}]}, {"id": "s2", "title": "Piha-alue, vierusta, sadevedet ja salaojat", "fields": [{"id": "i0", "type": "checklist", "label": "Maanpinnan kallistus rakennuksesta poispäin kaikilla sivuilla", "allowPhoto": true}, {"id": "i1", "type": "checklist", "label": "Kasvillisuus, multapenkit tai rakennelmat sokkelin vieressä", "allowPhoto": true}, {"id": "i2", "type": "checklist", "label": "Sadevesikourut ja syöksytorvet olemassa ja ehjät", "allowPhoto": true}, {"id": "i3", "type": "checklist", "label": "Sadevesien poisjohtaminen rakennuksesta (ei valu sokkelin viereen)", "allowPhoto": true}, {"id": "i4", "type": "checklist", "label": "Salaojien olemassaolo ja arvioitu ikä selvitetty", "allowPhoto": true}, {"id": "i5", "type": "checklist", "label": "Salaojien tarkastuskaivot löytyvät ja avattavissa", "allowPhoto": true}, {"id": "i6", "type": "checklist", "label": "Salaojien toimivuus tarkastettu (esim. vettä laskemalla)", "allowPhoto": true}, {"id": "i7", "type": "checklist", "label": "Salaojien purkupaikka selvitetty", "allowPhoto": true}, {"id": "i8", "type": "checklist", "label": "Kulkuväylien ja pihakannen kallistukset rakennuksen suhteen", "allowPhoto": true}]}, {"id": "s3", "title": "Perustukset, sokkeli, alapohja ja ryömintätila", "fields": [{"id": "i0", "type": "checklist", "label": "Perustamistapa todettu (maanvarainen laatta, ryömintätila, kellari)", "allowPhoto": true}, {"id": "i1", "type": "checklist", "label": "Sokkelissa halkeamia, murtumia tai painumia", "allowPhoto": true}, {"id": "i2", "type": "checklist", "label": "Kosteuseriste / patolevy ja sen yläreunan liitos havaittavissa", "allowPhoto": true}, {"id": "i3", "type": "checklist", "label": "Valesokkelirakenteen riski arvioitu (rungon alaosan sijainti suhteessa maanpintaan)", "allowPhoto": true}, {"id": "i4", "type": "checklist", "label": "Ryömintätilan tuuletusaukot riittävät ja toimivat (jos ryömintätila)", "allowPhoto": true}, {"id": "i5", "type": "checklist", "label": "Ryömintätilan kosteus, seisova vesi tai orgaaninen aines (jos päästään tarkastamaan)", "allowPhoto": true}, {"id": "i6", "type": "checklist", "label": "Alapohjan pintakosteusmittaus tehty sisätiloista", "allowPhoto": true}, {"id": "i7", "type": "checklist", "label": "Sisäpuoliset hajuhavainnot alapohjan kohdalla", "allowPhoto": true}, {"id": "i8", "type": "checklist", "label": "Radonhavainnot tai -mittaustieto selvitetty, jos saatavilla", "allowPhoto": true}]}, {"id": "s4", "title": "Julkisivut ja ulkoseinät", "fields": [{"id": "i0", "type": "checklist", "label": "Julkisivumateriaali ja verhoustyyppi todettu", "allowPhoto": true}, {"id": "i1", "type": "checklist", "label": "Verhouksen tuuletusrako toteutunut rakenneratkaisussa", "allowPhoto": true}, {"id": "i2", "type": "checklist", "label": "Halkeamia, maalipinnan hilseilyä tai muuta vaurioitumista julkisivussa", "allowPhoto": true}, {"id": "i3", "type": "checklist", "label": "Räystäiden riittävyys ja kunto (vesien ohjaus julkisivusta poispäin)", "allowPhoto": true}, {"id": "i4", "type": "checklist", "label": "Rakenneavaus tehty riskikohtaan (jos sovittu ja mahdollista)", "allowPhoto": true}, {"id": "i5", "type": "checklist", "label": "Sisäpuoliset kosteus- tai homejäljet ulkoseinien kohdalla", "allowPhoto": true}]}, {"id": "s5", "title": "Ikkunat ja ulko-ovet", "fields": [{"id": "i0", "type": "checklist", "label": "Ikkunoiden ikä, tyyppi ja yleiskunto arvioitu", "allowPhoto": true}, {"id": "i1", "type": "checklist", "label": "Tiivisteiden ja pellitysten kunto", "allowPhoto": true}, {"id": "i2", "type": "checklist", "label": "Ulko-ovien kunto, tiiveys ja karmien liitokset", "allowPhoto": true}, {"id": "i3", "type": "checklist", "label": "Kondenssin, vedon tai lahovaurion merkkejä ikkuna-/ovirakenteissa", "allowPhoto": true}]}, {"id": "s6", "title": "Parvekkeet, terassit ja katokset", "fields": [{"id": "i0", "type": "checklist", "label": "Kaiteiden kiinnitys ja turvallisuus", "allowPhoto": true}, {"id": "i1", "type": "checklist", "label": "Vedeneristys ja kallistukset parvekelaatalla/terassilla", "allowPhoto": true}, {"id": "i2", "type": "checklist", "label": "Rakenteen läpivientien ja liittymien tiiveys", "allowPhoto": true}, {"id": "i3", "type": "checklist", "label": "Kannatinrakenteiden ja kiinnitysten kunto", "allowPhoto": true}]}, {"id": "s7", "title": "Yläpohja ja vesikatto", "fields": [{"id": "i0", "type": "checklist", "label": "Vesikatteen materiaali, ikä ja yleiskunto", "allowPhoto": true}, {"id": "i1", "type": "checklist", "label": "Saumojen, läpivientien ja pellitysten tiiveys", "allowPhoto": true}, {"id": "i2", "type": "checklist", "label": "Räystäskourujen ja syöksytorvien kunto ja riittävyys", "allowPhoto": true}, {"id": "i3", "type": "checklist", "label": "Yläpohjan tuuletus toteutunut (harja-, räystäs- tai muu tuuletus)", "allowPhoto": true}, {"id": "i4", "type": "checklist", "label": "Lämmöneristeen kunto, paksuus ja mahdolliset painaumat", "allowPhoto": true}, {"id": "i5", "type": "checklist", "label": "Höyrynsulun kunto havaittavissa (jos päästään tarkastamaan)", "allowPhoto": true}, {"id": "i6", "type": "checklist", "label": "Vuoto-, kosteus- tai homejälkiä yläpohjan rakenteissa", "allowPhoto": true}, {"id": "i7", "type": "checklist", "label": "Kattorakenteiden kantavien osien silmämääräinen kunto", "allowPhoto": true}]}, {"id": "s8", "title": "Väliseinät ja välipohjat", "fields": [{"id": "i0", "type": "checklist", "label": "Kantavien rakenteiden silmämääräinen kunto", "allowPhoto": true}, {"id": "i1", "type": "checklist", "label": "Halkeamia rakenteissa tai pintamateriaaleissa", "allowPhoto": true}, {"id": "i2", "type": "checklist", "label": "Kosteus- tai vuotojälkiä välipohjien liitoskohdissa", "allowPhoto": true}, {"id": "i3", "type": "checklist", "label": "Askel- tai ilmaääneneristävyydestä tehdyt havainnot", "allowPhoto": true}]}, {"id": "s9", "title": "Märkätilat (kylpyhuone, sauna, kodinhoitohuone)", "fields": [{"id": "i0", "type": "checklist", "label": "Vedeneristyksen olemassaolo ja arvioitu ikä selvitetty", "allowPhoto": true}, {"id": "i1", "type": "checklist", "label": "Pintakosteusmittaus seinistä tehty", "allowPhoto": true}, {"id": "i2", "type": "checklist", "label": "Pintakosteusmittaus lattiasta tehty", "allowPhoto": true}, {"id": "i3", "type": "checklist", "label": "Lattiakaivon sijainti ja kallistukset kaivoon päin", "allowPhoto": true}, {"id": "i4", "type": "checklist", "label": "Laatoituksen ja silikonisaumojen kunto", "allowPhoto": true}, {"id": "i5", "type": "checklist", "label": "Märkätilan ilmanvaihdon toimivuus", "allowPhoto": true}, {"id": "i6", "type": "checklist", "label": "Lattialämmityksen olemassaolo ja toiminta (jos on)", "allowPhoto": true}]}, {"id": "s10", "title": "Muut sisätilat", "fields": [{"id": "i0", "type": "checklist", "label": "Huoneiden yleiskunto käyty läpi tilakohtaisesti", "allowPhoto": true}, {"id": "i1", "type": "checklist", "label": "Kosteus- tai valumajälkiä katoissa tai seinissä", "allowPhoto": true}, {"id": "i2", "type": "checklist", "label": "Lattiapinnoitteiden kunto ja mahdolliset kohoumat/halkeamat", "allowPhoto": true}, {"id": "i3", "type": "checklist", "label": "Poikkeavia hajuhavaintoja sisätiloissa", "allowPhoto": true}]}, {"id": "s11", "title": "LVI-järjestelmät", "fields": [{"id": "i0", "type": "checklist", "label": "Lämmitysjärjestelmän tyyppi ja arvioitu ikä", "allowPhoto": true}, {"id": "i1", "type": "checklist", "label": "Lämmönjakohuoneen/-laitteiston yleiskunto", "allowPhoto": true}, {"id": "i2", "type": "checklist", "label": "Käyttövesiputkiston materiaali, ikä ja kunto", "allowPhoto": true}, {"id": "i3", "type": "checklist", "label": "Viemäriputkiston materiaali, ikä ja kunto", "allowPhoto": true}, {"id": "i4", "type": "checklist", "label": "Ilmanvaihtojärjestelmän tyyppi (painovoimainen/koneellinen) ja kunto", "allowPhoto": true}, {"id": "i5", "type": "checklist", "label": "Ilmanvaihtokanavien ja venttiilien puhtaus ja toimivuus", "allowPhoto": true}, {"id": "i6", "type": "checklist", "label": "Vesikalusteiden ja hanojen yleiskunto ja mahdolliset vuodot", "allowPhoto": true}]}, {"id": "s12", "title": "Sähköjärjestelmä", "fields": [{"id": "i0", "type": "checklist", "label": "Pää- ja ryhmäkeskuksen ikä ja yleiskunto", "allowPhoto": true}, {"id": "i1", "type": "checklist", "label": "Johdotustyyppi selvitetty (jos tiedossa/nähtävissä)", "allowPhoto": true}, {"id": "i2", "type": "checklist", "label": "Vikavirtasuojien olemassaolo", "allowPhoto": true}, {"id": "i3", "type": "checklist", "label": "Pistorasioiden ja kytkinten silmämääräinen kunto", "allowPhoto": true}, {"id": "i4", "type": "checklist", "label": "Ulkovalaistuksen ja ulkopistorasioiden kunto", "allowPhoto": true}]}, {"id": "s13", "title": "Riskirakenteiden erillistarkastelu", "fields": [{"id": "i0", "type": "checklist", "label": "Valesokkelirakenteen mahdollisuus arvioitu rakennuksen ikäkauden perusteella", "allowPhoto": true}, {"id": "i1", "type": "checklist", "label": "Tasakaton tai loivan katon erityisriskit arvioitu", "allowPhoto": true}, {"id": "i2", "type": "checklist", "label": "Maanvastaisen puurakenteisen alapohjan riski arvioitu", "allowPhoto": true}, {"id": "i3", "type": "checklist", "label": "Rakennuksen ikäkaudelle tyypilliset riskirakenteet käyty läpi", "allowPhoto": true}, {"id": "i4", "type": "checklist", "label": "Kellarin maanvastaisten seinien kosteustekninen toimivuus", "allowPhoto": true}, {"id": "i5", "type": "checklist", "label": "Märkätilojen läpivientien riskit vanhoissa rakenteissa arvioitu", "allowPhoto": true}]}, {"id": "s14", "title": "Turvallisuus- ja terveyshaittariskit", "fields": [{"id": "i0", "type": "checklist", "label": "Putoamissuojaus kunnossa (kaiteet, portaat, parvekkeet)", "allowPhoto": true}, {"id": "i1", "type": "checklist", "label": "Palovaroittimien olemassaolo ja toimivuus", "allowPhoto": true}, {"id": "i2", "type": "checklist", "label": "Häkävaaran arviointi (tulisijat, hormit, ilmanvaihto)", "allowPhoto": true}, {"id": "i3", "type": "checklist", "label": "Sisäilman laatuun viittaavia havaintoja tai oireita selvitetty haastattelulla", "allowPhoto": true}, {"id": "i4", "type": "checklist", "label": "Epäily haitta-aineista (esim. asbesti) kirjattu, jos aihetta", "allowPhoto": true}]}]};
+
+let supabaseClient = null;
+
+const FORMS_TO_IMPORT = [
+  { slug: "kuntoarvio",      title: "Kiinteistön kuntoarvio",       def: null, oldPage: "kuntoarvio.html" },
+  { slug: "kuntotarkastus",  title: "Asuntokaupan kuntotarkastus",  def: null, oldPage: "kuntotarkastus.html" }
+];
+
+function toast(msg){
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  setTimeout(() => t.classList.remove("show"), 3200);
+}
+
+function log(msg){
+  const el = document.getElementById("log");
+  document.getElementById("logCard").style.display = "block";
+  el.textContent += msg + "\n";
+  el.scrollTop = el.scrollHeight;
+}
+
+function renderStatus(items){
+  const wrap = document.getElementById("statusList");
+  wrap.innerHTML = "";
+  items.forEach(it => {
+    const line = document.createElement("div");
+    line.className = "status-line";
+    const left = document.createElement("div");
+    left.innerHTML = "<strong>" + it.title + "</strong>";
+    const right = document.createElement("div");
+    if (it.existingId){
+      right.innerHTML =
+        '<span class="status-pill done">Tuotu</span>' +
+        '<a class="result-link" href="form.html?id=' + encodeURIComponent(it.existingId) + '">Avaa lomake →</a>';
+    } else {
+      right.innerHTML = '<span class="status-pill missing">Ei vielä tuotu</span>';
+    }
+    line.appendChild(left);
+    line.appendChild(right);
+    wrap.appendChild(line);
+  });
+}
+
+async function findExisting(slug){
+  const res = await supabaseClient
+    .from("forms")
+    .select("id,definition")
+    .contains("definition", { meta: { legacySlug: slug } })
+    .limit(1);
+  if (res.error){
+    log("Haku epäonnistui (" + slug + "): " + res.error.message);
+    return null;
+  }
+  return (res.data && res.data[0]) ? res.data[0].id : null;
+}
+
+async function migrateDocStyle(oldFormKey, newFormId){
+  try{
+    const existing = await supabaseClient
+      .from("doc_styles")
+      .select("style")
+      .eq("form_key", oldFormKey)
+      .maybeSingle();
+    if (existing.error){
+      log("Ulkoasun haku (" + oldFormKey + ") epäonnistui: " + existing.error.message);
+      return;
+    }
+    if (!existing.data){
+      log("Ei aiempaa mukautettua ulkoasua kohteelle " + oldFormKey + " — käytetään oletustyyliä.");
+      return;
+    }
+    const up = await supabaseClient
+      .from("doc_styles")
+      .upsert({ form_key: newFormId, style: existing.data.style }, { onConflict: "user_id,form_key" });
+    if (up.error){
+      log("Ulkoasun kopiointi epäonnistui (" + oldFormKey + "): " + up.error.message);
+    } else {
+      log("Mukautettu Word-ulkoasu kopioitu kohteesta " + oldFormKey + ".");
+    }
+  }catch(err){
+    log("Ulkoasun siirto epäonnistui (" + oldFormKey + "): " + err.message);
+  }
+}
+
+async function importForm(item){
+  log("Tuodaan: " + item.title + " …");
+  const row = {
+    title: item.def.meta.title,
+    tag: item.def.meta.tag || null,
+    description: item.def.meta.desc || null,
+    icon: item.def.meta.icon || "📋",
+    definition: item.def
+  };
+  const result = await supabaseClient.from("forms").insert(row).select().single();
+  if (result.error){
+    log("VIRHE (" + item.title + "): " + result.error.message);
+    return null;
+  }
+  log("OK: " + item.title + " → id " + result.data.id);
+  await migrateDocStyle(item.slug, result.data.id);
+  return result.data.id;
+}
+
+async function refreshStatus(){
+  for (const it of FORMS_TO_IMPORT){
+    it.existingId = await findExisting(it.slug);
+  }
+  renderStatus(FORMS_TO_IMPORT);
+  const anyMissing = FORMS_TO_IMPORT.some(it => !it.existingId);
+  document.getElementById("btnImport").disabled = !anyMissing;
+  document.getElementById("btnImport").textContent =
+    anyMissing ? "Tuo puuttuvat lomakkeet" : "Kaikki lomakkeet on jo tuotu";
+}
+
+document.getElementById("btnImport").addEventListener("click", async () => {
+  const btn = document.getElementById("btnImport");
+  btn.disabled = true;
+  const original = btn.textContent;
+  btn.textContent = "Tuodaan…";
+
+  for (const it of FORMS_TO_IMPORT){
+    if (it.existingId) continue;
+    const newId = await importForm(it);
+    if (newId) it.existingId = newId;
+  }
+
+  btn.textContent = original;
+  await refreshStatus();
+  toast("Valmis.");
+});
+
+function waitForSupabaseClient(cb, triesLeft){
+  if (typeof triesLeft !== "number") triesLeft = 100;
+  if (window.__supabaseClient) return cb(window.__supabaseClient);
+  if (triesLeft <= 0){ log("Supabase-yhteyttä ei saatu muodostettua (auth-gate.js ei latautunut)."); return; }
+  setTimeout(() => waitForSupabaseClient(cb, triesLeft - 1), 50);
+}
+
+waitForSupabaseClient(async (client) => {
+  supabaseClient = client;
+  FORMS_TO_IMPORT[0].def = KA_DEF;
+  FORMS_TO_IMPORT[1].def = KT_DEF;
+  await refreshStatus();
+});
+</script>
+
+</body>
+</html>

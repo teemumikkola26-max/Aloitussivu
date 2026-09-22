@@ -57,7 +57,7 @@ window.SubmissionSync = (function(){
         const paths = files.map(f => prefix + "/" + f.name);
         await client().storage.from("submission-photos").remove(paths);
       }
-    }catch(e){ /* ei estä rivin poistoa vaikka tiedostojen siivous epäonnistuisi */ }
+    }catch(e){ console.warn("Valokuvatiedostojen siivous epäonnistui -- rivi poistetaan silti", e); }
     const { error } = await client().from("submissions").delete().eq("id", id);
     if (error) throw error;
   }
@@ -87,7 +87,7 @@ window.SubmissionSync = (function(){
   }
 
   async function deletePhotoFile(path){
-    try{ await client().storage.from("submission-photos").remove([path]); }catch(e){}
+    try{ await client().storage.from("submission-photos").remove([path]); }catch(e){ console.warn("Yksittäisen valokuvan poisto epäonnistui", e); }
   }
 
   return {

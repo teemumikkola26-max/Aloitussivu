@@ -239,7 +239,7 @@ function buildStatusOptionRow(opt, idx){
   const row = document.createElement("div");
   row.className = "editor-row";
 
-  const labelInput = textInput(opt.label, v => { opt.label = v; opt.value = v.toLowerCase().replace(/[^a-z0-9åäö]+/g,"_") || opt.value; }, "Tilan nimi");
+  const labelInput = textInput(opt.label, v => { opt.label = v; }, "Tilan nimi");
   labelInput.style.flex = "1";
 
   const colorInput = document.createElement("input");

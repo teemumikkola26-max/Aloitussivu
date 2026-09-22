@@ -492,7 +492,7 @@ select{
    MENETELMÄT
    ============================================================ */
 
-const METHODS=[
+const DEFAULT_METHODS=[
   {
     id:"aisti",
     name:"Aistinvarainen tarkastelu",
@@ -779,6 +779,51 @@ const METHODS=[
   }
 ];
 
+/*
+ * METHODS on muokattava kopio DEFAULT_METHODS-listasta. Käyttäjä voi
+ * lisätä/muokata/poistaa menetelmiä "Muokkaa menetelmiä" -näkymässä.
+ * Muutokset tallennetaan laitekohtaisesti localStorageen (avain
+ * METHODS_STORAGE_KEY) — ne eivät tällä hetkellä synkronoidu pilveen
+ * eivätkä muille laitteille.
+ */
+const METHODS_STORAGE_KEY="kenttalomake_custom_methods_v1";
+
+let METHODS=cloneMethods(DEFAULT_METHODS);
+
+function cloneMethods(list){
+  return JSON.parse(JSON.stringify(list));
+}
+
+function genMethodId(){
+  return "m"+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+}
+
+function genFieldId(){
+  return "f"+Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+}
+
+function loadCustomMethods(){
+  try{
+    const raw=localStorage.getItem(METHODS_STORAGE_KEY);
+    if(!raw)return;
+    const custom=JSON.parse(raw);
+    if(Array.isArray(custom)&&custom.length){
+      METHODS=custom;
+    }
+  }catch(err){
+    console.warn("Menetelmien lataus localStoragesta epäonnistui",err);
+  }
+}
+
+function persistMethods(){
+  try{
+    localStorage.setItem(METHODS_STORAGE_KEY,JSON.stringify(METHODS));
+  }catch(err){
+    console.warn("Menetelmien tallennus localStorageen epäonnistui",err);
+    toast("Menetelmien tallennus epäonnistui laitteelle.");
+  }
+}
+
 const COMMON_FIELDS=[
   {
     id:"paikka",
@@ -806,6 +851,9 @@ let entries=[];
 let view="project";
 let editingEntry=null;
 let editingIsNew=false;
+
+let editingMethod=null;
+let editingMethodIsNew=false;
 
 let SUBMISSION_ID=null;
 
@@ -1986,7 +2034,9 @@ async function clearForm(){
       );
     }
 
-  }catch(err){}
+  }catch(err){
+    console.warn("kenttalomake_state-tilan poisto epäonnistui", err);
+  }
 
 
   try{
@@ -1995,7 +2045,9 @@ async function clearForm(){
       "kenttalomake_state"
     );
 
-  }catch(err){}
+  }catch(err){
+    console.warn("kenttalomake_state-tilan poisto localStoragesta epäonnistui", err);
+  }
 
 
   /*
@@ -2216,6 +2268,113 @@ function render(){
     app.appendChild(
       renderMethodGrid()
     );
+
+    footer.innerHTML=
+      '<button class="btn btn-ghost btn-block" id="btnManageMethods">'+
+      '⚙ Muokkaa menetelmiä'+
+      '</button>';
+
+    document
+      .getElementById("btnManageMethods")
+      .onclick=()=>{
+        view="methodsManage";
+        render();
+      };
+  }
+
+
+  if(view==="methodsManage"){
+
+    title.textContent="Menetelmät";
+
+    app.appendChild(
+      renderBack(()=>{
+        view="methodSelect";
+        render();
+      })
+    );
+
+    app.appendChild(
+      renderMethodsManageCard()
+    );
+
+    footer.innerHTML=
+      '<button class="btn btn-primary btn-block" id="btnAddNewMethod">'+
+      '+ Uusi menetelmä'+
+      '</button>'+
+      '<button class="btn btn-ghost btn-block" id="btnResetMethods" style="margin-top:6px;">'+
+      'Palauta oletusmenetelmät'+
+      '</button>';
+
+    document
+      .getElementById("btnAddNewMethod")
+      .onclick=()=>{
+        editingMethod={
+          id:genMethodId(),
+          name:"",
+          short:"",
+          fields:[]
+        };
+        editingMethodIsNew=true;
+        view="methodEdit";
+        render();
+      };
+
+    document
+      .getElementById("btnResetMethods")
+      .onclick=()=>{
+        if(
+          confirm(
+            "Palautetaanko oletusmenetelmät?\n\n"+
+            "Kaikki omat ja muokatut menetelmät korvataan "+
+            "sovelluksen alkuperäisillä menetelmillä. Jo tallennettuja "+
+            "kirjattuja menetelmätuloksia tämä ei poista, mutta jos "+
+            "poistettu menetelmä oli niiden pohjana, ne eivät enää "+
+            "löydy uudelleenmuokattavaksi."
+          )
+        ){
+          METHODS=cloneMethods(DEFAULT_METHODS);
+          persistMethods();
+          render();
+        }
+      };
+  }
+
+
+  if(view==="methodEdit"&&!editingMethod){
+    view="methodsManage";
+    render();
+    return;
+  }
+
+  if(view==="methodEdit"){
+
+    title.textContent=
+      editingMethodIsNew
+        ?"Uusi menetelmä"
+        :"Muokkaa menetelmää";
+
+    app.appendChild(
+      renderBack(()=>{
+        editingMethod=null;
+        editingMethodIsNew=false;
+        view="methodsManage";
+        render();
+      })
+    );
+
+    app.appendChild(
+      renderMethodEditCard()
+    );
+
+    footer.innerHTML=
+      '<button class="btn btn-primary btn-block" id="btnSaveMethod">'+
+      'Tallenna menetelmä'+
+      '</button>';
+
+    document
+      .getElementById("btnSaveMethod")
+      .onclick=saveMethodEdit;
   }
 
 
@@ -2754,6 +2913,323 @@ function renderMethodGrid(){
 
 
   return w;
+}
+
+
+/* ============================================================
+   MENETELMIEN HALLINTA (lisäys/muokkaus/poisto)
+   ============================================================ */
+
+const FIELD_TYPES=[
+  { value:"text", label:"Teksti (lyhyt)" },
+  { value:"textarea", label:"Teksti (pitkä)" },
+  { value:"number", label:"Numero" },
+  { value:"date", label:"Päivämäärä" },
+  { value:"select", label:"Valintalista" }
+];
+
+function fieldTypeLabel(type){
+  const t=FIELD_TYPES.find(x=>x.value===type);
+  return t?t.label:type;
+}
+
+function renderMethodsManageCard(){
+
+  const c=el(`
+    <div class="card">
+      <h2>
+        Menetelmät
+        <span class="badge">${METHODS.length}</span>
+      </h2>
+      <div class="hint">
+        Muokkaa olemassa olevia menetelmiä tai lisää uusia.
+        Muutokset tallennetaan tälle laitteelle.
+      </div>
+    </div>
+  `);
+
+  if(!METHODS.length){
+    c.appendChild(
+      el(`<div class="empty">Ei yhtään menetelmää. Lisää uusi alta.</div>`)
+    );
+    return c;
+  }
+
+  METHODS.forEach((m,idx)=>{
+
+    const usedCount=
+      entries.filter(e=>e.methodId===m.id).length;
+
+    const row=el(`
+      <div class="entry-card">
+        <div class="entry-top">
+          <div>
+            <div class="entry-title">${escapeHtml(m.name||"(nimetön menetelmä)")}</div>
+            <div class="entry-sub">
+              ${m.fields.length} kenttää
+              ${usedCount?(" · käytössä "+usedCount+" kirjauksessa"):""}
+            </div>
+          </div>
+          <div class="entry-actions">
+            <button type="button" class="btn btn-sm btn-outline" data-act="edit">Muokkaa</button>
+            <button type="button" class="btn btn-sm btn-danger" data-act="del">Poista</button>
+          </div>
+        </div>
+      </div>
+    `);
+
+    row.querySelector('[data-act="edit"]').onclick=()=>{
+      editingMethod=cloneMethods([m])[0];
+      editingMethodIsNew=false;
+      view="methodEdit";
+      render();
+    };
+
+    row.querySelector('[data-act="del"]').onclick=()=>{
+      const warn=
+        usedCount
+          ?("Menetelmää on käytetty "+usedCount+" kirjatussa menetelmässä. "+
+            "Jos poistat sen, näitä kirjauksia ei enää voi avata muokattavaksi, "+
+            "mutta niiden data säilyy taustalla.\n\n")
+          :"";
+      if(
+        confirm(
+          warn+
+          'Poistetaanko menetelmä "'+m.name+'" pysyvästi?'
+        )
+      ){
+        METHODS.splice(idx,1);
+        persistMethods();
+        render();
+      }
+    };
+
+    c.appendChild(row);
+  });
+
+  return c;
+}
+
+function renderMethodFieldRow(f,idx,fields){
+
+  const row=el(`
+    <div class="card" style="padding:12px;margin-bottom:10px;background:var(--paper);">
+      <div style="display:flex;gap:8px;align-items:flex-start;">
+        <div style="flex:1;">
+          <label>Kentän nimi</label>
+          <input type="text" id="mf_label_${idx}" value="${escapeAttribute(f.label||"")}" placeholder="esim. Mittausarvo">
+        </div>
+        <button type="button" class="btn btn-sm btn-danger" id="mf_del_${idx}" style="margin-top:22px;">✕</button>
+      </div>
+
+      <label>Kentän tyyppi</label>
+      <select id="mf_type_${idx}">
+        ${FIELD_TYPES.map(t=>`
+          <option value="${t.value}" ${t.value===f.type?"selected":""}>${t.label}</option>
+        `).join("")}
+      </select>
+
+      <div id="mf_options_wrap_${idx}" style="${f.type==="select"?"":"display:none;"}">
+        <label>Vaihtoehdot (yksi per rivi)</label>
+        <textarea id="mf_options_${idx}" placeholder="Vaihtoehto 1&#10;Vaihtoehto 2">${escapeHtml((f.options||[]).join("\n"))}</textarea>
+      </div>
+
+      <label>Ohjeteksti (valinnainen)</label>
+      <input type="text" id="mf_placeholder_${idx}" value="${escapeAttribute(f.placeholder||"")}" placeholder="Kenttäkohtainen esimerkkiteksti">
+
+      <label style="display:flex;align-items:center;gap:6px;margin-top:8px;">
+        <input type="checkbox" id="mf_req_${idx}" style="width:auto;" ${f.req?"checked":""}>
+        Pakollinen kenttä
+      </label>
+    </div>
+  `);
+
+  const typeSelect=row.querySelector(`#mf_type_${idx}`);
+  const optionsWrap=row.querySelector(`#mf_options_wrap_${idx}`);
+  typeSelect.onchange=()=>{
+    optionsWrap.style.display=
+      typeSelect.value==="select"?"":"none";
+  };
+
+  row.querySelector(`#mf_del_${idx}`).onclick=()=>{
+    syncMethodFieldsFromDom(fields);
+    fields.splice(idx,1);
+    renderMethodEditFieldsInto(fieldsListEl,fields);
+  };
+
+  return row;
+}
+
+let fieldsListEl=null;
+
+function renderMethodEditFieldsInto(wrap,fields){
+  wrap.innerHTML="";
+  fields.forEach((f,idx)=>{
+    wrap.appendChild(renderMethodFieldRow(f,idx,fields));
+  });
+  const countEl=document.getElementById("methodFieldsCount");
+  if(countEl)countEl.textContent=fields.length;
+}
+
+/*
+ * Ennen kuin kenttälista piirretään uudelleen (kentän lisäys/poisto),
+ * luetaan DOM:ssa jo auki olevien kenttärivien arvot talteen — muuten
+ * esim. kesken kirjoituksen oleva nimi katoaisi rivin lisäyksen/poiston
+ * yhteydessä.
+ */
+function syncMethodFieldsFromDom(fields){
+  fields.forEach((f,idx)=>{
+    const labelInput=document.getElementById("mf_label_"+idx);
+    if(!labelInput)return;
+    f.label=labelInput.value;
+
+    const typeSelect=document.getElementById("mf_type_"+idx);
+    if(typeSelect)f.type=typeSelect.value;
+
+    const placeholderInput=document.getElementById("mf_placeholder_"+idx);
+    if(placeholderInput)f.placeholder=placeholderInput.value;
+
+    const reqCheck=document.getElementById("mf_req_"+idx);
+    if(reqCheck)f.req=reqCheck.checked;
+
+    const optionsTextarea=document.getElementById("mf_options_"+idx);
+    if(optionsTextarea){
+      f.options=
+        optionsTextarea.value
+          .split("\n")
+          .map(s=>s.trim())
+          .filter(Boolean);
+    }
+  });
+}
+
+function renderMethodEditCard(){
+
+  const c=el(`
+    <div class="card">
+      <h2>Menetelmän tiedot</h2>
+
+      <label>Menetelmän nimi</label>
+      <input type="text" id="me_name" value="${escapeAttribute(editingMethod.name||"")}" placeholder="esim. Pintakosteuden mittaus">
+
+      <label>Lyhyt nimi (näkyy menetelmävalinnassa)</label>
+      <input type="text" id="me_short" value="${escapeAttribute(editingMethod.short||"")}" placeholder="esim. Pintakosteus">
+    </div>
+  `);
+
+  const fieldsCard=el(`
+    <div class="card">
+      <h2>
+        Kentät
+        <span class="badge" id="methodFieldsCount">${editingMethod.fields.length}</span>
+      </h2>
+      <div class="hint">
+        Kentät näkyvät lomakkeella tässä järjestyksessä, kun tätä
+        menetelmää käytetään.
+      </div>
+      <div id="methodFieldsList"></div>
+      <button type="button" class="btn btn-outline btn-block" id="btnAddMethodField">
+        + Lisää kenttä
+      </button>
+    </div>
+  `);
+
+  fieldsListEl=fieldsCard.querySelector("#methodFieldsList");
+  renderMethodEditFieldsInto(fieldsListEl,editingMethod.fields);
+
+  fieldsCard.querySelector("#btnAddMethodField").onclick=()=>{
+    syncMethodFieldsFromDom(editingMethod.fields);
+    editingMethod.fields.push({
+      id:genFieldId(),
+      label:"",
+      type:"text",
+      req:false,
+      placeholder:"",
+      options:[]
+    });
+    renderMethodEditFieldsInto(fieldsListEl,editingMethod.fields);
+  };
+
+  const container=el("<div></div>");
+  container.appendChild(c);
+  container.appendChild(fieldsCard);
+  return container;
+}
+
+function saveMethodEdit(){
+
+  const name=document.getElementById("me_name").value.trim();
+  const short=document.getElementById("me_short").value.trim();
+
+  if(!name){
+    toast("Anna menetelmälle nimi");
+    return;
+  }
+
+  const fields=editingMethod.fields;
+
+  for(let i=0;i<fields.length;i++){
+    const labelInput=document.getElementById("mf_label_"+i);
+    const typeSelect=document.getElementById("mf_type_"+i);
+    const placeholderInput=document.getElementById("mf_placeholder_"+i);
+    const reqCheck=document.getElementById("mf_req_"+i);
+    const optionsTextarea=document.getElementById("mf_options_"+i);
+
+    const label=labelInput.value.trim();
+    if(!label){
+      toast("Jokaisella kentällä pitää olla nimi");
+      return;
+    }
+
+    fields[i].label=label;
+    fields[i].type=typeSelect.value;
+    fields[i].placeholder=placeholderInput.value.trim();
+    fields[i].req=reqCheck.checked;
+
+    if(fields[i].type==="select"){
+      fields[i].options=
+        optionsTextarea.value
+          .split("\n")
+          .map(s=>s.trim())
+          .filter(Boolean);
+      if(!fields[i].options.length){
+        toast('Anna "'+label+'" -kentälle vähintään yksi vaihtoehto');
+        return;
+      }
+    }else{
+      delete fields[i].options;
+    }
+
+    if(!fields[i].id) fields[i].id=genFieldId();
+  }
+
+  if(!fields.length){
+    toast("Lisää menetelmälle vähintään yksi kenttä");
+    return;
+  }
+
+  editingMethod.name=name;
+  editingMethod.short=short||name;
+
+  if(editingMethodIsNew){
+    METHODS.push(editingMethod);
+  }else{
+    const idx=METHODS.findIndex(m=>m.id===editingMethod.id);
+    if(idx===-1){
+      METHODS.push(editingMethod);
+    }else{
+      METHODS[idx]=editingMethod;
+    }
+  }
+
+  persistMethods();
+
+  editingMethod=null;
+  editingMethodIsNew=false;
+  view="methodsManage";
+  render();
+
+  toast("Menetelmä tallennettu");
 }
 
 
@@ -6998,6 +7474,8 @@ function waitForSupabaseClient(
    ============================================================ */
 
 (async function bootstrap(){
+
+  loadCustomMethods();
 
   /*
    * KORJAUS: varmistetaan, että sivu näytetään (visibility:visible)

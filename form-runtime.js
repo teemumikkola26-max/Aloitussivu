@@ -157,7 +157,7 @@ async function syncToCloud(){
       const it = state.items[id];
       for (const p of it.photos){
         if (!p.path && p.blob){
-          try{ p.path = await window.SubmissionSync.uploadPhoto(SUBMISSION_ID, "p" + p.id + ".jpg", p.blob); }catch(e){}
+          try{ p.path = await window.SubmissionSync.uploadPhoto(SUBMISSION_ID, "p" + p.id + ".jpg", p.blob); }catch(e){ console.warn("Valokuvan lataus pilveen epäonnistui", e); }
         }
       }
     }
@@ -200,12 +200,12 @@ async function loadFromStorage(){
             const blob = await window.SubmissionSync.downloadPhoto(p.path);
             const url = URL.createObjectURL(blob);
             state.items[id].photos.push({ id:p.id, path:p.path, blob, url, w:p.w, h:p.h });
-          }catch(e){ /* yksittäisen kuvan lataus epäonnistui -- jatketaan muilla */ }
+          }catch(e){ console.warn("Yksittäisen kuvan lataus epäonnistui -- jatketaan muilla", e); }
         }
       }
       loadedFromCloud = true;
     }
-  }catch(e){ /* ei pilviyhteyttä -- jatketaan paikallisella kopiolla alla */ }
+  }catch(e){ console.warn("Ei pilviyhteyttä -- jatketaan paikallisella kopiolla", e); }
 
   if (!loadedFromCloud){
     const metaRows = await idbGetAll("meta");
@@ -662,7 +662,7 @@ document.getElementById("btnNew").addEventListener("click", () => {
     async () => {
       Object.values(state.items).forEach(it => it.photos.forEach(p => URL.revokeObjectURL(p.url)));
       if (db) await idbClearAll();
-      try{ await window.SubmissionSync.deleteSubmission(SUBMISSION_ID); }catch(e){}
+      try{ await window.SubmissionSync.deleteSubmission(SUBMISSION_ID); }catch(e){ console.warn("Lomaketäytön poisto pilvestä epäonnistui", e); }
 
       SUBMISSION_ID = window.SubmissionSync.newId();
       const params = new URLSearchParams(window.location.search);
