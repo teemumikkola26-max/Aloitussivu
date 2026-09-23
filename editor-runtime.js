@@ -522,6 +522,16 @@ function buildFieldBlock(sec, field, fieldIdx){
     field.tableRowHeaders.length = field.tableRows - 1;
     while (field.tableColHeaders.length < field.tableCols - 1) field.tableColHeaders.push("");
     field.tableColHeaders.length = field.tableCols - 1;
+    /*
+     * Oletuksena vain ensimmäinen rivi on kiinteä otsikkorivi —
+     * ensimmäinen sarake on nykyään tavallinen täytettävä sarake.
+     * Jo olemassa olevat taulukot, joissa on oikeasti kirjoitettuja
+     * riviotsikoita, pysyvät ennallaan (kiinteä sarake), ettei
+     * vanhoja lomakkeita rikota taannehtivasti.
+     */
+    if (field.tableFixedFirstCol == null){
+      field.tableFixedFirstCol = field.tableRowHeaders.some(h => h && h.trim() !== "");
+    }
 
     const dimRow = document.createElement("div");
     dimRow.className = "editor-row-sub";
@@ -556,6 +566,19 @@ function buildFieldBlock(sec, field, fieldIdx){
     dimRow.appendChild(colsWrap);
     wrap.appendChild(dimRow);
 
+    const fixedColWrap = document.createElement("label");
+    fixedColWrap.style.cssText = "display:flex;align-items:center;gap:4px;font-size:.74rem;color:var(--ink-soft);margin-top:6px;";
+    const fixedColCheck = document.createElement("input");
+    fixedColCheck.type = "checkbox";
+    fixedColCheck.checked = !!field.tableFixedFirstCol;
+    fixedColCheck.addEventListener("change", () => {
+      field.tableFixedFirstCol = fixedColCheck.checked;
+      renderEditor();
+    });
+    fixedColWrap.appendChild(fixedColCheck);
+    fixedColWrap.appendChild(document.createTextNode("Kiinteä ensimmäinen sarake (riviotsikot)"));
+    wrap.appendChild(fixedColWrap);
+
     const cornerInput = textInput(field.tableCorner, v => field.tableCorner = v, "Vasen yläkulma (valinnainen otsikko)");
     cornerInput.style.cssText = "width:100%;margin-top:8px;";
     wrap.appendChild(cornerInput);
@@ -570,15 +593,17 @@ function buildFieldBlock(sec, field, fieldIdx){
       wrap.appendChild(inp);
     });
 
-    const rowHeadersLabel = document.createElement("div");
-    rowHeadersLabel.style.cssText = "font-size:.74rem;color:var(--ink-soft);margin-top:6px;margin-bottom:3px;";
-    rowHeadersLabel.textContent = "Riviotsikot (kiinteät, ensimmäinen sarake):";
-    wrap.appendChild(rowHeadersLabel);
-    field.tableRowHeaders.forEach((val, i) => {
-      const inp = textInput(val, v => field.tableRowHeaders[i] = v, "Rivi " + (i+2));
-      inp.style.cssText = "width:100%;margin-bottom:5px;";
-      wrap.appendChild(inp);
-    });
+    if (field.tableFixedFirstCol){
+      const rowHeadersLabel = document.createElement("div");
+      rowHeadersLabel.style.cssText = "font-size:.74rem;color:var(--ink-soft);margin-top:6px;margin-bottom:3px;";
+      rowHeadersLabel.textContent = "Riviotsikot (kiinteät, ensimmäinen sarake):";
+      wrap.appendChild(rowHeadersLabel);
+      field.tableRowHeaders.forEach((val, i) => {
+        const inp = textInput(val, v => field.tableRowHeaders[i] = v, "Rivi " + (i+2));
+        inp.style.cssText = "width:100%;margin-bottom:5px;";
+        wrap.appendChild(inp);
+      });
+    }
 
     const hint = document.createElement("div");
     hint.style.cssText = "font-size:.74rem;color:var(--ink-soft);margin-top:4px;";

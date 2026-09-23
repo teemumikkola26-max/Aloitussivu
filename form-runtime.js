@@ -458,10 +458,11 @@ function renderSections(){
         tableEl.style.cssText = "border-collapse:collapse;width:100%;font-size:.85rem;";
         const rows = field.tableRows || 3;
         const cols = field.tableCols || 3;
+        const fixedFirstCol = !!field.tableFixedFirstCol;
         for (let r = 0; r < rows; r++){
           const tr = document.createElement("tr");
           for (let c = 0; c < cols; c++){
-            const isHeaderCell = (r === 0 || c === 0);
+            const isHeaderCell = (r === 0) || (c === 0 && fixedFirstCol);
             const cell = document.createElement(isHeaderCell ? "th" : "td");
             cell.style.cssText = "border:1px solid var(--line-strong);padding:6px 8px;text-align:left;" +
               (isHeaderCell ? "background:#f1efe8;font-weight:600;white-space:nowrap;" : "");
@@ -469,7 +470,7 @@ function renderSections(){
               cell.textContent = field.tableCorner || "";
             } else if (r === 0){
               cell.textContent = (field.tableColHeaders && field.tableColHeaders[c-1]) || "";
-            } else if (c === 0){
+            } else if (c === 0 && fixedFirstCol){
               cell.textContent = (field.tableRowHeaders && field.tableRowHeaders[r-1]) || "";
             } else {
               const key = "r" + r + "_c" + c;
@@ -739,18 +740,19 @@ async function buildDocx(){
       } else if (field.type === "table"){
         const rows = field.tableRows || 3;
         const cols = field.tableCols || 3;
+        const fixedFirstCol = !!field.tableFixedFirstCol;
         const tableRows2D = [];
         for (let r = 0; r < rows; r++){
           const row = [];
           for (let c = 0; c < cols; c++){
             if (r === 0 && c === 0) row.push(field.tableCorner || "");
             else if (r === 0) row.push((field.tableColHeaders && field.tableColHeaders[c-1]) || "");
-            else if (c === 0) row.push((field.tableRowHeaders && field.tableRowHeaders[r-1]) || "");
+            else if (c === 0 && fixedFirstCol) row.push((field.tableRowHeaders && field.tableRowHeaders[r-1]) || "");
             else row.push((it.table && it.table["r"+r+"_c"+c]) || "");
           }
           tableRows2D.push(row);
         }
-        bodyParts.push(engine.tableXml(tableRows2D, { headerRowCount:1, headerColCount:1, font:s.fonts.body, sz:engine.pt2hp(s.fonts.bodySize), color:s.colors.body }));
+        bodyParts.push(engine.tableXml(tableRows2D, { headerRowCount:1, headerColCount:(fixedFirstCol?1:0), font:s.fonts.body, sz:engine.pt2hp(s.fonts.bodySize), color:s.colors.body }));
         bodyParts.push(engine.paraXml("", { after:140 }));
       } else {
         let displayVal = it.value || "—";
