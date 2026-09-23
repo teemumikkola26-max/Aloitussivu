@@ -988,6 +988,19 @@ function floorPlanKey(){
   return "kenttalomake_floorplan_"+SUBMISSION_ID;
 }
 
+/*
+ * KORJAUS: window.storage/localStorage-varmistustallennus käytti aiemmin
+ * kiinteää avainta "kenttalomake_state" riippumatta SUBMISSION_ID:stä.
+ * Tämä sekoitti eri projektien paikalliset varmuuskopiot keskenään --
+ * uutta projektia avatessa saatettiin ladata edellisen projektin data
+ * ja näyttää virheellisesti "Offline - paikallinen kopio". IndexedDB oli
+ * jo oikein SUBMISSION_ID:llä eroteltu (DB_NAME), joten korjataan nyt
+ * myös nämä kaksi varmistustasoa samalla periaatteella.
+ */
+function portableStateKey(){
+  return "kenttalomake_state_"+SUBMISSION_ID;
+}
+
 function idbOpen(){
 
   return new Promise((resolve,reject)=>{
@@ -1251,7 +1264,7 @@ async function autosave(){
     try{
 
       await window.storage.set(
-        "kenttalomake_state",
+        portableStateKey(),
         JSON.stringify(portableState)
       );
 
@@ -1270,7 +1283,7 @@ async function autosave(){
   try{
 
     localStorage.setItem(
-      "kenttalomake_state",
+      portableStateKey(),
       JSON.stringify(portableState)
     );
 
@@ -1729,7 +1742,7 @@ async function loadState(){
 
         const r=
           await window.storage.get(
-            "kenttalomake_state"
+            portableStateKey()
           );
 
         value=
@@ -1756,7 +1769,7 @@ async function loadState(){
 
         const raw=
           localStorage.getItem(
-            "kenttalomake_state"
+            portableStateKey()
           );
 
         if(raw){
@@ -2030,7 +2043,7 @@ async function clearForm(){
     if(window.storage){
 
       await window.storage.delete(
-        "kenttalomake_state"
+        portableStateKey()
       );
     }
 
@@ -2042,7 +2055,7 @@ async function clearForm(){
   try{
 
     localStorage.removeItem(
-      "kenttalomake_state"
+      portableStateKey()
     );
 
   }catch(err){
