@@ -2248,6 +2248,9 @@ function render(){
       '<button class="btn btn-primary btn-block" id="btnAddMethod">'+
       '+ Lisää menetelmä'+
       '</button>'+
+      '<button class="btn btn-outline btn-block" id="btnStyle" style="margin-top:6px;">'+
+      '🎨 Muokkaa Word-ulkoasua'+
+      '</button>'+
       '<button class="btn btn-ghost btn-block" id="btnClearForm" style="margin-top:6px;">'+
       'Tyhjennä lomake'+
       '</button>';
@@ -2258,6 +2261,19 @@ function render(){
       .onclick=()=>{
         view="methodSelect";
         render();
+      };
+
+
+    document
+      .getElementById("btnStyle")
+      .onclick=()=>{
+        window.location.href=
+          "style-editor.html?form="+
+          encodeURIComponent(FORM_KEY)+
+          "&label="+
+          encodeURIComponent(FORM_LABEL)+
+          "&back="+
+          encodeURIComponent("kenttalomake.html");
       };
 
 
@@ -2755,15 +2771,6 @@ function renderEntriesCard(){
             Muodosta kenttämuistiinpano (Word)
           </button>
 
-          <button
-            class="btn btn-outline"
-            id="btnStyle"
-            style="flex:0 0 auto;"
-            aria-label="Muokkaa Word-tyyliä"
-          >
-            🎨
-          </button>
-
         </div>
       `);
 
@@ -2774,22 +2781,8 @@ function renderEntriesCard(){
     const b=
       r.querySelector("#btnExport");
 
-    const sb=
-      r.querySelector("#btnStyle");
-
 
     b.onclick=exportWord;
-
-
-    sb.onclick=()=>{
-      window.location.href=
-        "style-editor.html?form="+
-        encodeURIComponent(FORM_KEY)+
-        "&label="+
-        encodeURIComponent(FORM_LABEL)+
-        "&back="+
-        encodeURIComponent("kenttalomake.html");
-    };
   }
 
 

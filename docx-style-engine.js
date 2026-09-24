@@ -8,13 +8,22 @@
    TYYLIOBJEKTIN MUOTO (tallennetaan Supabasen doc_styles-tauluun):
    {
      coverPage: { enabled, title, subtitle, logoDataUrl, accentColor, companyInfo },
-     header: { enabled, text, showDate, align, showLogo },
-     footer: { enabled, text, showPageNumber, align },
+     header: { enabled, text, showDate, align, showLogo, fontSize, color },
+     footer: { enabled, text, showPageNumber, align, fontSize, color },
      fonts: { heading, body, headingSize, bodySize },
      colors: { heading, body },
      toc: { enabled, variant: "classic"|"simple" },
-     pagesBefore: [ { id, title, content } ],   // vakiotekstisivut ennen lomakkeen sisältöä
-     pagesAfter:  [ { id, title, content } ]    // vakiotekstisivut lomakkeen sisällön jälkeen
+     pagesBefore: [ { id, title, blocks } ],   // vakiotekstisivut ennen lomakkeen sisältöä
+     pagesAfter:  [ { id, title, blocks } ]    // vakiotekstisivut lomakkeen sisällön jälkeen
+
+     // Sivun "blocks" on lista lohkoja, esim:
+     //   { type:"heading",    text }
+     //   { type:"subheading", text, color }
+     //   { type:"paragraph",  text, color }
+     //   { type:"bullets",    items:[...], color }
+     //   { type:"numbered",   items:[...], color }
+     // Vanhat tallenteet, joissa on vain { content: "..." } (yksi tekstilohko),
+     // luetaan yhä oikein normalizePage()-funktion kautta.
    }
    ========================================================================= */
 window.DocxStyleEngine = (function(){
@@ -22,14 +31,64 @@ window.DocxStyleEngine = (function(){
   function defaultStyle(){
     return {
       coverPage: { enabled:false, title:"", subtitle:"", logoDataUrl:"", accentColor:"#8fb79c", companyInfo:"" },
-      header: { enabled:false, text:"", showDate:false, align:"left", showLogo:false },
-      footer: { enabled:false, text:"", showPageNumber:true, align:"center" },
+      header: { enabled:false, text:"", showDate:false, align:"left", showLogo:false, fontSize:9, color:"#7a7566" },
+      footer: { enabled:false, text:"", showPageNumber:true, align:"center", fontSize:9, color:"#7a7566" },
       fonts: { heading:"Calibri", body:"Calibri", headingSize:14, bodySize:10.5 },
       colors: { heading:"#233043", body:"#1c2430" },
       toc: { enabled:false, variant:"classic" },
       pagesBefore: [],
       pagesAfter: []
     };
+  }
+
+  /*
+   * Palauttaa sivun blocks-listan. Jos sivulla on vain vanha yksittäinen
+   * "content"-teksti (ennen lohkopohjaista editoria tallennettu), se
+   * muunnetaan yhdeksi paragraph-lohkoksi -- vanhat tallenteet siis
+   * näkyvät jatkossakin ennallaan.
+   */
+  function normalizePage(page){
+    if (page.blocks && page.blocks.length) return page.blocks;
+    if (page.content) return [{ type:"paragraph", text: page.content }];
+    return [];
+  }
+
+  /*
+   * Muuntaa yhden vakiotekstisivun blocks-listan OOXML-kappaleiksi.
+   * Palauttaa taulukon valmiita <w:p>...</w:p> -merkkijonoja.
+   */
+  function renderPageBlocks(blocks, style){
+    const parts = [];
+    blocks.forEach(b => {
+      const type = b.type || "paragraph";
+      if (type === "heading"){
+        parts.push(paraXml(b.text || "", {
+          bold:true, sz: pt2hp((style.fonts.headingSize||14)), font: style.fonts.heading,
+          color: b.color || style.colors.heading, before:160, after:100
+        }));
+      } else if (type === "subheading"){
+        parts.push(paraXml(b.text || "", {
+          bold:true, sz: pt2hp(Math.max(10, (style.fonts.headingSize||14) - 3)), font: style.fonts.heading,
+          color: b.color || style.colors.heading, before:120, after:80
+        }));
+      } else if (type === "bullets" || type === "numbered"){
+        const items = (b.items || []).filter(s => s != null && String(s).trim() !== "");
+        items.forEach(item => {
+          parts.push(paraXml(item, {
+            font: style.fonts.body, sz: pt2hp(style.fonts.bodySize), color: b.color || style.colors.body,
+            numId: type === "bullets" ? 1 : 2, after:40
+          }));
+        });
+      } else {
+        // paragraph (myös vanhojen tallenteiden migroitu content-teksti)
+        if (b.text) {
+          parts.push(paraXml(b.text, {
+            font: style.fonts.body, sz: pt2hp(style.fonts.bodySize), color: b.color || style.colors.body, after:100
+          }));
+        }
+      }
+    });
+    return parts;
   }
 
   const FONT_CHOICES = ["Calibri","Arial","Georgia","Times New Roman","Verdana","Cambria","Tahoma"];
@@ -48,6 +107,7 @@ window.DocxStyleEngine = (function(){
 
   // opts: bold, italic, color (hex no #), sz (half-points), font, before, after, align("center"|"right"|"left"),
   //       bottomBorder: { color, sz } -- ohut viiva kappaleen alle, pStyle: "Heading1" -- viittaus tyyliin (TOC:ia varten)
+  //       numId: 1 (luettelomerkki) tai 2 (numeroitu) -- ks. numberingXml(); ilvl: sisennystaso (0 = ensimmäinen)
   function paraXml(text, opts){
     opts = opts || {};
     const rPr = [];
@@ -56,9 +116,12 @@ window.DocxStyleEngine = (function(){
     if (opts.italic) rPr.push("<w:i/>");
     if (opts.color) rPr.push('<w:color w:val="' + opts.color.replace("#","") + '"/>');
     if (opts.sz) rPr.push('<w:sz w:val="' + opts.sz + '"/><w:szCs w:val="' + opts.sz + '"/>');
-    // OOXML-skeeman mukainen pPr-lasten järjestys: pStyle, pBdr, spacing, jc
+    // OOXML-skeeman mukainen pPr-lasten järjestys: pStyle, numPr, pBdr, spacing, jc
     const pPr = [];
     if (opts.pStyle) pPr.push('<w:pStyle w:val="' + xmlEsc(opts.pStyle) + '"/>');
+    if (opts.numId){
+      pPr.push('<w:numPr><w:ilvl w:val="' + (opts.ilvl || 0) + '"/><w:numId w:val="' + opts.numId + '"/></w:numPr>');
+    }
     if (opts.bottomBorder){
       pPr.push('<w:pBdr><w:bottom w:val="single" w:sz="' + (opts.bottomBorder.sz||16) + '" w:space="4" w:color="' + opts.bottomBorder.color.replace("#","") + '"/></w:pBdr>');
     }
@@ -71,17 +134,41 @@ window.DocxStyleEngine = (function(){
     return '<w:p>' + (pPr.length?'<w:pPr>'+pPr.join('')+'</w:pPr>':'') + '<w:r>' + (rPr.length?'<w:rPr>'+rPr.join('')+'</w:rPr>':'') + runs + '</w:r></w:p>';
   }
 
+  /*
+   * Kiinteä numerointimääritelmä: numId=1 luettelomerkeille (•),
+   * numId=2 numeroidulle listalle (1. 2. 3. ...). Sisällytetään aina
+   * dokumenttiin -- ei haittaa vaikka mitään listaa ei käytettäisi.
+   */
+  function numberingXml(){
+    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
+      '<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+      '<w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="bullet"/>' +
+      '<w:lvlText w:val="•"/><w:lvlJc w:val="left"/><w:pPr><w:ind w:left="432" w:hanging="432"/></w:pPr>' +
+      '<w:rPr><w:rFonts w:ascii="Symbol" w:hAnsi="Symbol" w:hint="default"/></w:rPr></w:lvl></w:abstractNum>' +
+      '<w:abstractNum w:abstractNumId="1"><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="decimal"/>' +
+      '<w:lvlText w:val="%1."/><w:lvlJc w:val="left"/><w:pPr><w:ind w:left="432" w:hanging="432"/></w:pPr></w:lvl></w:abstractNum>' +
+      '<w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>' +
+      '<w:num w:numId="2"><w:abstractNumId w:val="1"/></w:num>' +
+      '</w:numbering>';
+  }
+
   function imageXml(rId, cx, cy, docPrId, align){
     const pPr = align ? '<w:pPr><w:jc w:val="' + align + '"/></w:pPr>' : "";
     return '<w:p>' + pPr + '<w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="'+cx+'" cy="'+cy+'"/><wp:docPr id="'+docPrId+'" name="Kuva'+docPrId+'"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="'+docPrId+'" name="Kuva'+docPrId+'"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rId'+rId+'"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="'+cx+'" cy="'+cy+'"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>';
   }
 
-  function pageNumberFieldXml(prefixText, align){
+  function pageNumberFieldXml(prefixText, align, opts){
+    opts = opts || {};
+    const rPr = [];
+    if (opts.font) rPr.push(fontRpr(opts.font));
+    if (opts.color) rPr.push('<w:color w:val="' + opts.color.replace("#","") + '"/>');
+    if (opts.sz) rPr.push('<w:sz w:val="' + opts.sz + '"/><w:szCs w:val="' + opts.sz + '"/>');
+    const rPrXml = rPr.length ? '<w:rPr>' + rPr.join('') + '</w:rPr>' : "";
     return '<w:p><w:pPr><w:jc w:val="' + (align||"center") + '"/></w:pPr>' +
-      (prefixText ? '<w:r><w:t xml:space="preserve">' + xmlEsc(prefixText) + ' — Sivu </w:t></w:r>' : '<w:r><w:t xml:space="preserve">Sivu </w:t></w:r>') +
-      '<w:fldSimple w:instr="PAGE"><w:r><w:t>1</w:t></w:r></w:fldSimple>' +
-      '<w:r><w:t xml:space="preserve"> / </w:t></w:r>' +
-      '<w:fldSimple w:instr="NUMPAGES"><w:r><w:t>1</w:t></w:r></w:fldSimple>' +
+      (prefixText ? '<w:r>' + rPrXml + '<w:t xml:space="preserve">' + xmlEsc(prefixText) + ' — Sivu </w:t></w:r>' : '<w:r>' + rPrXml + '<w:t xml:space="preserve">Sivu </w:t></w:r>') +
+      '<w:fldSimple w:instr="PAGE"><w:r>' + rPrXml + '<w:t>1</w:t></w:r></w:fldSimple>' +
+      '<w:r>' + rPrXml + '<w:t xml:space="preserve"> / </w:t></w:r>' +
+      '<w:fldSimple w:instr="NUMPAGES"><w:r>' + rPrXml + '<w:t>1</w:t></w:r></w:fldSimple>' +
       '</w:p>';
   }
 
@@ -247,9 +334,7 @@ window.DocxStyleEngine = (function(){
         bold:true, sz: pt2hp(style.fonts.headingSize), font: style.fonts.heading, color: style.colors.heading,
         pStyle:"Heading1", after:160
       }));
-      if (page.content){
-        finalBodyParts.push(paraXml(page.content, { font: style.fonts.body, sz: pt2hp(style.fonts.bodySize), color: style.colors.body }));
-      }
+      finalBodyParts.push(...renderPageBlocks(normalizePage(page), style));
       finalBodyParts.push(pageBreakXml());
     });
 
@@ -261,9 +346,7 @@ window.DocxStyleEngine = (function(){
         bold:true, sz: pt2hp(style.fonts.headingSize), font: style.fonts.heading, color: style.colors.heading,
         pStyle:"Heading1", after:160
       }));
-      if (page.content){
-        finalBodyParts.push(paraXml(page.content, { font: style.fonts.body, sz: pt2hp(style.fonts.bodySize), color: style.colors.body }));
-      }
+      finalBodyParts.push(...renderPageBlocks(normalizePage(page), style));
     });
 
     // ---- Ylä-/alatunniste ----
@@ -292,7 +375,9 @@ window.DocxStyleEngine = (function(){
         headerRelsContent = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/header-logo.jpeg"/></Relationships>';
         headerBodyXml += imageXml(1, cx, cy, 900, headerAlign);
       }
-      headerBodyXml += paraXml(headerText, { font: style.fonts.body, sz:18, color:"7A7566", align: headerAlign });
+      headerBodyXml += paraXml(headerText, {
+        font: style.fonts.body, sz: pt2hp(style.header.fontSize || 9), color: (style.header.color || "#7a7566"), align: headerAlign
+      });
 
       const headerXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">' +
         headerBodyXml + '</w:hdr>';
@@ -305,13 +390,14 @@ window.DocxStyleEngine = (function(){
     if (style.footer && style.footer.enabled){
       const rId = relCounter++;
       const footerAlign = style.footer.align || "center";
+      const footerFontOpts = { font: style.fonts.body, sz: pt2hp(style.footer.fontSize || 9), color: (style.footer.color || "#7a7566") };
       let footerXml;
       if (style.footer.showPageNumber){
         footerXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
-          pageNumberFieldXml(style.footer.text || "", footerAlign) + '</w:ftr>';
+          pageNumberFieldXml(style.footer.text || "", footerAlign, footerFontOpts) + '</w:ftr>';
       } else {
         footerXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
-          paraXml(style.footer.text || "", { align:footerAlign, font: style.fonts.body, sz:18, color:"7A7566" }) + '</w:ftr>';
+          paraXml(style.footer.text || "", Object.assign({ align:footerAlign }, footerFontOpts)) + '</w:ftr>';
       }
       headerFolderFiles.push({ name:"footer1.xml", content: footerXml });
       relParts.push('<Relationship Id="rId'+rId+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/>');
@@ -345,6 +431,7 @@ window.DocxStyleEngine = (function(){
       '<Default Extension="jpeg" ContentType="image/jpeg"/>' +
       '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
       '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>' +
+      '<Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>' +
       '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>' +
       '<Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>' +
       contentTypeOverrides.join('') + '</Types>';
@@ -359,6 +446,7 @@ window.DocxStyleEngine = (function(){
     const docRelsXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
       '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
       '<Relationship Id="rId9" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' +
+      '<Relationship Id="rId8" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/>' +
       relParts.join('') + '</Relationships>';
 
     const coreXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
@@ -374,6 +462,7 @@ window.DocxStyleEngine = (function(){
     const wordFolder = zip.folder("word");
     wordFolder.file("document.xml", documentXml);
     wordFolder.file("styles.xml", stylesXml);
+    wordFolder.file("numbering.xml", numberingXml());
     wordFolder.folder("_rels").file("document.xml.rels", docRelsXml);
     headerFolderFiles.forEach(f => wordFolder.file(f.name, f.content));
     if (headerRelsFiles.length){
@@ -390,5 +479,5 @@ window.DocxStyleEngine = (function(){
     return zip.generateAsync({ type:"blob", mimeType:"application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
   }
 
-  return { defaultStyle, FONT_CHOICES, xmlEsc, paraXml, imageXml, pageBreakXml, tocFieldXml, tableXml, pxToEmu, scaledDims, pt2hp, assembleDocx };
+  return { defaultStyle, FONT_CHOICES, xmlEsc, paraXml, imageXml, pageBreakXml, tocFieldXml, tableXml, pxToEmu, scaledDims, pt2hp, assembleDocx, normalizePage };
 })();

@@ -166,6 +166,110 @@ function buildTocCard(){
   return card;
 }
 
+const BLOCK_TYPES = [
+  ["heading", "Otsikko"],
+  ["subheading", "Väliotsikko"],
+  ["paragraph", "Kappale"],
+  ["bullets", "Luettelo (luettelomerkit)"],
+  ["numbered", "Numeroitu luettelo"]
+];
+
+function blockTypeSelect(value, onChange){
+  const sel = document.createElement("select");
+  sel.className = "type-select";
+  sel.style.width = "auto";
+  BLOCK_TYPES.forEach(([v,label]) => {
+    const o = document.createElement("option");
+    o.value = v; o.textContent = label;
+    if (v === value) o.selected = true;
+    sel.appendChild(o);
+  });
+  sel.addEventListener("change", () => onChange(sel.value));
+  return sel;
+}
+
+function renderBlockEditor(blocks, idx, rerenderBlocks){
+  const b = blocks[idx];
+  const wrap = document.createElement("div");
+  wrap.className = "section-block";
+  wrap.style.cssText = "background:var(--paper);margin-top:8px;padding:10px;";
+
+  const head = document.createElement("div");
+  head.style.cssText = "display:flex;gap:6px;align-items:center;margin-bottom:6px;";
+
+  const typeSel = blockTypeSelect(b.type, (v) => {
+    b.type = v;
+    if ((v === "bullets" || v === "numbered") && !b.items) b.items = b.text ? [b.text] : [""];
+    if ((v === "heading" || v === "subheading" || v === "paragraph") && !("text" in b)) b.text = (b.items || []).join("\n");
+    rerenderBlocks();
+  });
+  head.appendChild(typeSel);
+
+  const spacer = document.createElement("div");
+  spacer.style.flex = "1";
+  head.appendChild(spacer);
+
+  const upBtn = document.createElement("button");
+  upBtn.type = "button"; upBtn.className = "icon-btn"; upBtn.textContent = "↑";
+  upBtn.disabled = idx === 0;
+  upBtn.addEventListener("click", () => {
+    if (idx === 0) return;
+    const tmp = blocks[idx-1]; blocks[idx-1] = blocks[idx]; blocks[idx] = tmp;
+    rerenderBlocks();
+  });
+  const downBtn = document.createElement("button");
+  downBtn.type = "button"; downBtn.className = "icon-btn"; downBtn.textContent = "↓";
+  downBtn.disabled = idx === blocks.length - 1;
+  downBtn.addEventListener("click", () => {
+    if (idx === blocks.length - 1) return;
+    const tmp = blocks[idx+1]; blocks[idx+1] = blocks[idx]; blocks[idx] = tmp;
+    rerenderBlocks();
+  });
+  const delBtn = document.createElement("button");
+  delBtn.type = "button"; delBtn.className = "icon-btn icon-btn-danger"; delBtn.textContent = "✕";
+  delBtn.addEventListener("click", () => { blocks.splice(idx,1); rerenderBlocks(); });
+
+  head.appendChild(upBtn);
+  head.appendChild(downBtn);
+  head.appendChild(delBtn);
+  wrap.appendChild(head);
+
+  if (b.type === "heading"){
+    const t = textInput(b.text, v => b.text = v, "Otsikon teksti");
+    t.style.width = "100%";
+    wrap.appendChild(t);
+  } else if (b.type === "subheading"){
+    const t = textInput(b.text, v => b.text = v, "Väliotsikon teksti");
+    t.style.width = "100%";
+    wrap.appendChild(t);
+    const colorRow = document.createElement("div");
+    colorRow.style.cssText = "display:flex;align-items:center;gap:8px;margin-top:6px;font-size:.78rem;color:var(--ink-soft);";
+    colorRow.appendChild(document.createTextNode("Väri"));
+    colorRow.appendChild(colorPicker(b.color || style.colors.heading, v => b.color = v));
+    wrap.appendChild(colorRow);
+  } else if (b.type === "paragraph"){
+    const t = textareaInput(b.text, v => b.text = v, "Kappaleen teksti…");
+    t.style.minHeight = "80px";
+    wrap.appendChild(t);
+    const colorRow = document.createElement("div");
+    colorRow.style.cssText = "display:flex;align-items:center;gap:8px;margin-top:6px;font-size:.78rem;color:var(--ink-soft);";
+    colorRow.appendChild(document.createTextNode("Tekstin väri"));
+    colorRow.appendChild(colorPicker(b.color || style.colors.body, v => b.color = v));
+    wrap.appendChild(colorRow);
+  } else if (b.type === "bullets" || b.type === "numbered"){
+    const t = textareaInput((b.items || []).join("\n"), v => b.items = v.split("\n"), "Yksi kohta per rivi…");
+    t.style.minHeight = "80px";
+    wrap.appendChild(t);
+    const colorRow = document.createElement("div");
+    colorRow.style.cssText = "display:flex;align-items:center;gap:8px;margin-top:6px;font-size:.78rem;color:var(--ink-soft);";
+    colorRow.appendChild(document.createTextNode("Tekstin väri"));
+    colorRow.appendChild(colorPicker(b.color || style.colors.body, v => b.color = v));
+    wrap.appendChild(colorRow);
+  }
+
+  return wrap;
+}
+
 function buildPagesCard(titleText, key){
   const card = document.createElement("section");
   card.className = "card";
@@ -176,9 +280,19 @@ function buildPagesCard(titleText, key){
   if (!style[key]) style[key] = [];
   const pages = style[key];
 
+  // Migroi vanhat "content"-sivut blocks-muotoon kertaalleen, jotta editori
+  // näyttää ne heti uudessa lohkoeditorissa ja tallennus tapahtuu jatkossa
+  // blocks-muodossa. docx-vienti osaisi lukea kumpaakin joka tapauksessa.
+  pages.forEach(page => {
+    if (!page.blocks){
+      page.blocks = window.DocxStyleEngine.normalizePage(page);
+      delete page.content;
+    }
+  });
+
   pages.forEach((page, idx) => {
-    const block = document.createElement("div");
-    block.className = "section-block";
+    const pageEl = document.createElement("div");
+    pageEl.className = "section-block";
 
     const head = document.createElement("div");
     head.className = "section-block-head";
@@ -208,13 +322,42 @@ function buildPagesCard(titleText, key){
     head.appendChild(upBtn);
     head.appendChild(downBtn);
     head.appendChild(delBtn);
-    block.appendChild(head);
+    pageEl.appendChild(head);
 
-    const contentArea = textareaInput(page.content, v => page.content = v, "Sivun vakioteksti…");
-    contentArea.style.minHeight = "110px";
-    block.appendChild(contentArea);
+    const blocksWrap = document.createElement("div");
+    pageEl.appendChild(blocksWrap);
 
-    body.appendChild(block);
+    function rerenderBlocks(){
+      blocksWrap.innerHTML = "";
+      page.blocks.forEach((b, bIdx) => {
+        blocksWrap.appendChild(renderBlockEditor(page.blocks, bIdx, rerenderBlocks));
+      });
+    }
+    rerenderBlocks();
+
+    const addBlockRow = document.createElement("div");
+    addBlockRow.style.cssText = "display:flex;gap:6px;margin-top:8px;";
+    const newBlockType = { value: "paragraph" };
+    const addTypeSel = blockTypeSelect(newBlockType.value, v => newBlockType.value = v);
+    addTypeSel.style.flex = "1";
+    const addBlockBtn = document.createElement("button");
+    addBlockBtn.type = "button";
+    addBlockBtn.className = "add-row-btn";
+    addBlockBtn.style.marginTop = "0";
+    addBlockBtn.textContent = "+ Lisää lohko";
+    addBlockBtn.addEventListener("click", () => {
+      const t = newBlockType.value;
+      const blk = { type: t };
+      if (t === "bullets" || t === "numbered") blk.items = [""];
+      else blk.text = "";
+      page.blocks.push(blk);
+      rerenderBlocks();
+    });
+    addBlockRow.appendChild(addTypeSel);
+    addBlockRow.appendChild(addBlockBtn);
+    pageEl.appendChild(addBlockRow);
+
+    body.appendChild(pageEl);
   });
 
   const addBtn = document.createElement("button");
@@ -222,7 +365,7 @@ function buildPagesCard(titleText, key){
   addBtn.className = "add-row-btn";
   addBtn.textContent = "+ Lisää sivu";
   addBtn.addEventListener("click", () => {
-    pages.push({ id: "pg" + Date.now(), title:"Uusi sivu", content:"" });
+    pages.push({ id: "pg" + Date.now(), title:"Uusi sivu", blocks:[{ type:"paragraph", text:"" }] });
     renderEditor();
   });
   body.appendChild(addBtn);
@@ -338,8 +481,10 @@ function buildHeaderCard(){
   body.appendChild(t.wrap);
 
   if (style.header.enabled){
-    body.appendChild(fieldRow("Teksti (esim. yrityksen nimi)", textInput(style.header.text, v => style.header.text = v, "esim. Yritys Oy")));
+    body.appendChild(fieldRow("Teksti (esim. yrityksen nimi) — voi olla useampi rivi", textareaInput(style.header.text, v => style.header.text = v, "esim. Yritys Oy\nOsoite tai lisärivi")));
     body.appendChild(fieldRow("Tasaus", alignSelect(style.header.align, v => style.header.align = v)));
+    body.appendChild(fieldRow("Fonttikoko", sizeSelect(style.header.fontSize || 9, [7,8,9,10,11,12,14], v => style.header.fontSize = v)));
+    body.appendChild(fieldRow("Väri", colorPicker(style.header.color || "#7a7566", v => style.header.color = v)));
     const dt = toggleRow("Näytä myös päivämäärä", style.header.showDate, (v) => style.header.showDate = v);
     body.appendChild(dt.wrap);
     if (style.coverPage.logoDataUrl){
@@ -371,8 +516,10 @@ function buildFooterCard(){
   body.appendChild(t.wrap);
 
   if (style.footer.enabled){
-    body.appendChild(fieldRow("Teksti", textInput(style.footer.text, v => style.footer.text = v, "esim. Luottamuksellinen")));
+    body.appendChild(fieldRow("Teksti — voi olla useampi rivi", textareaInput(style.footer.text, v => style.footer.text = v, "esim. Luottamuksellinen")));
     body.appendChild(fieldRow("Tasaus", alignSelect(style.footer.align, v => style.footer.align = v)));
+    body.appendChild(fieldRow("Fonttikoko", sizeSelect(style.footer.fontSize || 9, [7,8,9,10,11,12,14], v => style.footer.fontSize = v)));
+    body.appendChild(fieldRow("Väri", colorPicker(style.footer.color || "#7a7566", v => style.footer.color = v)));
     const pn = toggleRow("Näytä sivunumero (esim. Sivu 1 / 3)", style.footer.showPageNumber, (v) => style.footer.showPageNumber = v);
     body.appendChild(pn.wrap);
   }
