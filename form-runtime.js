@@ -707,8 +707,37 @@ async function loadDocStyle(){
       pagesBefore: s.pagesBefore || [],
       pagesAfter: s.pagesAfter || []
     };
+    await fetchDocxAttachments(loadedDocStyle);
   }catch(err){
     loadedDocStyle = window.DocxStyleEngine.defaultStyle();
+  }
+}
+
+/*
+ * Hakee käyttäjän lataamat .docx-liitteet (kansilehti ja/tai vakiotekstisivut)
+ * Supabase Storagesta ja liittää tavut _docxBytes-kenttään, jota
+ * docx-style-engine.js käyttää altChunk-upotukseen. Jos haku epäonnistuu,
+ * kenttä jää tyhjäksi ja moottori näyttää huomautuksen sen paikalla.
+ */
+async function fetchDocxAttachment(path){
+  try{
+    const { data, error } = await window.__supabaseClient.storage.from("submission-photos").download(path);
+    if (error || !data) return null;
+    return await data.arrayBuffer();
+  }catch(err){
+    console.warn("Word-liitteen haku epäonnistui", path, err);
+    return null;
+  }
+}
+
+async function fetchDocxAttachments(s){
+  if (s.coverPage && s.coverPage.sourceMode === "docx" && s.coverPage.docxPath){
+    s.coverPage._docxBytes = await fetchDocxAttachment(s.coverPage.docxPath);
+  }
+  for (const page of (s.pagesBefore || []).concat(s.pagesAfter || [])){
+    if (page.sourceMode === "docx" && page.docxPath){
+      page._docxBytes = await fetchDocxAttachment(page.docxPath);
+    }
   }
 }
 

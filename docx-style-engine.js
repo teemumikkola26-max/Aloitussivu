@@ -7,14 +7,15 @@
 
    TYYLIOBJEKTIN MUOTO (tallennetaan Supabasen doc_styles-tauluun):
    {
-     coverPage: { enabled, title, subtitle, logoDataUrl, accentColor, companyInfo },
+     coverPage: { enabled, title, subtitle, logoDataUrl, accentColor, companyInfo,
+                  sourceMode: "generated"|"docx", docxPath, docxFileName },
      header: { enabled, text, showDate, align, showLogo, fontSize, color },
      footer: { enabled, text, showPageNumber, align, fontSize, color },
      fonts: { heading, body, headingSize, bodySize },
      colors: { heading, body },
      toc: { enabled, variant: "classic"|"simple" },
-     pagesBefore: [ { id, title, blocks } ],   // vakiotekstisivut ennen lomakkeen sisältöä
-     pagesAfter:  [ { id, title, blocks } ]    // vakiotekstisivut lomakkeen sisällön jälkeen
+     pagesBefore: [ { id, title, blocks, sourceMode, docxPath, docxFileName } ],
+     pagesAfter:  [ { id, title, blocks, sourceMode, docxPath, docxFileName } ]
 
      // Sivun "blocks" on lista lohkoja, esim:
      //   { type:"heading",    text }
@@ -24,13 +25,20 @@
      //   { type:"numbered",   items:[...], color }
      // Vanhat tallenteet, joissa on vain { content: "..." } (yksi tekstilohko),
      // luetaan yhä oikein normalizePage()-funktion kautta.
+     //
+     // sourceMode:"docx" (kansilehdellä tai yksittäisellä sivulla) tarkoittaa,
+     // että sisältö tulee käyttäjän itse lataamasta .docx-tiedostosta blocksin
+     // sijaan. docxPath on polku Supabase Storagessa; kutsujan (export-koodin)
+     // täytyy ladata tiedoston tavut ETUKÄTEEN ja liittää ne kenttään
+     // "_docxBytes" (ArrayBuffer/Uint8Array) ennen assembleDocx()-kutsua --
+     // tämä moduuli ei itse tee verkkokutsuja.
    }
    ========================================================================= */
 window.DocxStyleEngine = (function(){
 
   function defaultStyle(){
     return {
-      coverPage: { enabled:false, title:"", subtitle:"", logoDataUrl:"", accentColor:"#8fb79c", companyInfo:"" },
+      coverPage: { enabled:false, title:"", subtitle:"", logoDataUrl:"", accentColor:"#8fb79c", companyInfo:"", sourceMode:"generated", docxPath:"", docxFileName:"" },
       header: { enabled:false, text:"", showDate:false, align:"left", showLogo:false, fontSize:9, color:"#7a7566" },
       footer: { enabled:false, text:"", showPageNumber:true, align:"center", fontSize:9, color:"#7a7566" },
       fonts: { heading:"Calibri", body:"Calibri", headingSize:14, bodySize:10.5 },
@@ -176,6 +184,17 @@ window.DocxStyleEngine = (function(){
     return '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
   }
 
+  /*
+   * altChunk upottaa toisen Word-tiedoston (käyttäjän itse lataaman .docx:n)
+   * sellaisenaan tähän dokumenttiin -- Word yhdistää sisällön (tekstit,
+   * muotoilut, kuvat, taulukot) automaattisesti avatessaan tiedoston.
+   * Näin käyttäjän oma muotoilu säilyy sellaisenaan, ilman että meidän
+   * tarvitsee itse tulkita heidän Word-tiedostonsa sisältöä.
+   */
+  function altChunkXml(rId){
+    return '<w:altChunk r:id="rId' + rId + '"/>';
+  }
+
   function tocFieldXml(variant, headingText){
     const switches = variant === "simple" ? '\\o "1-1" \\h \\n \\z' : '\\o "1-1" \\h \\z \\u';
     return paraXml(headingText || "Sisällysluettelo", { bold:true, sz:32 }) +
@@ -270,6 +289,7 @@ window.DocxStyleEngine = (function(){
     const relParts = [];
     const contentTypeOverrides = [];
     const mediaFiles = [];
+    const chunkFiles = []; // [{ name, bytes }] -- käyttäjän lataamat .docx-liitteet (altChunk)
     let relCounter = 10; // pieni marginaali kiinteille rel-id:eille alla
     let docPrCounter = 100;
 
@@ -277,6 +297,15 @@ window.DocxStyleEngine = (function(){
       mediaFiles.push({ name: m.name, blob: m.blob });
       relParts.push('<Relationship Id="rId'+m.rId+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/'+m.name+'"/>');
     });
+
+    function registerDocxChunk(bytes, fileName){
+      const rId = relCounter++;
+      const name = fileName || ("afchunk" + chunkFiles.length + ".docx");
+      chunkFiles.push({ name, bytes });
+      relParts.push('<Relationship Id="rId'+rId+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/aFChunk" Target="'+name+'"/>');
+      contentTypeOverrides.push('<Override PartName="/word/'+name+'" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document"/>');
+      return rId;
+    }
 
     let logoInfo = null;
     if (style.coverPage && style.coverPage.logoDataUrl && (style.coverPage.enabled || (style.header && style.header.showLogo))){
@@ -291,30 +320,42 @@ window.DocxStyleEngine = (function(){
     // ---- Kansilehti (oma sectio, ei ylä/alatunnistetta) ----
     if (style.coverPage && style.coverPage.enabled){
       const coverParts = [];
-      coverParts.push(paraXml("", { after:1200 }));
-      if (logoInfo){
-        const maxCx = 3200000;
-        const { cx, cy } = scaledDims(logoInfo.w, logoInfo.h, maxCx);
-        const rId = relCounter++;
-        mediaFiles.push({ name:"logo.jpeg", blob: logoInfo.blob });
-        relParts.push('<Relationship Id="rId'+rId+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/logo.jpeg"/>');
-        coverParts.push(imageXml(rId, cx, cy, docPrCounter++, "center"));
-        coverParts.push(paraXml("", { after:400 }));
-      }
-      coverParts.push(paraXml(style.coverPage.title || meta.title || "Lomake", {
-        bold:true, sz:56, align:"center", font: style.fonts.heading, color: style.colors.heading, after:120,
-        bottomBorder: style.coverPage.accentColor ? { color: style.coverPage.accentColor, sz:20 } : null
-      }));
-      if (style.coverPage.subtitle){
-        coverParts.push(paraXml(style.coverPage.subtitle, {
-          sz:26, align:"center", font: style.fonts.body, color: style.colors.body, after:120
+      if (style.coverPage.sourceMode === "docx"){
+        if (style.coverPage._docxBytes){
+          const rId = registerDocxChunk(style.coverPage._docxBytes, "cover-chunk.docx");
+          coverParts.push(altChunkXml(rId));
+        } else {
+          coverParts.push(paraXml("", { after:1200 }));
+          coverParts.push(paraXml("Kansilehden liitetiedostoa (" + (style.coverPage.docxFileName || "ladattu .docx") + ") ei saatu haettua.", {
+            align:"center", italic:true, font: style.fonts.body, color:"A13030"
+          }));
+        }
+      } else {
+        coverParts.push(paraXml("", { after:1200 }));
+        if (logoInfo){
+          const maxCx = 3200000;
+          const { cx, cy } = scaledDims(logoInfo.w, logoInfo.h, maxCx);
+          const rId = relCounter++;
+          mediaFiles.push({ name:"logo.jpeg", blob: logoInfo.blob });
+          relParts.push('<Relationship Id="rId'+rId+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/logo.jpeg"/>');
+          coverParts.push(imageXml(rId, cx, cy, docPrCounter++, "center"));
+          coverParts.push(paraXml("", { after:400 }));
+        }
+        coverParts.push(paraXml(style.coverPage.title || meta.title || "Lomake", {
+          bold:true, sz:56, align:"center", font: style.fonts.heading, color: style.colors.heading, after:120,
+          bottomBorder: style.coverPage.accentColor ? { color: style.coverPage.accentColor, sz:20 } : null
         }));
-      }
-      if (style.coverPage.companyInfo){
-        coverParts.push(paraXml("", { after:800 }));
-        coverParts.push(paraXml(style.coverPage.companyInfo, {
-          sz:18, align:"center", font: style.fonts.body, color:"7A7566"
-        }));
+        if (style.coverPage.subtitle){
+          coverParts.push(paraXml(style.coverPage.subtitle, {
+            sz:26, align:"center", font: style.fonts.body, color: style.colors.body, after:120
+          }));
+        }
+        if (style.coverPage.companyInfo){
+          coverParts.push(paraXml("", { after:800 }));
+          coverParts.push(paraXml(style.coverPage.companyInfo, {
+            sz:18, align:"center", font: style.fonts.body, color:"7A7566"
+          }));
+        }
       }
       finalBodyParts.push(...coverParts);
 
@@ -334,7 +375,18 @@ window.DocxStyleEngine = (function(){
         bold:true, sz: pt2hp(style.fonts.headingSize), font: style.fonts.heading, color: style.colors.heading,
         pStyle:"Heading1", after:160
       }));
-      finalBodyParts.push(...renderPageBlocks(normalizePage(page), style));
+      if (page.sourceMode === "docx"){
+        if (page._docxBytes){
+          const rId = registerDocxChunk(page._docxBytes, "page-chunk-" + chunkFiles.length + ".docx");
+          finalBodyParts.push(altChunkXml(rId));
+        } else {
+          finalBodyParts.push(paraXml("Sivun liitetiedostoa (" + (page.docxFileName || "ladattu .docx") + ") ei saatu haettua.", {
+            italic:true, font: style.fonts.body, color:"A13030"
+          }));
+        }
+      } else {
+        finalBodyParts.push(...renderPageBlocks(normalizePage(page), style));
+      }
       finalBodyParts.push(pageBreakXml());
     });
 
@@ -346,7 +398,18 @@ window.DocxStyleEngine = (function(){
         bold:true, sz: pt2hp(style.fonts.headingSize), font: style.fonts.heading, color: style.colors.heading,
         pStyle:"Heading1", after:160
       }));
-      finalBodyParts.push(...renderPageBlocks(normalizePage(page), style));
+      if (page.sourceMode === "docx"){
+        if (page._docxBytes){
+          const rId = registerDocxChunk(page._docxBytes, "page-chunk-" + chunkFiles.length + ".docx");
+          finalBodyParts.push(altChunkXml(rId));
+        } else {
+          finalBodyParts.push(paraXml("Sivun liitetiedostoa (" + (page.docxFileName || "ladattu .docx") + ") ei saatu haettua.", {
+            italic:true, font: style.fonts.body, color:"A13030"
+          }));
+        }
+      } else {
+        finalBodyParts.push(...renderPageBlocks(normalizePage(page), style));
+      }
     });
 
     // ---- Ylä-/alatunniste ----
@@ -473,6 +536,7 @@ window.DocxStyleEngine = (function(){
       const mediaFolder = wordFolder.folder("media");
       mediaFiles.forEach(m => mediaFolder.file(m.name, m.blob));
     }
+    chunkFiles.forEach(c => wordFolder.file(c.name, c.bytes));
     zip.folder("docProps").file("core.xml", coreXml);
     zip.folder("docProps").file("app.xml", appXml);
 

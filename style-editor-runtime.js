@@ -324,38 +324,42 @@ function buildPagesCard(titleText, key){
     head.appendChild(delBtn);
     pageEl.appendChild(head);
 
-    const blocksWrap = document.createElement("div");
-    pageEl.appendChild(blocksWrap);
+    pageEl.appendChild(buildDocxSourceControl(page, page.id, renderEditor));
 
-    function rerenderBlocks(){
-      blocksWrap.innerHTML = "";
-      page.blocks.forEach((b, bIdx) => {
-        blocksWrap.appendChild(renderBlockEditor(page.blocks, bIdx, rerenderBlocks));
-      });
-    }
-    rerenderBlocks();
+    if ((page.sourceMode || "generated") !== "docx"){
+      const blocksWrap = document.createElement("div");
+      pageEl.appendChild(blocksWrap);
 
-    const addBlockRow = document.createElement("div");
-    addBlockRow.style.cssText = "display:flex;gap:6px;margin-top:8px;";
-    const newBlockType = { value: "paragraph" };
-    const addTypeSel = blockTypeSelect(newBlockType.value, v => newBlockType.value = v);
-    addTypeSel.style.flex = "1";
-    const addBlockBtn = document.createElement("button");
-    addBlockBtn.type = "button";
-    addBlockBtn.className = "add-row-btn";
-    addBlockBtn.style.marginTop = "0";
-    addBlockBtn.textContent = "+ Lisää lohko";
-    addBlockBtn.addEventListener("click", () => {
-      const t = newBlockType.value;
-      const blk = { type: t };
-      if (t === "bullets" || t === "numbered") blk.items = [""];
-      else blk.text = "";
-      page.blocks.push(blk);
+      function rerenderBlocks(){
+        blocksWrap.innerHTML = "";
+        page.blocks.forEach((b, bIdx) => {
+          blocksWrap.appendChild(renderBlockEditor(page.blocks, bIdx, rerenderBlocks));
+        });
+      }
       rerenderBlocks();
-    });
-    addBlockRow.appendChild(addTypeSel);
-    addBlockRow.appendChild(addBlockBtn);
-    pageEl.appendChild(addBlockRow);
+
+      const addBlockRow = document.createElement("div");
+      addBlockRow.style.cssText = "display:flex;gap:6px;margin-top:8px;";
+      const newBlockType = { value: "paragraph" };
+      const addTypeSel = blockTypeSelect(newBlockType.value, v => newBlockType.value = v);
+      addTypeSel.style.flex = "1";
+      const addBlockBtn = document.createElement("button");
+      addBlockBtn.type = "button";
+      addBlockBtn.className = "add-row-btn";
+      addBlockBtn.style.marginTop = "0";
+      addBlockBtn.textContent = "+ Lisää lohko";
+      addBlockBtn.addEventListener("click", () => {
+        const t = newBlockType.value;
+        const blk = { type: t };
+        if (t === "bullets" || t === "numbered") blk.items = [""];
+        else blk.text = "";
+        page.blocks.push(blk);
+        rerenderBlocks();
+      });
+      addBlockRow.appendChild(addTypeSel);
+      addBlockRow.appendChild(addBlockBtn);
+      pageEl.appendChild(addBlockRow);
+    }
 
     body.appendChild(pageEl);
   });
@@ -388,6 +392,10 @@ function buildCoverCard(){
   body.appendChild(t.wrap);
 
   if (style.coverPage.enabled){
+    body.appendChild(buildDocxSourceControl(style.coverPage, "cover", renderEditor));
+  }
+
+  if (style.coverPage.enabled && style.coverPage.sourceMode !== "docx"){
     body.appendChild(fieldRow("Otsikko (tyhjä = lomakkeen nimi)", textInput(style.coverPage.title, v => style.coverPage.title = v, "esim. Kuntotarkastusraportti")));
     body.appendChild(fieldRow("Alaotsikko", textInput(style.coverPage.subtitle, v => style.coverPage.subtitle = v, "esim. Osoite tai tilaaja")));
     body.appendChild(fieldRow("Korostusviivan väri (otsikon alla)", colorPicker(style.coverPage.accentColor, v => style.coverPage.accentColor = v)));
@@ -442,6 +450,146 @@ function buildCoverCard(){
 
   card.appendChild(body);
   return card;
+}
+
+/*
+ * Käyttäjän lataamat .docx-liitteet (kansilehti tai vakiotekstisivu)
+ * tallennetaan samaan Storage-buckettiin kuin lomaketäyttöjen valokuvat.
+ * Jos organisaatiossa on tarkoituksenmukaisempaa käyttää erillistä buckettia,
+ * vaihda vakio alle (bucket pitää luoda ja sille pitää olla RLS-käytännöt
+ * valmiina Supabasen hallintapaneelissa).
+ */
+const DOC_ATTACHMENT_BUCKET = "submission-photos";
+const MAX_DOCX_SIZE_BYTES = 8 * 1024 * 1024; // 8 MB
+
+let cachedUserId = null;
+async function getUserIdCached(){
+  if (cachedUserId) return cachedUserId;
+  const { data, error } = await supabaseClient.auth.getUser();
+  if (error || !data || !data.user) throw new Error("Käyttäjää ei tunnistettu.");
+  cachedUserId = data.user.id;
+  return cachedUserId;
+}
+
+function docxSlotPath(userId, slotName){
+  return userId + "/doc-style/" + encodeURIComponent(FORM_KEY) + "/" + slotName + ".docx";
+}
+
+async function uploadDocxAttachment(file, slotName){
+  if (!file.name.toLowerCase().endsWith(".docx")){
+    throw new Error("Vain .docx-tiedostot ovat tuettuja.");
+  }
+  if (file.size > MAX_DOCX_SIZE_BYTES){
+    throw new Error("Tiedosto on liian suuri (max " + (MAX_DOCX_SIZE_BYTES/1024/1024) + " MB).");
+  }
+  const userId = await getUserIdCached();
+  const path = docxSlotPath(userId, slotName);
+  const { error } = await supabaseClient.storage.from(DOC_ATTACHMENT_BUCKET)
+    .upload(path, file, { upsert:true, contentType: file.type || "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+  if (error) throw error;
+  return path;
+}
+
+async function removeDocxAttachment(path){
+  if (!path) return;
+  try{
+    await supabaseClient.storage.from(DOC_ATTACHMENT_BUCKET).remove([path]);
+  }catch(err){
+    console.warn("Liitetiedoston poisto tallennustilasta epäonnistui", err);
+  }
+}
+
+/*
+ * Rakentaa yhden "sisällön lähde: Sovelluksen luoma / Oma Word-tiedosto"
+ * -osion. target on kohdeobjekti (style.coverPage tai yksittäinen sivu),
+ * jolle asetetaan sourceMode/docxPath/docxFileName. slotName on vakaa
+ * tunniste, jolla liite tallennetaan Storageen (esim. "cover" tai sivun id).
+ */
+function buildDocxSourceControl(target, slotName, onRerender){
+  const wrap = document.createElement("div");
+  wrap.style.cssText = "margin:8px 0;padding:10px;background:var(--paper);border-radius:8px;";
+
+  const modeRow = document.createElement("div");
+  modeRow.style.cssText = "display:flex;gap:14px;font-size:.82rem;margin-bottom:8px;";
+  ["generated","docx"].forEach(mode => {
+    const lbl = document.createElement("label");
+    lbl.style.cssText = "display:flex;align-items:center;gap:5px;cursor:pointer;";
+    const radio = document.createElement("input");
+    radio.type = "radio";
+    radio.name = "srcmode-" + slotName;
+    radio.checked = (target.sourceMode || "generated") === mode;
+    radio.addEventListener("change", () => {
+      if (!radio.checked) return;
+      target.sourceMode = mode;
+      onRerender();
+    });
+    lbl.appendChild(radio);
+    lbl.appendChild(document.createTextNode(mode === "docx" ? "Oma Word-tiedosto (.docx)" : "Sovelluksen luoma"));
+    modeRow.appendChild(lbl);
+  });
+  wrap.appendChild(modeRow);
+
+  if (target.sourceMode === "docx"){
+    if (target.docxFileName){
+      const info = document.createElement("div");
+      info.style.cssText = "font-size:.82rem;margin-bottom:6px;display:flex;align-items:center;gap:8px;";
+      info.appendChild(document.createTextNode("📎 " + target.docxFileName));
+      const rmBtn = document.createElement("button");
+      rmBtn.type = "button";
+      rmBtn.className = "fr-btn fr-btn-danger";
+      rmBtn.textContent = "Poista liite";
+      rmBtn.addEventListener("click", async () => {
+        await removeDocxAttachment(target.docxPath);
+        target.docxPath = "";
+        target.docxFileName = "";
+        onRerender();
+      });
+      info.appendChild(rmBtn);
+      wrap.appendChild(info);
+    } else {
+      const hint = document.createElement("div");
+      hint.style.cssText = "font-size:.78rem;color:var(--ink-soft);margin-bottom:6px;";
+      hint.textContent = "Ei vielä ladattua tiedostoa. Vientiin tulee huomautus, jos tiedosto puuttuu.";
+      wrap.appendChild(hint);
+    }
+
+    const fileInput = document.createElement("input");
+    fileInput.type = "file";
+    fileInput.accept = ".docx";
+    fileInput.style.display = "none";
+    fileInput.addEventListener("change", async (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      pickBtn.disabled = true;
+      pickBtn.textContent = "Ladataan…";
+      try{
+        const path = await uploadDocxAttachment(file, slotName);
+        target.docxPath = path;
+        target.docxFileName = file.name;
+        onRerender();
+      }catch(err){
+        showToast("Tiedoston lataus epäonnistui: " + (err.message || err));
+        pickBtn.disabled = false;
+        pickBtn.textContent = target.docxFileName ? "Vaihda tiedosto" : "Valitse .docx-tiedosto";
+      }
+    });
+    wrap.appendChild(fileInput);
+
+    const pickBtn = document.createElement("button");
+    pickBtn.type = "button";
+    pickBtn.className = "add-row-btn";
+    pickBtn.style.marginTop = "0";
+    pickBtn.textContent = target.docxFileName ? "Vaihda tiedosto" : "Valitse .docx-tiedosto";
+    pickBtn.addEventListener("click", () => fileInput.click());
+    wrap.appendChild(pickBtn);
+
+    const note = document.createElement("div");
+    note.style.cssText = "font-size:.74rem;color:var(--ink-soft);margin-top:6px;";
+    note.textContent = "Word yhdistää tiedostosi sisällön (tekstit, muotoilut, kuvat) automaattisesti raporttiin sitä avattaessa — oma muotoilusi säilyy sellaisenaan.";
+    wrap.appendChild(note);
+  }
+
+  return wrap;
 }
 
 function resizeImageToDataUrl(file, maxDim){
