@@ -265,6 +265,48 @@ window.DocxStyleEngine = (function(){
     });
   }
 
+  /*
+   * Lukee ladatun .docx-liitteen OMAN sivunasettelun (sivukoko + marginaalit)
+   * sen document.xml:n viimeisestä <w:sectPr>:stä, jotta emme pakota
+   * sovelluksen omia oletusarvoja liitteen päälle. Palauttaa null, jos
+   * tiedostoa ei voida purkaa tai siitä ei löydy sectPr:ää -- tällöin
+   * kutsuja käyttää sovelluksen oletusarvoja (ennallaan, ei regressiota).
+   */
+  async function extractPageSetupFromDocx(bytes){
+    try{
+      const subZip = await JSZip.loadAsync(bytes);
+      const docXmlFile = subZip.file("word/document.xml");
+      if (!docXmlFile) return null;
+      const xmlText = await docXmlFile.async("string");
+      const parser = new DOMParser();
+      const xdoc = parser.parseFromString(xmlText, "application/xml");
+      if (xdoc.getElementsByTagName("parsererror").length) return null;
+      const W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
+      const sectPrs = xdoc.getElementsByTagNameNS(W_NS, "sectPr");
+      if (!sectPrs.length) return null;
+      // Dokumentin viimeinen sectPr edustaa sen pääsektiota (tai ainoaa sektiota).
+      const sectPr = sectPrs[sectPrs.length - 1];
+      const pgSzEl = sectPr.getElementsByTagNameNS(W_NS, "pgSz")[0];
+      const pgMarEl = sectPr.getElementsByTagNameNS(W_NS, "pgMar")[0];
+      if (!pgSzEl && !pgMarEl) return null;
+      function copyAttrs(el, names){
+        if (!el) return "";
+        let s = "";
+        names.forEach(n => {
+          const v = el.getAttribute("w:" + n);
+          if (v !== null && v !== "") s += ' w:' + n + '="' + v + '"';
+        });
+        return s;
+      }
+      const pgSzXml = pgSzEl ? '<w:pgSz' + copyAttrs(pgSzEl, ["w","h","orient","code"]) + '/>' : '';
+      const pgMarXml = pgMarEl ? '<w:pgMar' + copyAttrs(pgMarEl, ["top","right","bottom","left","header","footer","gutter"]) + '/>' : '';
+      if (!pgSzXml && !pgMarXml) return null;
+      return { pgSzXml, pgMarXml };
+    }catch(e){
+      return null;
+    }
+  }
+
   function pxToEmu(px){ return Math.round(px * 9525); }
 
   function scaledDims(w, h, maxCxEmu){
@@ -359,9 +401,23 @@ window.DocxStyleEngine = (function(){
       }
       finalBodyParts.push(...coverParts);
 
+      // Kansilehden oma sivukoko/marginaalit: jos kansilehti on ladattu .docx,
+      // luetaan sen OMA sectPr ja käytetään sitä, jotta asettelu (esim. reunukset,
+      // sivun suunta) ei muutu viennin yhteydessä. Muussa tapauksessa (tai jos
+      // purku epäonnistuu) käytetään sovelluksen oletusarvoja kuten ennenkin.
+      let coverPgSzXml = '<w:pgSz w:w="11906" w:h="16838"/>';
+      let coverPgMarXml = '<w:pgMar w:top="1417" w:right="1417" w:bottom="1417" w:left="1417"/>';
+      if (style.coverPage.sourceMode === "docx" && style.coverPage._docxBytes){
+        const coverPageSetup = await extractPageSetupFromDocx(style.coverPage._docxBytes);
+        if (coverPageSetup){
+          if (coverPageSetup.pgSzXml) coverPgSzXml = coverPageSetup.pgSzXml;
+          if (coverPageSetup.pgMarXml) coverPgMarXml = coverPageSetup.pgMarXml;
+        }
+      }
+
       // Sectionin päätös ilman header/footer-viittausta (kansilehti pysyy puhtaana)
       finalBodyParts.push(
-        '<w:p><w:pPr><w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1417" w:right="1417" w:bottom="1417" w:left="1417"/></w:sectPr></w:pPr></w:p>'
+        '<w:p><w:pPr><w:sectPr>' + coverPgSzXml + coverPgMarXml + '</w:sectPr></w:pPr></w:p>'
       );
     }
 
