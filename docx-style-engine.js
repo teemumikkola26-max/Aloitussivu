@@ -101,6 +101,13 @@ window.DocxStyleEngine = (function(){
 
   const FONT_CHOICES = ["Calibri","Arial","Georgia","Times New Roman","Verdana","Cambria","Tahoma"];
 
+  // Tuotujen .docx-liitteiden mediatiedostojen tarvitsemat Content_Types-oletukset
+  // (jpeg/xml/rels ovat jo aina mukana peruspaketissa).
+  const EXT_CONTENT_TYPES = {
+    png:"image/png", gif:"image/gif", bmp:"image/bmp", tif:"image/tiff", tiff:"image/tiff",
+    emf:"image/x-emf", wmf:"image/x-wmf", wdp:"image/vnd.ms-photo", jpg:"image/jpeg", jpeg:"image/jpeg"
+  };
+
   function xmlEsc(s){
     return String(s == null ? "" : s)
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -146,8 +153,10 @@ window.DocxStyleEngine = (function(){
    * Kiinteä numerointimääritelmä: numId=1 luettelomerkeille (•),
    * numId=2 numeroidulle listalle (1. 2. 3. ...). Sisällytetään aina
    * dokumenttiin -- ei haittaa vaikka mitään listaa ei käytettäisi.
+   * extraXml: tuodusta .docx-liitteestä poimitut (uudelleennimetyt)
+   * abstractNum/num-määritelmät, jotka lisätään perään.
    */
-  function numberingXml(){
+  function numberingXml(extraXml){
     return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
       '<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
       '<w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="bullet"/>' +
@@ -157,7 +166,251 @@ window.DocxStyleEngine = (function(){
       '<w:lvlText w:val="%1."/><w:lvlJc w:val="left"/><w:pPr><w:ind w:left="432" w:hanging="432"/></w:pPr></w:lvl></w:abstractNum>' +
       '<w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>' +
       '<w:num w:numId="2"><w:abstractNumId w:val="1"/></w:num>' +
+      (extraXml || '') +
       '</w:numbering>';
+  }
+
+  /*
+   * Poimii OOXML-elementin (esim. <w:style ...>...</w:style>) merkkijonosta
+   * kaikki esiintymät alkaen annetusta avaavasta tagista, laskien
+   * <tag ...> / </tag> -sisäkkäisyyden itse (regex ei osaa tätä luotettavasti
+   * kun sisältöä on paljon ja se voi teoriassa sisältää samannimisiä
+   * sisäkkäisiä elementtejä).
+   */
+  function extractTopLevelBlocks(xml, tagName){
+    const blocks = [];
+    const openRe = new RegExp('<' + tagName + '(?:\\s[^>]*)?>', 'g');
+    const selfCloseRe = new RegExp('<' + tagName + '(?:\\s[^>]*)?/>');
+    let m;
+    while ((m = openRe.exec(xml))){
+      if (selfCloseRe.test(m[0])) continue; // ei pitäisi tapahtua näille tageille, mutta varmuuden vuoksi
+      const start = m.index;
+      let depth = 1;
+      const scanRe = new RegExp('<' + tagName + '(?:\\s[^>]*)?/?>|</' + tagName + '>', 'g');
+      scanRe.lastIndex = openRe.lastIndex;
+      let end = -1, sm;
+      while ((sm = scanRe.exec(xml))){
+        if (sm[0].charAt(1) === '/') { depth--; if (depth === 0){ end = sm.index + sm[0].length; break; } }
+        else if (!sm[0].endsWith('/>')) depth++;
+      }
+      if (end === -1) break;
+      blocks.push(xml.slice(start, end));
+      openRe.lastIndex = end;
+    }
+    return blocks;
+  }
+
+  /*
+   * Tuo käyttäjän lataaman .docx-tiedoston sisällön (kansilehti tai
+   * vakiotekstisivu) suoraan osaksi tuotettavaa dokumenttia -- EI
+   * altChunk-viittauksena (joka vaatii Wordin tulkitsevan sen erikseen ja
+   * jättää nimettyihin tyyleihin/teemaan perustuvan muotoilun helposti
+   * soveltamatta), vaan kopioimalla ja uudelleennimeämällä tyylit,
+   * numeroinnit, teeman, kuvat ja mahdollisen ylä-/alatunnisteen niin,
+   * etteivät ne törmää tämän dokumentin omiin. Näin muotoilu säilyy
+   * täsmälleen samana kaikissa Word-yhteensopivissa ohjelmissa, ei vain
+   * Wordissa.
+   *
+   * ctx-oliossa jaetut, koko assembleDocx-kutsun ajan kertyvät taulukot:
+   * relParts, contentTypeOverrides, mediaFiles, headerFolderFiles,
+   * headerRelsFiles, importedStyleDefs, importedNumDefs, extraDefaultExts
+   * (Set), sekä ctx.theme (ensimmäinen tuotu teema voittaa).
+   * Palauttaa { bodyXml, sectPr } -- sectPr sisältää lähteen oman
+   * sivukoon/marginaalit (ja ylä/alatunnisteen, jos sellainen löytyi).
+   */
+  async function importDocxAsSection(bytes, ctx, label){
+    const zip = await JSZip.loadAsync(bytes);
+    const docFile = zip.file("word/document.xml");
+    if (!docFile) throw new Error("word/document.xml puuttuu ladatusta tiedostosta");
+    const docXml = await docFile.async("string");
+    const relsFile = zip.file("word/_rels/document.xml.rels");
+    const relsXml = relsFile ? await relsFile.async("string") : "";
+
+    const importIdx = ++ctx.importCounter;
+
+    function parseRelationships(xmlText){
+      const map = {};
+      const re = /<Relationship\s+Id="([^"]+)"\s+Type="([^"]+)"\s+Target="([^"]+)"(\s+TargetMode="([^"]+)")?\s*\/>/g;
+      let m;
+      while ((m = re.exec(xmlText))){
+        map[m[1]] = { type: m[2], target: m[3], external: m[5] === "External" };
+      }
+      return map;
+    }
+
+    // ---- kuvat + ulkoiset linkit: kopioi ja rakenna vanha->uusi rId -kartta ----
+    async function importMediaFromRels(relMap, basePath, filePrefix){
+      const idMap = {};
+      for (const oldId in relMap){
+        const r = relMap[oldId];
+        if (r.target.indexOf("media/") === 0){
+          const zipPath = basePath + r.target;
+          const f = zip.file(zipPath);
+          if (!f) continue;
+          const blob = await f.async("blob");
+          const origName = r.target.split("/").pop();
+          const ext = (origName.split(".").pop() || "bin").toLowerCase();
+          if (EXT_CONTENT_TYPES[ext]) ctx.extraDefaultExts.add(ext);
+          const newName = filePrefix + "_" + origName;
+          ctx.mediaFiles.push({ name: newName, blob });
+          const newRid = ctx.relCounter.value++;
+          ctx.relParts.push('<Relationship Id="rId'+newRid+'" Type="'+r.type+'" Target="media/'+newName+'"/>');
+          idMap[oldId] = newRid;
+        } else if (r.external){
+          const newRid = ctx.relCounter.value++;
+          ctx.relParts.push('<Relationship Id="rId'+newRid+'" Type="'+r.type+'" Target="'+xmlEsc(r.target)+'" TargetMode="External"/>');
+          idMap[oldId] = newRid;
+        }
+      }
+      return idMap;
+    }
+
+    function remapRidsInXml(xmlStr, idMap){
+      let out = xmlStr;
+      for (const oldId in idMap) out = out.split('"'+oldId+'"').join('"rId'+idMap[oldId]+'"');
+      const validSet = {}; for (const k in idMap) validSet['rId'+idMap[k]] = true;
+      // pura roikkuvat hyperlinkit, joiden kohderelaatiota ei tuotu mukaan
+      out = out.replace(/<w:hyperlink([^>]*)r:id="([^"]+)"([^>]*)>([\s\S]*?)<\/w:hyperlink>/g, function(m,a,rid,b,inner){
+        return validSet[rid] ? m : inner;
+      });
+      return out;
+    }
+
+    const docRels = parseRelationships(relsXml);
+    const docIdMap = await importMediaFromRels(docRels, "word/", "imp" + importIdx);
+
+    // ---- runko + viimeinen (koko sivun) sectPr ----
+    const bodyMatch = /<w:body[^>]*>([\s\S]*)<\/w:body>/.exec(docXml);
+    let bodyInner = bodyMatch ? bodyMatch[1] : "";
+    const trimmed = bodyInner.trim();
+    let sourceSectPr = null;
+    const lastOpenIdx = trimmed.lastIndexOf('<w:sectPr');
+    if (lastOpenIdx !== -1){
+      const candidate = trimmed.slice(lastOpenIdx);
+      if (/^<w:sectPr\b[\s\S]*<\/w:sectPr>\s*$/.test(candidate)){
+        sourceSectPr = candidate.match(/^<w:sectPr\b[\s\S]*<\/w:sectPr>/)[0];
+        const idx = bodyInner.lastIndexOf(sourceSectPr);
+        bodyInner = bodyInner.slice(0, idx) + bodyInner.slice(idx + sourceSectPr.length);
+      }
+    }
+    // Dokumentin SISÄLLÄ olevat (väli-)osiovaihdot voivat viitata omiin
+    // ylä/alatunnisteisiinsa -- niitä ei tuoda, joten viittaukset poistetaan
+    // ettei jää roikkuvia rId:eitä.
+    bodyInner = bodyInner.replace(/<w:headerReference[^/]*\/>/g, "").replace(/<w:footerReference[^/]*\/>/g, "");
+
+    bodyInner = remapRidsInXml(bodyInner, docIdMap);
+
+    // ---- tyylit: poimi, nimeä uudelleen törmäysten välttämiseksi ----
+    const styleIdMap = {};
+    let importedStylesXml = "";
+    const stylesFile = zip.file("word/styles.xml");
+    if (stylesFile){
+      const stylesXmlSrc = await stylesFile.async("string");
+      const styleBlocks = extractTopLevelBlocks(stylesXmlSrc, "w:style");
+      const prefix = "imp" + importIdx + "_";
+      styleBlocks.forEach(block => {
+        const idMatch = /w:styleId="([^"]+)"/.exec(block);
+        if (idMatch) styleIdMap[idMatch[1]] = prefix + idMatch[1];
+      });
+      const remapStyleRef = s => s.replace(
+        /(<w:(?:pStyle|rStyle|tblStyle|tblStylePr|basedOn|next|link|numStyleLink|styleLink)\s+w:val=")([^"]+)(")/g,
+        (m,pre,val,post) => styleIdMap[val] ? pre+styleIdMap[val]+post : m
+      );
+      importedStylesXml = styleBlocks.map(block => {
+        let b = block.replace(/w:styleId="([^"]+)"/, (m,id) => 'w:styleId="' + (styleIdMap[id] || id) + '"');
+        return remapStyleRef(b);
+      }).join('');
+      bodyInner = bodyInner.replace(
+        /(<w:(?:pStyle|rStyle|tblStyle|numStyleLink|styleLink)\s+w:val=")([^"]+)(")/g,
+        (m,pre,val,post) => styleIdMap[val] ? pre+styleIdMap[val]+post : m
+      );
+    }
+    ctx.importedStyleDefs.push(importedStylesXml);
+
+    // ---- numerointi: poimi, nimeä uudelleen ----
+    let importedNumXml = "";
+    const numberingFile = zip.file("word/numbering.xml");
+    if (numberingFile){
+      const numXmlSrc = await numberingFile.async("string");
+      const absBlocks = extractTopLevelBlocks(numXmlSrc, "w:abstractNum");
+      const numBlocks = extractTopLevelBlocks(numXmlSrc, "w:num");
+      const absIdMap = {}, numIdMap = {};
+      const base = 9000 + importIdx * 500;
+      absBlocks.forEach(b => {
+        const m = /w:abstractNumId="([^"]+)"/.exec(b);
+        if (m) absIdMap[m[1]] = String(base + parseInt(m[1], 10));
+      });
+      numBlocks.forEach(b => {
+        const m = /w:numId="([^"]+)"/.exec(b);
+        if (m) numIdMap[m[1]] = String(base + 200 + parseInt(m[1], 10));
+      });
+      const remappedAbs = absBlocks.map(b => b.replace(/w:abstractNumId="([^"]+)"/, (m,id) => 'w:abstractNumId="'+(absIdMap[id]||id)+'"'));
+      const remappedNum = numBlocks.map(b => {
+        let out = b.replace(/w:numId="([^"]+)"/, (m,id) => 'w:numId="'+(numIdMap[id]||id)+'"');
+        out = out.replace(/(<w:abstractNumId\s+w:val=")([^"]+)(")/, (m,pre,val,post) => absIdMap[val] ? pre+absIdMap[val]+post : m);
+        return out;
+      });
+      importedNumXml = remappedAbs.join('') + remappedNum.join('');
+      bodyInner = bodyInner.replace(/(<w:numId\s+w:val=")([^"]+)(")/g, (m,pre,val,post) => numIdMap[val] ? pre+numIdMap[val]+post : m);
+    }
+    ctx.importedNumDefs.push(importedNumXml);
+
+    // ---- teema (fontit/värit): vain ensimmäinen tuonti voittaa ----
+    if (!ctx.theme.xml){
+      const themeFile = zip.file("word/theme/theme1.xml");
+      if (themeFile){
+        ctx.theme.xml = await themeFile.async("string");
+        const themeRid = ctx.relCounter.value++;
+        ctx.relParts.push('<Relationship Id="rId'+themeRid+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="theme/theme1.xml"/>');
+        ctx.contentTypeOverrides.push('<Override PartName="/word/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>');
+      }
+    }
+
+    // ---- ylä-/alatunniste (vain koko tuodun sivun sulkevasta sectPr:stä) ----
+    let headerRefXml = "", footerRefXml = "";
+    if (sourceSectPr){
+      const hRefMatch = /<w:headerReference\s+w:type="default"\s+r:id="([^"]+)"/.exec(sourceSectPr);
+      const fRefMatch = /<w:footerReference\s+w:type="default"\s+r:id="([^"]+)"/.exec(sourceSectPr);
+      for (const ref of [{ m:hRefMatch, kind:"header", tag:"hdr" }, { m:fRefMatch, kind:"footer", tag:"ftr" }]){
+        if (!ref.m) continue;
+        const info = docRels[ref.m[1]];
+        if (!info) continue;
+        const partPath = "word/" + info.target;
+        const partFile = zip.file(partPath);
+        if (!partFile) continue;
+        let partXml = await partFile.async("string");
+        const partRelsPath = "word/_rels/" + info.target.split("/").pop() + ".rels";
+        const partRelsFile = zip.file(partRelsPath);
+        const partRels = partRelsFile ? parseRelationships(await partRelsFile.async("string")) : {};
+        const partIdMap = await importMediaFromRels(partRels, "word/", "imp" + importIdx + "_" + ref.kind);
+        partXml = remapRidsInXml(partXml, partIdMap);
+        if (Object.keys(styleIdMap).length){
+          partXml = partXml.replace(
+            /(<w:(?:pStyle|rStyle)\s+w:val=")([^"]+)(")/g,
+            (m,pre,val,post) => styleIdMap[val] ? pre+styleIdMap[val]+post : m
+          );
+        }
+        const partName = "imp-" + ref.kind + importIdx + ".xml";
+        ctx.headerFolderFiles.push({ name: partName, content: partXml });
+        const partRid = ctx.relCounter.value++;
+        ctx.relParts.push('<Relationship Id="rId'+partRid+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/'+ref.kind+'" Target="'+partName+'"/>');
+        ctx.contentTypeOverrides.push('<Override PartName="/word/'+partName+'" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.'+ref.kind+'+xml"/>');
+        if (ref.kind === "header") headerRefXml = '<w:headerReference w:type="default" r:id="rId'+partRid+'"/>';
+        else footerRefXml = '<w:footerReference w:type="default" r:id="rId'+partRid+'"/>';
+      }
+    }
+
+    // ---- siisti sectPr: vain sivukoko/marginaalit/suunta + mahd. oma ylä/alatunniste ----
+    let cleanSectPr;
+    if (sourceSectPr){
+      const pgSz = (/<w:pgSz\b[^/]*\/>/.exec(sourceSectPr) || [''])[0];
+      const pgMar = (/<w:pgMar\b[^/]*\/>/.exec(sourceSectPr) || [''])[0];
+      cleanSectPr = '<w:sectPr>' + headerRefXml + footerRefXml + pgSz + pgMar + '</w:sectPr>';
+    } else {
+      cleanSectPr = '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1417" w:right="1417" w:bottom="1417" w:left="1417"/></w:sectPr>';
+    }
+
+    return { bodyXml: bodyInner, sectPr: cleanSectPr };
   }
 
   function imageXml(rId, cx, cy, docPrId, align){
@@ -182,17 +435,6 @@ window.DocxStyleEngine = (function(){
 
   function pageBreakXml(){
     return '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
-  }
-
-  /*
-   * altChunk upottaa toisen Word-tiedoston (käyttäjän itse lataaman .docx:n)
-   * sellaisenaan tähän dokumenttiin -- Word yhdistää sisällön (tekstit,
-   * muotoilut, kuvat, taulukot) automaattisesti avatessaan tiedoston.
-   * Näin käyttäjän oma muotoilu säilyy sellaisenaan, ilman että meidän
-   * tarvitsee itse tulkita heidän Word-tiedostonsa sisältöä.
-   */
-  function altChunkXml(rId){
-    return '<w:altChunk r:id="rId' + rId + '"/>';
   }
 
   function tocFieldXml(variant, headingText){
@@ -265,48 +507,6 @@ window.DocxStyleEngine = (function(){
     });
   }
 
-  /*
-   * Lukee ladatun .docx-liitteen OMAN sivunasettelun (sivukoko + marginaalit)
-   * sen document.xml:n viimeisestä <w:sectPr>:stä, jotta emme pakota
-   * sovelluksen omia oletusarvoja liitteen päälle. Palauttaa null, jos
-   * tiedostoa ei voida purkaa tai siitä ei löydy sectPr:ää -- tällöin
-   * kutsuja käyttää sovelluksen oletusarvoja (ennallaan, ei regressiota).
-   */
-  async function extractPageSetupFromDocx(bytes){
-    try{
-      const subZip = await JSZip.loadAsync(bytes);
-      const docXmlFile = subZip.file("word/document.xml");
-      if (!docXmlFile) return null;
-      const xmlText = await docXmlFile.async("string");
-      const parser = new DOMParser();
-      const xdoc = parser.parseFromString(xmlText, "application/xml");
-      if (xdoc.getElementsByTagName("parsererror").length) return null;
-      const W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
-      const sectPrs = xdoc.getElementsByTagNameNS(W_NS, "sectPr");
-      if (!sectPrs.length) return null;
-      // Dokumentin viimeinen sectPr edustaa sen pääsektiota (tai ainoaa sektiota).
-      const sectPr = sectPrs[sectPrs.length - 1];
-      const pgSzEl = sectPr.getElementsByTagNameNS(W_NS, "pgSz")[0];
-      const pgMarEl = sectPr.getElementsByTagNameNS(W_NS, "pgMar")[0];
-      if (!pgSzEl && !pgMarEl) return null;
-      function copyAttrs(el, names){
-        if (!el) return "";
-        let s = "";
-        names.forEach(n => {
-          const v = el.getAttribute("w:" + n);
-          if (v !== null && v !== "") s += ' w:' + n + '="' + v + '"';
-        });
-        return s;
-      }
-      const pgSzXml = pgSzEl ? '<w:pgSz' + copyAttrs(pgSzEl, ["w","h","orient","code"]) + '/>' : '';
-      const pgMarXml = pgMarEl ? '<w:pgMar' + copyAttrs(pgMarEl, ["top","right","bottom","left","header","footer","gutter"]) + '/>' : '';
-      if (!pgSzXml && !pgMarXml) return null;
-      return { pgSzXml, pgMarXml };
-    }catch(e){
-      return null;
-    }
-  }
-
   function pxToEmu(px){ return Math.round(px * 9525); }
 
   function scaledDims(w, h, maxCxEmu){
@@ -331,23 +531,29 @@ window.DocxStyleEngine = (function(){
     const relParts = [];
     const contentTypeOverrides = [];
     const mediaFiles = [];
-    const chunkFiles = []; // [{ name, bytes }] -- käyttäjän lataamat .docx-liitteet (altChunk)
-    let relCounter = 10; // pieni marginaali kiinteille rel-id:eille alla
+    const headerFolderFiles = [];
+    const headerRelsFiles = []; // [{ name:"header1.xml.rels", content }] -- ei enää käytössä (ks. ctx-tuonti), säilytetty taaksepäin yhteensopivuuden vuoksi
     let docPrCounter = 100;
+
+    // Jaettu tila importDocxAsSection()-kutsuille (kansilehti + vakiotekstisivut,
+    // jotka on ladattu valmiina .docx-tiedostoina): tyylit/numeroinnit/teema/media
+    // kertyvät tänne ja kirjoitetaan pakettiin lopussa. relCounter.value on AINOA
+    // rId-laskuri koko funktiossa (myös alla oleva host-koodi käyttää sitä), jotta
+    // tuotu ja itse generoitu sisältö eivät koskaan saa samaa rId:tä.
+    const importCtx = {
+      relParts, contentTypeOverrides, mediaFiles, headerFolderFiles,
+      relCounter: { value: 10 },
+      importCounter: 0,
+      importedStyleDefs: [],
+      importedNumDefs: [],
+      extraDefaultExts: new Set(),
+      theme: { xml: null }
+    };
 
     extraMedia.forEach(m => {
       mediaFiles.push({ name: m.name, blob: m.blob });
       relParts.push('<Relationship Id="rId'+m.rId+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/'+m.name+'"/>');
     });
-
-    function registerDocxChunk(bytes, fileName){
-      const rId = relCounter++;
-      const name = fileName || ("afchunk" + chunkFiles.length + ".docx");
-      chunkFiles.push({ name, bytes });
-      relParts.push('<Relationship Id="rId'+rId+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/aFChunk" Target="'+name+'"/>');
-      contentTypeOverrides.push('<Override PartName="/word/'+name+'" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document"/>');
-      return rId;
-    }
 
     let logoInfo = null;
     if (style.coverPage && style.coverPage.logoDataUrl && (style.coverPage.enabled || (style.header && style.header.showLogo))){
@@ -359,13 +565,22 @@ window.DocxStyleEngine = (function(){
     const finalBodyParts = [];
     let headerFooterSectPrExtra = "";
 
-    // ---- Kansilehti (oma sectio, ei ylä/alatunnistetta) ----
+    // ---- Kansilehti (oma sectio; jos ladattu .docx, käyttää sen omaa sivukokoa/marginaaleja/ylä-alatunnistetta) ----
     if (style.coverPage && style.coverPage.enabled){
       const coverParts = [];
+      let coverSectPr = null;
       if (style.coverPage.sourceMode === "docx"){
         if (style.coverPage._docxBytes){
-          const rId = registerDocxChunk(style.coverPage._docxBytes, "cover-chunk.docx");
-          coverParts.push(altChunkXml(rId));
+          try{
+            const imported = await importDocxAsSection(style.coverPage._docxBytes, importCtx, "cover");
+            coverParts.push(imported.bodyXml);
+            coverSectPr = imported.sectPr;
+          } catch(e){
+            coverParts.push(paraXml("", { after:1200 }));
+            coverParts.push(paraXml("Kansilehden liitetiedostoa (" + (style.coverPage.docxFileName || "ladattu .docx") + ") ei voitu lukea: " + (e && e.message || e), {
+              align:"center", italic:true, font: style.fonts.body, color:"A13030"
+            }));
+          }
         } else {
           coverParts.push(paraXml("", { after:1200 }));
           coverParts.push(paraXml("Kansilehden liitetiedostoa (" + (style.coverPage.docxFileName || "ladattu .docx") + ") ei saatu haettua.", {
@@ -377,7 +592,7 @@ window.DocxStyleEngine = (function(){
         if (logoInfo){
           const maxCx = 3200000;
           const { cx, cy } = scaledDims(logoInfo.w, logoInfo.h, maxCx);
-          const rId = relCounter++;
+          const rId = importCtx.relCounter.value++;
           mediaFiles.push({ name:"logo.jpeg", blob: logoInfo.blob });
           relParts.push('<Relationship Id="rId'+rId+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/logo.jpeg"/>');
           coverParts.push(imageXml(rId, cx, cy, docPrCounter++, "center"));
@@ -401,23 +616,10 @@ window.DocxStyleEngine = (function(){
       }
       finalBodyParts.push(...coverParts);
 
-      // Kansilehden oma sivukoko/marginaalit: jos kansilehti on ladattu .docx,
-      // luetaan sen OMA sectPr ja käytetään sitä, jotta asettelu (esim. reunukset,
-      // sivun suunta) ei muutu viennin yhteydessä. Muussa tapauksessa (tai jos
-      // purku epäonnistuu) käytetään sovelluksen oletusarvoja kuten ennenkin.
-      let coverPgSzXml = '<w:pgSz w:w="11906" w:h="16838"/>';
-      let coverPgMarXml = '<w:pgMar w:top="1417" w:right="1417" w:bottom="1417" w:left="1417"/>';
-      if (style.coverPage.sourceMode === "docx" && style.coverPage._docxBytes){
-        const coverPageSetup = await extractPageSetupFromDocx(style.coverPage._docxBytes);
-        if (coverPageSetup){
-          if (coverPageSetup.pgSzXml) coverPgSzXml = coverPageSetup.pgSzXml;
-          if (coverPageSetup.pgMarXml) coverPgMarXml = coverPageSetup.pgMarXml;
-        }
-      }
-
-      // Sectionin päätös ilman header/footer-viittausta (kansilehti pysyy puhtaana)
+      // Sectionin päätös: ladatulla sivulla sen OMA sivukoko/marginaalit (ja ylä-/alatunniste,
+      // jos sillä oli sellainen); generoidulla kansilehdellä ennallaan puhdas, ilman ylä/alatunnistetta.
       finalBodyParts.push(
-        '<w:p><w:pPr><w:sectPr>' + coverPgSzXml + coverPgMarXml + '</w:sectPr></w:pPr></w:p>'
+        '<w:p><w:pPr>' + (coverSectPr || '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1417" w:right="1417" w:bottom="1417" w:left="1417"/></w:sectPr>') + '</w:pPr></w:p>'
       );
     }
 
@@ -426,29 +628,39 @@ window.DocxStyleEngine = (function(){
       finalBodyParts.push(tocFieldXml(style.toc.variant));
       finalBodyParts.push(pageBreakXml());
     }
-    (style.pagesBefore || []).forEach(page => {
+    for (const page of (style.pagesBefore || [])){
       finalBodyParts.push(paraXml(page.title || "Sivu", {
         bold:true, sz: pt2hp(style.fonts.headingSize), font: style.fonts.heading, color: style.colors.heading,
         pStyle:"Heading1", after:160
       }));
       if (page.sourceMode === "docx"){
         if (page._docxBytes){
-          const rId = registerDocxChunk(page._docxBytes, "page-chunk-" + chunkFiles.length + ".docx");
-          finalBodyParts.push(altChunkXml(rId));
+          try{
+            const imported = await importDocxAsSection(page._docxBytes, importCtx, "page");
+            finalBodyParts.push(imported.bodyXml);
+            // Oma sectio säilyttää sivun alkuperäisen sivukoon/marginaalit/ylä-alatunnisteen.
+            finalBodyParts.push('<w:p><w:pPr>' + imported.sectPr + '</w:pPr></w:p>');
+          } catch(e){
+            finalBodyParts.push(paraXml("Sivun liitetiedostoa (" + (page.docxFileName || "ladattu .docx") + ") ei voitu lukea: " + (e && e.message || e), {
+              italic:true, font: style.fonts.body, color:"A13030"
+            }));
+            finalBodyParts.push(pageBreakXml());
+          }
         } else {
           finalBodyParts.push(paraXml("Sivun liitetiedostoa (" + (page.docxFileName || "ladattu .docx") + ") ei saatu haettua.", {
             italic:true, font: style.fonts.body, color:"A13030"
           }));
+          finalBodyParts.push(pageBreakXml());
         }
       } else {
         finalBodyParts.push(...renderPageBlocks(normalizePage(page), style));
+        finalBodyParts.push(pageBreakXml());
       }
-      finalBodyParts.push(pageBreakXml());
-    });
+    }
 
     finalBodyParts.push(...bodyParts);
 
-    (style.pagesAfter || []).forEach(page => {
+    for (const page of (style.pagesAfter || [])){
       finalBodyParts.push(pageBreakXml());
       finalBodyParts.push(paraXml(page.title || "Sivu", {
         bold:true, sz: pt2hp(style.fonts.headingSize), font: style.fonts.heading, color: style.colors.heading,
@@ -456,8 +668,15 @@ window.DocxStyleEngine = (function(){
       }));
       if (page.sourceMode === "docx"){
         if (page._docxBytes){
-          const rId = registerDocxChunk(page._docxBytes, "page-chunk-" + chunkFiles.length + ".docx");
-          finalBodyParts.push(altChunkXml(rId));
+          try{
+            const imported = await importDocxAsSection(page._docxBytes, importCtx, "page");
+            finalBodyParts.push(imported.bodyXml);
+            finalBodyParts.push('<w:p><w:pPr>' + imported.sectPr + '</w:pPr></w:p>');
+          } catch(e){
+            finalBodyParts.push(paraXml("Sivun liitetiedostoa (" + (page.docxFileName || "ladattu .docx") + ") ei voitu lukea: " + (e && e.message || e), {
+              italic:true, font: style.fonts.body, color:"A13030"
+            }));
+          }
         } else {
           finalBodyParts.push(paraXml("Sivun liitetiedostoa (" + (page.docxFileName || "ladattu .docx") + ") ei saatu haettua.", {
             italic:true, font: style.fonts.body, color:"A13030"
@@ -466,15 +685,13 @@ window.DocxStyleEngine = (function(){
       } else {
         finalBodyParts.push(...renderPageBlocks(normalizePage(page), style));
       }
-    });
+    }
 
     // ---- Ylä-/alatunniste ----
     let headerRefXml = "", footerRefXml = "";
-    const headerFolderFiles = [];
-    const headerRelsFiles = []; // [{ name:"header1.xml.rels", content }]
 
     if (style.header && style.header.enabled){
-      const rId = relCounter++;
+      const rId = importCtx.relCounter.value++;
       let headerText = style.header.text || "";
       if (style.header.showDate){
         const d = new Date();
@@ -507,7 +724,7 @@ window.DocxStyleEngine = (function(){
       headerRefXml = '<w:headerReference w:type="default" r:id="rId'+rId+'"/>';
     }
     if (style.footer && style.footer.enabled){
-      const rId = relCounter++;
+      const rId = importCtx.relCounter.value++;
       const footerAlign = style.footer.align || "center";
       const footerFontOpts = { font: style.fonts.body, sz: pt2hp(style.footer.fontSize || 9), color: (style.footer.color || "#7a7566") };
       let footerXml;
@@ -541,6 +758,7 @@ window.DocxStyleEngine = (function(){
       '<w:pPr><w:outlineLvl w:val="0"/></w:pPr>' +
       '<w:rPr>' + fontRpr(style.fonts.heading) + '<w:b/><w:color w:val="' + (style.colors.heading||"#233043").replace("#","") + '"/><w:sz w:val="' + pt2hp(style.fonts.headingSize||14) + '"/></w:rPr>' +
       '</w:style>' +
+      importCtx.importedStyleDefs.join('') +
       '</w:styles>';
 
     const contentTypesXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
@@ -548,6 +766,9 @@ window.DocxStyleEngine = (function(){
       '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
       '<Default Extension="xml" ContentType="application/xml"/>' +
       '<Default Extension="jpeg" ContentType="image/jpeg"/>' +
+      Array.from(importCtx.extraDefaultExts).filter(ext => ext !== "jpeg" && ext !== "jpg").map(ext =>
+        '<Default Extension="' + ext + '" ContentType="' + (EXT_CONTENT_TYPES[ext] || "application/octet-stream") + '"/>'
+      ).join('') +
       '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
       '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>' +
       '<Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>' +
@@ -581,7 +802,7 @@ window.DocxStyleEngine = (function(){
     const wordFolder = zip.folder("word");
     wordFolder.file("document.xml", documentXml);
     wordFolder.file("styles.xml", stylesXml);
-    wordFolder.file("numbering.xml", numberingXml());
+    wordFolder.file("numbering.xml", numberingXml(importCtx.importedNumDefs.join('')));
     wordFolder.folder("_rels").file("document.xml.rels", docRelsXml);
     headerFolderFiles.forEach(f => wordFolder.file(f.name, f.content));
     if (headerRelsFiles.length){
@@ -592,7 +813,9 @@ window.DocxStyleEngine = (function(){
       const mediaFolder = wordFolder.folder("media");
       mediaFiles.forEach(m => mediaFolder.file(m.name, m.blob));
     }
-    chunkFiles.forEach(c => wordFolder.file(c.name, c.bytes));
+    if (importCtx.theme.xml){
+      wordFolder.folder("theme").file("theme1.xml", importCtx.theme.xml);
+    }
     zip.folder("docProps").file("core.xml", coreXml);
     zip.folder("docProps").file("app.xml", appXml);
 
