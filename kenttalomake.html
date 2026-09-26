@@ -529,9 +529,10 @@ select{
 }
 
 .table-field-table input[type=text],
-.table-field-table input[type=number]{
+.table-field-table input[type=number],
+.table-field-table select{
   width:100px;
-  min-width:70px;
+  min-width:78px;
   padding:6px 7px;
   font-size:14px;
   border-radius:6px
@@ -3095,8 +3096,21 @@ function syncFieldColumnsFromDom(f,fieldIdx){
         `mf_col_type_${fieldIdx}_${cIdx}`
       );
 
+    const optionsTextarea=
+      document.getElementById(
+        `mf_col_options_${fieldIdx}_${cIdx}`
+      );
+
     if(labelInput)col.label=labelInput.value;
     if(typeSelect)col.type=typeSelect.value;
+
+    if(optionsTextarea){
+      col.options=
+        optionsTextarea.value
+          .split("\n")
+          .map(s=>s.trim())
+          .filter(Boolean);
+    }
   });
 }
 
@@ -3642,15 +3656,25 @@ function renderMethodFieldRow(f,idx,fields){
             <select id="mf_col_type_${idx}_${cIdx}" style="flex:0 0 auto;width:auto;">
               <option value="text" ${col.type==="text"?"selected":""}>Teksti</option>
               <option value="number" ${col.type==="number"?"selected":""}>Numero</option>
+              <option value="select" ${col.type==="select"?"selected":""}>Valinta</option>
             </select>
             <button type="button" class="btn btn-sm btn-danger" id="mf_col_del_${idx}_${cIdx}">✕</button>
+          </div>
+          <div id="mf_col_options_wrap_${idx}_${cIdx}" style="${col.type==="select"?"":"display:none;"}margin-top:6px;">
+            <label style="margin-top:0;">Vaihtoehdot (yksi per rivi)</label>
+            <textarea id="mf_col_options_${idx}_${cIdx}" placeholder="Vaihtoehto 1&#10;Vaihtoehto 2">${escapeHtml((col.options||[]).join("\n"))}</textarea>
           </div>
         </div>
       `);
 
       colsWrap.appendChild(cr);
 
-      cr.querySelector(`#mf_col_type_${idx}_${cIdx}`).onchange=()=>{
+      const colOptionsWrap=
+        cr.querySelector(`#mf_col_options_wrap_${idx}_${cIdx}`);
+
+      cr.querySelector(`#mf_col_type_${idx}_${cIdx}`).onchange=e=>{
+        colOptionsWrap.style.display=
+          e.target.value==="select"?"":"none";
         syncFieldColumnsFromDom(f,idx);
         renderHints();
       };
@@ -3909,14 +3933,41 @@ function saveMethodEdit(){
 
       fields[i].columns=
         (fields[i].columns||[])
-          .map(col=>({
-            id:col.id||genFieldId(),
-            label:String(col.label||"").trim(),
-            type:col.type==="number"?"number":"text"
-          }));
+          .map(col=>{
+
+            const type=
+              (col.type==="number"||col.type==="select")
+                ?col.type
+                :"text";
+
+            const cleaned={
+              id:col.id||genFieldId(),
+              label:String(col.label||"").trim(),
+              type
+            };
+
+            if(type==="select"){
+              cleaned.options=
+                (col.options||[])
+                  .map(s=>String(s).trim())
+                  .filter(Boolean);
+            }
+
+            return cleaned;
+          });
 
       if(fields[i].columns.some(col=>col.label==="")){
         toast('Anna jokaiselle "'+label+'" -taulukon sarakkeelle nimi');
+        return;
+      }
+
+      if(
+        fields[i].columns.some(col=>
+          col.type==="select" &&
+          (!col.options||!col.options.length)
+        )
+      ){
+        toast('Anna jokaiselle "'+label+'" -taulukon valintasarakkeelle vähintään yksi vaihtoehto');
         return;
       }
 
@@ -4625,21 +4676,48 @@ function renderTableField(f,values){
       const tr=
         elRow(`
           <tr>
-            ${cols.map(c=>`
-              <td>
-                <input
-                  type="${c.type==="number"?"number":"text"}"
-                  id="tblcell_${escapeAttribute(f.id)}_${rIdx}_${escapeAttribute(c.id)}"
-                  autocomplete="off"
-                  ${c.type==="number"?'step="any"':""}
-                  value="${escapeAttribute(
-                    row[c.id]!==undefined && row[c.id]!==null
-                      ?row[c.id]
-                      :""
-                  )}"
-                >
-              </td>
-            `).join("")}
+            ${cols.map(c=>{
+
+              if(c.type==="select"){
+
+                const curVal=
+                  row[c.id]!==undefined && row[c.id]!==null
+                    ?row[c.id]
+                    :"";
+
+                return `
+                  <td>
+                    <select
+                      id="tblcell_${escapeAttribute(f.id)}_${rIdx}_${escapeAttribute(c.id)}"
+                    >
+                      <option value="">Valitse...</option>
+                      ${(c.options||[]).map(o=>`
+                        <option
+                          value="${escapeAttribute(o)}"
+                          ${o===curVal?"selected":""}
+                        >${escapeHtml(o)}</option>
+                      `).join("")}
+                    </select>
+                  </td>
+                `;
+              }
+
+              return `
+                <td>
+                  <input
+                    type="${c.type==="number"?"number":"text"}"
+                    id="tblcell_${escapeAttribute(f.id)}_${rIdx}_${escapeAttribute(c.id)}"
+                    autocomplete="off"
+                    ${c.type==="number"?'step="any"':""}
+                    value="${escapeAttribute(
+                      row[c.id]!==undefined && row[c.id]!==null
+                        ?row[c.id]
+                        :""
+                    )}"
+                  >
+                </td>
+              `;
+            }).join("")}
             <td class="table-field-action">
               <div style="display:flex;gap:4px;align-items:center;">
                 ${hasHints?`
