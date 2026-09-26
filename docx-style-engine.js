@@ -99,7 +99,7 @@ window.DocxStyleEngine = (function(){
     return parts;
   }
 
-  const FONT_CHOICES = ["Calibri","Arial","Georgia","Times New Roman","Verdana","Cambria","Tahoma"];
+  const FONT_CHOICES = ["Calibri","Arial","Georgia","Times New Roman","Verdana","Cambria","Tahoma","Ebrima"];
 
   // Tuotujen .docx-liitteiden mediatiedostojen tarvitsemat Content_Types-oletukset
   // (jpeg/xml/rels ovat jo aina mukana peruspaketissa).
