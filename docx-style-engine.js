@@ -41,8 +41,8 @@ window.DocxStyleEngine = (function(){
       coverPage: { enabled:false, title:"", subtitle:"", logoDataUrl:"", accentColor:"#8fb79c", companyInfo:"", sourceMode:"generated", docxPath:"", docxFileName:"" },
       header: { enabled:false, text:"", showDate:false, align:"left", showLogo:false, fontSize:9, color:"#7a7566" },
       footer: { enabled:false, text:"", showPageNumber:true, align:"center", fontSize:9, color:"#7a7566" },
-      fonts: { heading:"Calibri", body:"Calibri", headingSize:14, bodySize:10.5 },
-      colors: { heading:"#233043", body:"#1c2430" },
+      fonts: { heading:"Calibri", body:"Calibri", headingSize:16, subheadingSize:11, bodySize:10.5 },
+      colors: { heading:"#000000", body:"#1c2430" },
       toc: { enabled:false, variant:"classic" },
       pagesBefore: [],
       pagesAfter: []
@@ -76,7 +76,7 @@ window.DocxStyleEngine = (function(){
         }));
       } else if (type === "subheading"){
         parts.push(paraXml(b.text || "", {
-          bold:true, sz: pt2hp(Math.max(10, (style.fonts.headingSize||14) - 3)), font: style.fonts.heading,
+          bold:true, sz: pt2hp(style.fonts.subheadingSize||11), font: style.fonts.heading,
           color: b.color || style.colors.heading, before:120, after:80
         }));
       } else if (type === "bullets" || type === "numbered"){
@@ -388,9 +388,17 @@ window.DocxStyleEngine = (function(){
       }
     }
 
-    // ---- ylä-/alatunniste (vain koko tuodun sivun sulkevasta sectPr:stä) ----
+    // ---- ylä-/alatunniste ----
+    // "page"-tyyppinen tuonti (vakiotekstisivu) käyttää AINA sovelluksen
+    // omaa vakioylä-/alatunnistetta (ctx.mainHeaderRefXml/mainFooterRefXml),
+    // jotta sivu näyttää samalta kuin muutkin sivut -- lähdetiedoston OMAA
+    // ylä-/alatunnistetta ei tuoda tähän. "cover"-tyyppinen tuonti (kansilehti)
+    // säilyttää edelleen lähteensä oman ylä-/alatunnisteen (tai ei mitään).
     let headerRefXml = "", footerRefXml = "";
-    if (sourceSectPr){
+    if (label === "page"){
+      headerRefXml = ctx.mainHeaderRefXml || "";
+      footerRefXml = ctx.mainFooterRefXml || "";
+    } else if (sourceSectPr){
       const hRefMatch = /<w:headerReference\s+w:type="default"\s+r:id="([^"]+)"/.exec(sourceSectPr);
       const fRefMatch = /<w:footerReference\s+w:type="default"\s+r:id="([^"]+)"/.exec(sourceSectPr);
       for (const ref of [{ m:hRefMatch, kind:"header", tag:"hdr" }, { m:fRefMatch, kind:"footer", tag:"ftr" }]){
@@ -429,7 +437,8 @@ window.DocxStyleEngine = (function(){
       const pgMar = (/<w:pgMar\b[^/]*\/>/.exec(sourceSectPr) || [''])[0];
       cleanSectPr = '<w:sectPr>' + headerRefXml + footerRefXml + pgSz + pgMar + '</w:sectPr>';
     } else {
-      cleanSectPr = '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1417" w:right="1417" w:bottom="1417" w:left="1417"/></w:sectPr>';
+      cleanSectPr = '<w:sectPr>' + headerRefXml + footerRefXml +
+        '<w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1417" w:right="1417" w:bottom="1417" w:left="1417"/></w:sectPr>';
     }
 
     return { bodyXml: bodyInner, sectPr: cleanSectPr };
@@ -478,9 +487,22 @@ window.DocxStyleEngine = (function(){
     const headerColCount = opts.headerColCount || 0;
     const colCount = rows[0] ? rows[0].length : 0;
     const totalWidth = 9026;
-    const colWidths = opts.colWidthPercents
+    const rawColWidths = opts.colWidthPercents
       ? opts.colWidthPercents.map(p => Math.floor(totalWidth * p / 100))
       : Array.from({length:colCount}, () => Math.floor(totalWidth / (colCount||1)));
+
+    // Pyöristys (ja opts.colWidthPercents-prosenttien pyöristys esim. 16+16+
+    // 16+16+16+16=96) voi jättää sarakeleveydet summaamaan hieman alle
+    // totalWidth:n. Ilman w:tblLayout="fixed" (ks. alla) Word saattaisi
+    // silloin laskea sarakeleveydet UUDELLEEN sisällön perusteella, jolloin
+    // otsikkosanat voivat pilkkoutua kirjain kerrallaan omille riveilleen.
+    // Varmistetaan siis, että leveydet summaavat TÄSMÄLLEEN totalWidth:iin
+    // (erotus lisätään viimeiseen sarakkeeseen).
+    const colWidths = rawColWidths.slice();
+    if (colWidths.length){
+      const sum = colWidths.reduce((a,b) => a+b, 0);
+      colWidths[colWidths.length-1] += (totalWidth - sum);
+    }
 
     const gridCols = colWidths.map(w => '<w:gridCol w:w="'+w+'"/>').join('');
     const noBorders = !!opts.noBorders;
@@ -510,8 +532,14 @@ window.DocxStyleEngine = (function(){
       return '<w:tr>' + tcXml + '</w:tr>';
     }).join('');
 
+    // w:tblLayout type="fixed" + w:tblW type="dxa" (eikä "auto") pakottaa
+    // Wordin käyttämään juuri näitä sarakeleveyksiä sellaisenaan, sen sijaan
+    // että se laskisi ne uudelleen solujen sisällön perusteella. Ilman tätä
+    // kapeat, moniriviset otsikkosolut (esim. "Paksuus (mm)") saattoivat
+    // renderöityä lähes nollaleveinä, jolloin teksti pilkkoutui kirjain
+    // kerrallaan omille riveilleen.
     return '<w:tbl>' +
-      '<w:tblPr><w:tblW w:w="0" w:type="auto"/>' + borderXml + '</w:tblPr>' +
+      '<w:tblPr><w:tblW w:w="'+totalWidth+'" w:type="dxa"/><w:tblLayout w:type="fixed"/>' + borderXml + '</w:tblPr>' +
       '<w:tblGrid>' + gridCols + '</w:tblGrid>' +
       trXml + '</w:tbl>';
   }
@@ -587,6 +615,72 @@ window.DocxStyleEngine = (function(){
 
     const finalBodyParts = [];
     let headerFooterSectPrExtra = "";
+
+    // ---- Ylä-/alatunniste ----
+    // Lasketaan TÄSSÄ (ennen kansilehteä/sivuja), jotta samat rId:t
+    // (headerRefXml/footerRefXml) ovat käytettävissä myös silloin, kun
+    // käyttäjä on ladannut vakiotekstisivuksi oman .docx-tiedoston --
+    // muuten importDocxAsSection() käyttäisi tuodun tiedoston OMAA
+    // ylä-/alatunnistetta (tai ei mitään), eivätkä ladatut sivut näyttäisi
+    // samalta kuin sovelluksen muut sivut.
+    let headerRefXml = "", footerRefXml = "";
+
+    if (style.header && style.header.enabled){
+      const rId = importCtx.relCounter.value++;
+      let headerText = style.header.text || "";
+      if (style.header.showDate){
+        const d = new Date();
+        const dateStr = d.getDate() + "." + (d.getMonth()+1) + "." + d.getFullYear();
+        headerText = headerText ? headerText + " — " + dateStr : dateStr;
+      }
+      const headerAlign = style.header.align || "left";
+      let headerBodyXml = "";
+      let headerRelsContent = "";
+
+      if (style.header.showLogo && logoInfo){
+        const maxCx = 900000; // pieni logo ylätunnisteessa
+        const { cx, cy } = scaledDims(logoInfo.w, logoInfo.h, maxCx);
+        mediaFiles.push({ name:"header-logo.jpeg", blob: logoInfo.blob });
+        // Ylätunnisteen kuvaviittaukset käyttävät OMAA rels-tiedostoaan (header1.xml.rels),
+        // joten rId1 tässä ei törmää dokumentin muihin rId:eihin.
+        headerRelsContent = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/header-logo.jpeg"/></Relationships>';
+        headerBodyXml += imageXml(1, cx, cy, 900, headerAlign);
+      }
+      headerBodyXml += paraXml(headerText, {
+        font: style.fonts.body, sz: pt2hp(style.header.fontSize || 9), color: (style.header.color || "#7a7566"), align: headerAlign
+      });
+
+      const headerXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">' +
+        headerBodyXml + '</w:hdr>';
+      headerFolderFiles.push({ name:"header1.xml", content: headerXml });
+      if (headerRelsContent) headerRelsFiles.push({ name:"header1.xml.rels", content: headerRelsContent });
+      relParts.push('<Relationship Id="rId'+rId+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/>');
+      contentTypeOverrides.push('<Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>');
+      headerRefXml = '<w:headerReference w:type="default" r:id="rId'+rId+'"/>';
+    }
+    if (style.footer && style.footer.enabled){
+      const rId = importCtx.relCounter.value++;
+      const footerAlign = style.footer.align || "center";
+      const footerFontOpts = { font: style.fonts.body, sz: pt2hp(style.footer.fontSize || 9), color: (style.footer.color || "#7a7566") };
+      let footerXml;
+      if (style.footer.showPageNumber){
+        footerXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+          pageNumberFieldXml(style.footer.text || "", footerAlign, footerFontOpts) + '</w:ftr>';
+      } else {
+        footerXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+          paraXml(style.footer.text || "", Object.assign({ align:footerAlign }, footerFontOpts)) + '</w:ftr>';
+      }
+      headerFolderFiles.push({ name:"footer1.xml", content: footerXml });
+      relParts.push('<Relationship Id="rId'+rId+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/>');
+      contentTypeOverrides.push('<Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/>');
+      footerRefXml = '<w:footerReference w:type="default" r:id="rId'+rId+'"/>';
+    }
+
+    // Sivukohtaisesti tuoduille vakiotekstisivuille (importDocxAsSection,
+    // label "page") jaettavat samat viittaukset, ks. kommentti kohdassa
+    // "---- ylä-/alatunniste ----" tuonnin sisällä.
+    importCtx.mainHeaderRefXml = headerRefXml;
+    importCtx.mainFooterRefXml = footerRefXml;
 
     // ---- Kansilehti (oma sectio; jos ladattu .docx, käyttää sen omaa sivukokoa/marginaaleja/ylä-alatunnistetta) ----
     if (style.coverPage && style.coverPage.enabled){
@@ -710,59 +804,7 @@ window.DocxStyleEngine = (function(){
       }
     }
 
-    // ---- Ylä-/alatunniste ----
-    let headerRefXml = "", footerRefXml = "";
-
-    if (style.header && style.header.enabled){
-      const rId = importCtx.relCounter.value++;
-      let headerText = style.header.text || "";
-      if (style.header.showDate){
-        const d = new Date();
-        const dateStr = d.getDate() + "." + (d.getMonth()+1) + "." + d.getFullYear();
-        headerText = headerText ? headerText + " — " + dateStr : dateStr;
-      }
-      const headerAlign = style.header.align || "left";
-      let headerBodyXml = "";
-      let headerRelsContent = "";
-
-      if (style.header.showLogo && logoInfo){
-        const maxCx = 900000; // pieni logo ylätunnisteessa
-        const { cx, cy } = scaledDims(logoInfo.w, logoInfo.h, maxCx);
-        mediaFiles.push({ name:"header-logo.jpeg", blob: logoInfo.blob });
-        // Ylätunnisteen kuvaviittaukset käyttävät OMAA rels-tiedostoaan (header1.xml.rels),
-        // joten rId1 tässä ei törmää dokumentin muihin rId:eihin.
-        headerRelsContent = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/header-logo.jpeg"/></Relationships>';
-        headerBodyXml += imageXml(1, cx, cy, 900, headerAlign);
-      }
-      headerBodyXml += paraXml(headerText, {
-        font: style.fonts.body, sz: pt2hp(style.header.fontSize || 9), color: (style.header.color || "#7a7566"), align: headerAlign
-      });
-
-      const headerXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">' +
-        headerBodyXml + '</w:hdr>';
-      headerFolderFiles.push({ name:"header1.xml", content: headerXml });
-      if (headerRelsContent) headerRelsFiles.push({ name:"header1.xml.rels", content: headerRelsContent });
-      relParts.push('<Relationship Id="rId'+rId+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/>');
-      contentTypeOverrides.push('<Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>');
-      headerRefXml = '<w:headerReference w:type="default" r:id="rId'+rId+'"/>';
-    }
-    if (style.footer && style.footer.enabled){
-      const rId = importCtx.relCounter.value++;
-      const footerAlign = style.footer.align || "center";
-      const footerFontOpts = { font: style.fonts.body, sz: pt2hp(style.footer.fontSize || 9), color: (style.footer.color || "#7a7566") };
-      let footerXml;
-      if (style.footer.showPageNumber){
-        footerXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
-          pageNumberFieldXml(style.footer.text || "", footerAlign, footerFontOpts) + '</w:ftr>';
-      } else {
-        footerXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
-          paraXml(style.footer.text || "", Object.assign({ align:footerAlign }, footerFontOpts)) + '</w:ftr>';
-      }
-      headerFolderFiles.push({ name:"footer1.xml", content: footerXml });
-      relParts.push('<Relationship Id="rId'+rId+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/>');
-      contentTypeOverrides.push('<Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/>');
-      footerRefXml = '<w:footerReference w:type="default" r:id="rId'+rId+'"/>';
-    }
+    // (headerRefXml/footerRefXml laskettu jo funktion alussa, ks. yllä.)
 
     const finalSectPr = '<w:sectPr>' + headerRefXml + footerRefXml +
       '<w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1417" w:right="1417" w:bottom="1417" w:left="1417"/></w:sectPr>';
@@ -790,7 +832,7 @@ window.DocxStyleEngine = (function(){
       '</w:style>' +
       '<w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:basedOn w:val="Normal"/><w:qFormat/>' +
       '<w:pPr><w:outlineLvl w:val="1"/></w:pPr>' +
-      '<w:rPr>' + fontRpr(style.fonts.heading) + '<w:b/><w:color w:val="' + (style.colors.heading||"#233043").replace("#","") + '"/><w:sz w:val="' + pt2hp(Math.max(9,(style.fonts.headingSize||14)-1)) + '"/></w:rPr>' +
+      '<w:rPr>' + fontRpr(style.fonts.heading) + '<w:b/><w:color w:val="' + (style.colors.heading||"#233043").replace("#","") + '"/><w:sz w:val="' + pt2hp(style.fonts.subheadingSize||11) + '"/></w:rPr>' +
       '</w:style>' +
       importCtx.importedStyleDefs.join('') +
       '</w:styles>';

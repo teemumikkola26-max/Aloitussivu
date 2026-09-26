@@ -1025,10 +1025,10 @@ async function persistMethods(){
 const COMMON_FIELDS=[
   {
     id:"paikka",
-    label:"Tutkittava tila",
+    label:"Tutkimuskohta / rakenneosa / tila",
     type:"text",
     req:true,
-    placeholder:"esim. Kylpyhuone, 1. krs"
+    placeholder:"esim. Kylpyhuone 1. krs, ulkoseinä"
   }
 ];
 
@@ -4223,7 +4223,7 @@ function renderEntryForm(){
     renderField(
       {
         id:"huomiot",
-        label:"Muut havainnot",
+        label:"Vapaa huomio (valinnainen)",
         type:"textarea"
       },
       editingEntry.values
@@ -5918,7 +5918,7 @@ async function exportWord(){
           {
             bold:true,
             sz:engine.pt2hp(
-              s.fonts.headingSize+3
+              s.fonts.headingSize
             ),
             font:s.fonts.heading,
             color:s.colors.heading,
@@ -5939,7 +5939,7 @@ async function exportWord(){
         {
           bold:true,
           sz:engine.pt2hp(
-            s.fonts.headingSize
+            s.fonts.subheadingSize
           ),
           font:s.fonts.heading,
           color:s.colors.heading,

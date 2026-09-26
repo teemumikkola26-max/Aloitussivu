@@ -698,8 +698,9 @@ function buildFontsCard(){
   body.className = "card-body";
 
   body.appendChild(fieldRow("Otsikoiden fontti", fontSelect(style.fonts.heading, v => style.fonts.heading = v)));
-  body.appendChild(fieldRow("Otsikoiden koko", sizeSelect(style.fonts.headingSize, [12,13,14,16,18,20,24,28], v => style.fonts.headingSize = v)));
-  body.appendChild(fieldRow("Otsikoiden väri", colorPicker(style.colors.heading, v => style.colors.heading = v)));
+  body.appendChild(fieldRow("Pääotsikoiden koko", sizeSelect(style.fonts.headingSize, [11,12,13,14,16,18,20,24,28], v => style.fonts.headingSize = v)));
+  body.appendChild(fieldRow("Alaotsikoiden koko", sizeSelect(style.fonts.subheadingSize||11, [9,10,11,12,13,14,16,18], v => style.fonts.subheadingSize = v)));
+  body.appendChild(fieldRow("Otsikoiden väri (pää- ja alaotsikot)", colorPicker(style.colors.heading, v => style.colors.heading = v)));
 
   body.appendChild(fieldRow("Leipätekstin fontti", fontSelect(style.fonts.body, v => style.fonts.body = v)));
   body.appendChild(fieldRow("Leipätekstin koko", sizeSelect(style.fonts.bodySize, [9,9.5,10,10.5,11,12,13,14], v => style.fonts.bodySize = v)));
