@@ -1025,10 +1025,10 @@ async function persistMethods(){
 const COMMON_FIELDS=[
   {
     id:"paikka",
-    label:"Tutkimuskohta / rakenneosa / tila",
+    label:"Tutkittava tila",
     type:"text",
     req:true,
-    placeholder:"esim. Kylpyhuone 1. krs, ulkoseinä"
+    placeholder:"esim. Kylpyhuone, 1. krs"
   }
 ];
 
@@ -4223,7 +4223,7 @@ function renderEntryForm(){
     renderField(
       {
         id:"huomiot",
-        label:"Vapaa huomio (valinnainen)",
+        label:"Muut havainnot",
         type:"textarea"
       },
       editingEntry.values
