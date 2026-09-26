@@ -559,6 +559,13 @@ select{
   flex:0 0 auto
 }
 
+.table-field-action{
+  position:sticky;
+  right:0;
+  background:var(--card);
+  box-shadow:-4px 0 4px -2px rgba(0,0,0,.08)
+}
+
 @media(min-width:700px){
   .wrap{
     max-width:850px;
@@ -4584,7 +4591,7 @@ function renderTableField(f,values){
                 ${cols.map(c=>`
                   <th>${escapeHtml(c.label||"")}</th>
                 `).join("")}
-                <th></th>
+                <th class="table-field-action"></th>
               </tr>
             </thead>
             <tbody id="tblbody_${escapeAttribute(f.id)}"></tbody>
@@ -4633,7 +4640,7 @@ function renderTableField(f,values){
                 >
               </td>
             `).join("")}
-            <td>
+            <td class="table-field-action">
               <div style="display:flex;gap:4px;align-items:center;">
                 ${hasHints?`
                   <button
