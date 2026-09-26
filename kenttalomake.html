@@ -2297,6 +2297,25 @@ function el(html){
   return d.firstElementChild;
 }
 
+/*
+ * el():n kaltainen, mutta <tr>...</tr>-merkkijonoille. Tavallinen
+ * div.innerHTML="<tr>...</tr>" ei toimi: selain jäsentää HTML:ää
+ * spesifikaation mukaan niin, että tr/td-tagit ilman table-
+ * kontekstia hylätään kokonaan, jolloin vain rivin ENSIMMÄINEN
+ * sisäkkäinen elementti (esim. ensimmäisen sarakkeen input) jäisi
+ * jäljelle ja loput sarakkeet katoaisivat. Käyttämällä <tbody>-
+ * elementtiä jäsennyskontekstina (parametrina annettu <tr>...</tr>
+ * mukaan lukien) <tr> ja sen <td>-lapset jäsentyvät oikein.
+ */
+function elRow(html){
+
+  const tbody=document.createElement("tbody");
+
+  tbody.innerHTML=html.trim();
+
+  return tbody.firstElementChild;
+}
+
 
 function escapeHtml(s){
 
@@ -4597,7 +4616,7 @@ function renderTableField(f,values){
     rows.forEach((row,rIdx)=>{
 
       const tr=
-        el(`
+        elRow(`
           <tr>
             ${cols.map(c=>`
               <td>
@@ -4643,7 +4662,7 @@ function renderTableField(f,values){
       if(hasHints){
 
         hintRowEl=
-          el(`
+          elRow(`
             <tr id="tblhintrow_${escapeAttribute(f.id)}_${rIdx}" style="display:none;">
               <td colspan="${cols.length+1}" style="border-bottom:1px solid var(--line);">
                 <div class="field-hint-box open" id="tblhintbox_${escapeAttribute(f.id)}_${rIdx}"></div>
