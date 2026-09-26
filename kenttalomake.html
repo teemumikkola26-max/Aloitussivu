@@ -455,6 +455,46 @@ select{
   color:#8a8574
 }
 
+.field-hint-host{
+  position:relative
+}
+
+.field-hint-btn{
+  position:absolute;
+  top:-4px;
+  right:0;
+  width:22px;
+  height:22px;
+  border-radius:50%;
+  border:1.5px solid var(--warn);
+  background:#fbf1de;
+  color:var(--warn);
+  font-weight:800;
+  font-size:.82rem;
+  line-height:1;
+  cursor:pointer;
+  padding:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  z-index:2
+}
+
+.field-hint-box{
+  display:none;
+  margin:6px 0 4px;
+  padding:8px 10px;
+  border-radius:8px;
+  background:#fbf1de;
+  border:1px solid var(--warn);
+  color:var(--warn);
+  font-size:.85rem
+}
+
+.field-hint-box.open{
+  display:block
+}
+
 @media(min-width:700px){
   .wrap{
     max-width:850px;
@@ -2939,6 +2979,126 @@ function fieldTypeLabel(type){
   return t?t.label:type;
 }
 
+/*
+ * APULAUSEET
+ *
+ * Kenttäkohtaisia ehdollisia vihjetekstejä tutkijalle, esim.
+ * "Pintakosteus koholla, tee rakennekosteusmittaus", kun kentän
+ * arvo täyttää ehdon (esim. > 80). Sallitut vertailut riippuvat
+ * kentän tyypistä: numerokentille suuruusvertailut, muille
+ * yhtäsuuruus/erisuuruus ja "sisältää".
+ */
+function hintOpsForType(type){
+  if(type==="number"){
+    return [
+      { value:"gt", label:"suurempi kuin (>)" },
+      { value:"gte", label:"vähintään (≥)" },
+      { value:"lt", label:"pienempi kuin (<)" },
+      { value:"lte", label:"enintään (≤)" },
+      { value:"eq", label:"yhtä suuri (=)" },
+      { value:"neq", label:"eri suuri (≠)" }
+    ];
+  }
+  return [
+    { value:"eq", label:"on (=)" },
+    { value:"neq", label:"ei ole (≠)" },
+    { value:"contains", label:"sisältää" }
+  ];
+}
+
+function evalHintRule(rule,type,rawValue){
+
+  if(
+    rawValue===undefined ||
+    rawValue===null
+  )return false;
+
+  const strVal=
+    String(rawValue).trim();
+
+  if(strVal==="")return false;
+
+
+  if(type==="number"){
+
+    const n=Number(strVal);
+    const rv=Number(rule.value);
+
+    if(
+      !Number.isFinite(n) ||
+      !Number.isFinite(rv)
+    )return false;
+
+    switch(rule.op){
+      case "gt":return n>rv;
+      case "gte":return n>=rv;
+      case "lt":return n<rv;
+      case "lte":return n<=rv;
+      case "eq":return n===rv;
+      case "neq":return n!==rv;
+      default:return false;
+    }
+  }
+
+  const a=strVal.toLowerCase();
+  const b=String(rule.value||"").trim().toLowerCase();
+
+  if(b==="")return false;
+
+  switch(rule.op){
+    case "eq":return a===b;
+    case "neq":return a!==b;
+    case "contains":return a.indexOf(b)!==-1;
+    default:return false;
+  }
+}
+
+function matchingHints(f,rawValue){
+
+  if(!f.hints||!f.hints.length)return [];
+
+  return f.hints
+    .filter(r=>
+      r.text &&
+      r.text.trim() &&
+      evalHintRule(r,f.type,rawValue)
+    )
+    .map(r=>r.text.trim());
+}
+
+/*
+ * Lukee kentän apulauserivien nykyiset DOM-arvot talteen f.hints-
+ * taulukkoon. Kutsutaan aina ennen kuin apulauserivit tai koko
+ * kenttälista piirretään uudelleen, jotta kesken kirjoituksen
+ * olevat arvot eivät katoa.
+ */
+function syncFieldHintsFromDom(f,fieldIdx){
+
+  if(!Array.isArray(f.hints))return;
+
+  f.hints.forEach((r,hIdx)=>{
+
+    const opSel=
+      document.getElementById(
+        `mf_hint_op_${fieldIdx}_${hIdx}`
+      );
+
+    const valInput=
+      document.getElementById(
+        `mf_hint_val_${fieldIdx}_${hIdx}`
+      );
+
+    const textInput=
+      document.getElementById(
+        `mf_hint_text_${fieldIdx}_${hIdx}`
+      );
+
+    if(opSel)r.op=opSel.value;
+    if(valInput)r.value=valInput.value;
+    if(textInput)r.text=textInput.value;
+  });
+}
+
 function renderMethodsManageCard(){
 
   const c=el(`
@@ -3018,6 +3178,8 @@ function renderMethodsManageCard(){
 
 function renderMethodFieldRow(f,idx,fields){
 
+  if(!Array.isArray(f.hints))f.hints=[];
+
   const row=el(`
     <div class="card" style="padding:12px;margin-bottom:10px;background:var(--paper);">
       <div style="display:flex;gap:8px;align-items:flex-start;">
@@ -3047,14 +3209,94 @@ function renderMethodFieldRow(f,idx,fields){
         <input type="checkbox" id="mf_req_${idx}" style="width:auto;" ${f.req?"checked":""}>
         Pakollinen kenttä
       </label>
+
+      <div style="margin-top:10px;border-top:1px solid var(--line);padding-top:10px;">
+        <label>Apulauseet tutkijalle (valinnainen)</label>
+        <div class="hint">
+          Näytetään huutomerkki-kuvakkeena lomakkeella, kun kirjattu
+          arvo täyttää ehdon (esim. arvo &gt; 80 → "Pintakosteus
+          koholla, tee rakennekosteusmittaus").
+        </div>
+        <div id="mf_hints_${idx}"></div>
+        <button type="button" class="btn btn-sm btn-outline" id="mf_addhint_${idx}">
+          + Lisää apulause
+        </button>
+      </div>
     </div>
   `);
 
   const typeSelect=row.querySelector(`#mf_type_${idx}`);
   const optionsWrap=row.querySelector(`#mf_options_wrap_${idx}`);
+  const hintsWrap=row.querySelector(`#mf_hints_${idx}`);
+
+  function renderHints(){
+
+    hintsWrap.innerHTML="";
+
+    const ops=hintOpsForType(f.type);
+
+    f.hints.forEach((r,hIdx)=>{
+
+      if(!ops.find(o=>o.value===r.op)){
+        r.op=ops[0].value;
+      }
+
+      const hr=el(`
+        <div class="card" style="padding:8px;margin-bottom:8px;background:#fff;">
+          <div style="display:flex;gap:6px;align-items:center;">
+            <select id="mf_hint_op_${idx}_${hIdx}" style="flex:0 0 auto;width:auto;">
+              ${ops.map(o=>`
+                <option value="${o.value}" ${o.value===r.op?"selected":""}>${o.label}</option>
+              `).join("")}
+            </select>
+            <input
+              type="text"
+              id="mf_hint_val_${idx}_${hIdx}"
+              placeholder="Arvo"
+              value="${escapeAttribute(r.value||"")}"
+              style="width:90px;flex:0 0 auto;"
+            >
+            <button type="button" class="btn btn-sm btn-danger" id="mf_hint_del_${idx}_${hIdx}" style="margin-left:auto;">✕</button>
+          </div>
+          <input
+            type="text"
+            id="mf_hint_text_${idx}_${hIdx}"
+            placeholder="Apulause, esim. Pintakosteus koholla, tee rakennekosteusmittaus"
+            value="${escapeAttribute(r.text||"")}"
+            style="margin-top:6px;"
+          >
+        </div>
+      `);
+
+      hintsWrap.appendChild(hr);
+
+      hr.querySelector(`#mf_hint_del_${idx}_${hIdx}`).onclick=()=>{
+        syncFieldHintsFromDom(f,idx);
+        f.hints.splice(hIdx,1);
+        renderHints();
+      };
+    });
+  }
+
+  renderHints();
+
+  row.querySelector(`#mf_addhint_${idx}`).onclick=()=>{
+    syncFieldHintsFromDom(f,idx);
+    f.hints.push({
+      id:genFieldId(),
+      op:hintOpsForType(f.type)[0].value,
+      value:"",
+      text:""
+    });
+    renderHints();
+  };
+
   typeSelect.onchange=()=>{
     optionsWrap.style.display=
       typeSelect.value==="select"?"":"none";
+    syncFieldHintsFromDom(f,idx);
+    f.type=typeSelect.value;
+    renderHints();
   };
 
   row.querySelector(`#mf_del_${idx}`).onclick=()=>{
@@ -3106,6 +3348,8 @@ function syncMethodFieldsFromDom(fields){
           .map(s=>s.trim())
           .filter(Boolean);
     }
+
+    syncFieldHintsFromDom(f,idx);
   });
 }
 
@@ -3151,7 +3395,8 @@ function renderMethodEditCard(){
       type:"text",
       req:false,
       placeholder:"",
-      options:[]
+      options:[],
+      hints:[]
     });
     renderMethodEditFieldsInto(fieldsListEl,editingMethod.fields);
   };
@@ -3205,6 +3450,21 @@ function saveMethodEdit(){
     }else{
       delete fields[i].options;
     }
+
+    syncFieldHintsFromDom(fields[i],i);
+
+    fields[i].hints=
+      (fields[i].hints||[])
+        .map(r=>({
+          id:r.id||genFieldId(),
+          op:r.op,
+          value:String(r.value||"").trim(),
+          text:String(r.text||"").trim()
+        }))
+        .filter(r=>
+          r.text!=="" &&
+          r.value!==""
+        );
 
     if(!fields[i].id) fields[i].id=genFieldId();
   }
@@ -3667,15 +3927,37 @@ function renderField(f,values){
   }
 
 
+  const hasHints=
+    Array.isArray(f.hints) &&
+    f.hints.length>0;
+
+
   const w=
     el(`
-      <div>
+      <div class="field-hint-host" style="position:relative;">
 
         <label class="${f.req?"req":""}">
           ${escapeHtml(f.label)}
         </label>
 
+        ${hasHints?`
+          <button
+            type="button"
+            class="field-hint-btn"
+            id="hintbtn_${escapeAttribute(f.id)}"
+            title="Näytä apulause"
+            style="display:none;"
+          >!</button>
+        `:""}
+
         ${ih}
+
+        ${hasHints?`
+          <div
+            class="field-hint-box"
+            id="hintbox_${escapeAttribute(f.id)}"
+          ></div>
+        `:""}
 
       </div>
     `);
@@ -3687,9 +3969,54 @@ function renderField(f,values){
     );
 
 
+  let refreshHint=()=>{};
+
+  if(hasHints){
+
+    const hintBtn=
+      w.querySelector(
+        `#hintbtn_${CSS.escape(f.id)}`
+      );
+
+    const hintBox=
+      w.querySelector(
+        `#hintbox_${CSS.escape(f.id)}`
+      );
+
+    refreshHint=()=>{
+
+      const matches=
+        matchingHints(f,values[f.id]);
+
+      if(matches.length){
+
+        hintBtn.style.display="flex";
+
+        hintBox.innerHTML=
+          matches
+            .map(t=>escapeHtml(t))
+            .join("<br>");
+
+      }else{
+
+        hintBtn.style.display="none";
+        hintBox.classList.remove("open");
+      }
+    };
+
+    hintBtn.onclick=()=>{
+      hintBox.classList.toggle("open");
+    };
+
+    refreshHint();
+  }
+
+
   input.oninput=e=>{
 
     values[f.id]=e.target.value;
+
+    refreshHint();
 
     scheduleAutosave();
   };
@@ -3698,6 +4025,8 @@ function renderField(f,values){
   input.onchange=e=>{
 
     values[f.id]=e.target.value;
+
+    refreshHint();
 
     scheduleAutosave();
   };
