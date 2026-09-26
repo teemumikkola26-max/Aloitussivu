@@ -788,6 +788,10 @@ window.DocxStyleEngine = (function(){
       '<w:pPr><w:outlineLvl w:val="0"/></w:pPr>' +
       '<w:rPr>' + fontRpr(style.fonts.heading) + '<w:b/><w:color w:val="' + (style.colors.heading||"#233043").replace("#","") + '"/><w:sz w:val="' + pt2hp(style.fonts.headingSize||14) + '"/></w:rPr>' +
       '</w:style>' +
+      '<w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:basedOn w:val="Normal"/><w:qFormat/>' +
+      '<w:pPr><w:outlineLvl w:val="1"/></w:pPr>' +
+      '<w:rPr>' + fontRpr(style.fonts.heading) + '<w:b/><w:color w:val="' + (style.colors.heading||"#233043").replace("#","") + '"/><w:sz w:val="' + pt2hp(Math.max(9,(style.fonts.headingSize||14)-1)) + '"/></w:rPr>' +
+      '</w:style>' +
       importCtx.importedStyleDefs.join('') +
       '</w:styles>';
 

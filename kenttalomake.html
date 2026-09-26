@@ -4566,6 +4566,27 @@ async function exportWord(){
         return a.originalIndex-b.originalIndex;
       });
 
+  /*
+   * Suomenkieliset monikkomuodot vakiomenetelmien ryhmäotsikoihin
+   * (esim. "avaus" -> "Rakenneavaukset"). Itse tehdyille/muokatuille
+   * menetelmille ei voida luotettavasti johtaa monikkomuotoa
+   * automaattisesti, joten niiden ryhmäotsikkona käytetään
+   * menetelmän omaa (yksikkömuotoista) nimeä sellaisenaan.
+   */
+  const METHOD_GROUP_HEADING={
+    aisti:"Aistinvaraiset tarkastelut",
+    pintakosteus:"Pintakosteuden mittaukset",
+    rh:"Rakenteen suht. kosteuden mittaukset (RH)",
+    merkkiaine:"Merkkiainekokeet",
+    nayte:"Näytteet",
+    lampokuvaus:"Lämpökuvaukset",
+    avaus:"Rakenneavaukset",
+    iv:"IV- ja painesuhdemittaukset",
+    muu:"Muut menetelmät"
+  };
+
+  let lastGroupMethodId=null;
+
   for(
     const {e,originalIndex:i} of exportOrder
   ){
@@ -4579,6 +4600,29 @@ async function exportWord(){
     if(!m)continue;
 
 
+    if(m.id!==lastGroupMethodId){
+
+      bodyParts.push(
+        engine.paraXml(
+          METHOD_GROUP_HEADING[m.id]||m.name,
+          {
+            bold:true,
+            sz:engine.pt2hp(
+              s.fonts.headingSize+3
+            ),
+            font:s.fonts.heading,
+            color:s.colors.heading,
+            pStyle:"Heading1",
+            before:320,
+            after:120
+          }
+        )
+      );
+
+      lastGroupMethodId=m.id;
+    }
+
+
     bodyParts.push(
       engine.paraXml(
         `Menetelmä ${i+1}: ${m.name}`,
@@ -4589,9 +4633,9 @@ async function exportWord(){
           ),
           font:s.fonts.heading,
           color:s.colors.heading,
-          pStyle:"Heading1",
-          before:280,
-          after:100
+          pStyle:"Heading2",
+          before:200,
+          after:80
         }
       )
     );
