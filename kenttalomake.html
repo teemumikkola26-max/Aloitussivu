@@ -495,6 +495,70 @@ select{
   display:block
 }
 
+.table-field{
+  margin-top:10px
+}
+
+.table-field-scroll{
+  overflow-x:auto;
+  margin:6px 0 8px;
+  -webkit-overflow-scrolling:touch
+}
+
+.table-field-table{
+  border-collapse:collapse;
+  width:100%
+}
+
+.table-field-table th{
+  font-family:var(--mono);
+  font-size:10.5px;
+  text-transform:uppercase;
+  letter-spacing:.04em;
+  color:#66604f;
+  text-align:left;
+  padding:4px 6px;
+  border-bottom:1.5px solid var(--line);
+  white-space:nowrap
+}
+
+.table-field-table td{
+  padding:4px 6px 4px 0;
+  border-bottom:1px solid var(--line);
+  vertical-align:middle
+}
+
+.table-field-table input[type=text],
+.table-field-table input[type=number]{
+  width:100px;
+  min-width:70px;
+  padding:6px 7px;
+  font-size:14px;
+  border-radius:6px
+}
+
+.table-field-table td:last-child{
+  padding-right:0
+}
+
+.field-hint-btn-inline{
+  width:22px;
+  height:22px;
+  border-radius:50%;
+  border:1.5px solid var(--warn);
+  background:#fbf1de;
+  color:var(--warn);
+  font-weight:800;
+  font-size:.82rem;
+  line-height:1;
+  cursor:pointer;
+  padding:0;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  flex:0 0 auto
+}
+
 @media(min-width:700px){
   .wrap{
     max-width:850px;
@@ -2971,12 +3035,43 @@ const FIELD_TYPES=[
   { value:"textarea", label:"Teksti (pitkä)" },
   { value:"number", label:"Numero" },
   { value:"date", label:"Päivämäärä" },
-  { value:"select", label:"Valintalista" }
+  { value:"select", label:"Valintalista" },
+  { value:"table", label:"Taulukko (voi lisätä rivejä)" }
 ];
 
 function fieldTypeLabel(type){
   const t=FIELD_TYPES.find(x=>x.value===type);
   return t?t.label:type;
+}
+
+/*
+ * TAULUKKOKENTÄN SARAKKEET
+ *
+ * Taulukkotyyppinen kenttä (esim. rakenneavauksen "Rakennekerrokset")
+ * koostuu käyttäjän määrittelemistä sarakkeista (f.columns:
+ * {id,label,type}), ja tutkija lisää lomakkeella rivejä tarpeen
+ * mukaan. Jokainen rivi on olio { [columnId]: arvo }, ja koko
+ * taulukon arvo tallentuu values[f.id]:hen listana rivejä.
+ */
+function syncFieldColumnsFromDom(f,fieldIdx){
+
+  if(!Array.isArray(f.columns))return;
+
+  f.columns.forEach((col,cIdx)=>{
+
+    const labelInput=
+      document.getElementById(
+        `mf_col_label_${fieldIdx}_${cIdx}`
+      );
+
+    const typeSelect=
+      document.getElementById(
+        `mf_col_type_${fieldIdx}_${cIdx}`
+      );
+
+    if(labelInput)col.label=labelInput.value;
+    if(typeSelect)col.type=typeSelect.value;
+  });
 }
 
 /*
@@ -3067,6 +3162,38 @@ function matchingHints(f,rawValue){
 }
 
 /*
+ * Taulukkokentän apulausesäännöt voivat yhdistää useita ehtoja
+ * saman rivin eri sarakkeista (kaikkien pitää täyttyä = JA).
+ * Arvioidaan yhtä riviä (row = {sarakeId: arvo}) vasten.
+ */
+function matchingTableRowHints(f,cols,row){
+
+  if(!f.hints||!f.hints.length)return [];
+
+  return f.hints
+    .filter(rule=>
+      rule.text &&
+      rule.text.trim() &&
+      Array.isArray(rule.conditions) &&
+      rule.conditions.length &&
+      rule.conditions.every(cond=>{
+
+        const col=
+          cols.find(c=>c.id===cond.colId);
+
+        if(!col)return false;
+
+        return evalHintRule(
+          cond,
+          col.type,
+          row[col.id]
+        );
+      })
+    )
+    .map(rule=>rule.text.trim());
+}
+
+/*
  * Lukee kentän apulauserivien nykyiset DOM-arvot talteen f.hints-
  * taulukkoon. Kutsutaan aina ennen kuin apulauserivit tai koko
  * kenttälista piirretään uudelleen, jotta kesken kirjoituksen
@@ -3098,6 +3225,48 @@ function syncFieldHintsFromDom(f,fieldIdx){
     if(textInput)r.text=textInput.value;
   });
 }
+
+/*
+ * Sama kuin syncFieldHintsFromDom, mutta taulukkokentän
+ * usean ehdon säännöille (f.hints[i].conditions[j]).
+ */
+function syncFieldTableHintsFromDom(f,fieldIdx){
+
+  if(!Array.isArray(f.hints))return;
+
+  f.hints.forEach((rule,ruleIdx)=>{
+
+    (rule.conditions||[]).forEach((cond,condIdx)=>{
+
+      const colSel=
+        document.getElementById(
+          `mf_ruleCond_col_${fieldIdx}_${ruleIdx}_${condIdx}`
+        );
+
+      const opSel=
+        document.getElementById(
+          `mf_ruleCond_op_${fieldIdx}_${ruleIdx}_${condIdx}`
+        );
+
+      const valInput=
+        document.getElementById(
+          `mf_ruleCond_val_${fieldIdx}_${ruleIdx}_${condIdx}`
+        );
+
+      if(colSel)cond.colId=colSel.value;
+      if(opSel)cond.op=opSel.value;
+      if(valInput)cond.value=valInput.value;
+    });
+
+    const textInput=
+      document.getElementById(
+        `mf_ruleText_${fieldIdx}_${ruleIdx}`
+      );
+
+    if(textInput)rule.text=textInput.value;
+  });
+}
+
 
 function renderMethodsManageCard(){
 
@@ -3179,6 +3348,7 @@ function renderMethodsManageCard(){
 function renderMethodFieldRow(f,idx,fields){
 
   if(!Array.isArray(f.hints))f.hints=[];
+  if(!Array.isArray(f.columns))f.columns=[];
 
   const row=el(`
     <div class="card" style="padding:12px;margin-bottom:10px;background:var(--paper);">
@@ -3202,20 +3372,37 @@ function renderMethodFieldRow(f,idx,fields){
         <textarea id="mf_options_${idx}" placeholder="Vaihtoehto 1&#10;Vaihtoehto 2">${escapeHtml((f.options||[]).join("\n"))}</textarea>
       </div>
 
-      <label>Ohjeteksti (valinnainen)</label>
-      <input type="text" id="mf_placeholder_${idx}" value="${escapeAttribute(f.placeholder||"")}" placeholder="Kenttäkohtainen esimerkkiteksti">
+      <div id="mf_table_wrap_${idx}" style="${f.type==="table"?"":"display:none;"}margin-top:8px;">
+        <label>Taulukon sarakkeet</label>
+        <div class="hint">
+          Määritä sarakkeet, joita tutkija täyttää rivi kerrallaan
+          (esim. "Rakennekerros", "Paksuus (mm)", "Kosteus (%)").
+          Tutkija voi lisätä lomakkeella niin monta riviä kuin tarvitsee.
+        </div>
+        <div id="mf_cols_${idx}"></div>
+        <button type="button" class="btn btn-sm btn-outline" id="mf_addcol_${idx}">
+          + Lisää sarake
+        </button>
+      </div>
+
+      <div id="mf_placeholder_wrap_${idx}" style="${f.type==="table"?"display:none;":""}">
+        <label>Ohjeteksti (valinnainen)</label>
+        <input type="text" id="mf_placeholder_${idx}" value="${escapeAttribute(f.placeholder||"")}" placeholder="Kenttäkohtainen esimerkkiteksti">
+      </div>
 
       <label style="display:flex;align-items:center;gap:6px;margin-top:8px;">
         <input type="checkbox" id="mf_req_${idx}" style="width:auto;" ${f.req?"checked":""}>
         Pakollinen kenttä
       </label>
 
-      <div style="margin-top:10px;border-top:1px solid var(--line);padding-top:10px;">
+      <div id="mf_hints_wrap_${idx}" style="margin-top:10px;border-top:1px solid var(--line);padding-top:10px;">
         <label>Apulauseet tutkijalle (valinnainen)</label>
         <div class="hint">
-          Näytetään huutomerkki-kuvakkeena lomakkeella, kun kirjattu
-          arvo täyttää ehdon (esim. arvo &gt; 80 → "Pintakosteus
-          koholla, tee rakennekosteusmittaus").
+          Näytetään huutomerkki-kuvakkeena, kun ehdot täyttyvät.
+          Taulukkokentässä voit yhdistää useita saman rivin ehtoja
+          (JA), esim. "Kosteus &gt; 80" TAI "Rakennekerros = eriste
+          JA Kosteus &gt; 30" — apulause näkyy silloin kyseisen rivin
+          kohdalla.
         </div>
         <div id="mf_hints_${idx}"></div>
         <button type="button" class="btn btn-sm btn-outline" id="mf_addhint_${idx}">
@@ -3227,11 +3414,143 @@ function renderMethodFieldRow(f,idx,fields){
 
   const typeSelect=row.querySelector(`#mf_type_${idx}`);
   const optionsWrap=row.querySelector(`#mf_options_wrap_${idx}`);
+  const tableWrap=row.querySelector(`#mf_table_wrap_${idx}`);
+  const placeholderWrap=row.querySelector(`#mf_placeholder_wrap_${idx}`);
   const hintsWrap=row.querySelector(`#mf_hints_${idx}`);
+  const colsWrap=row.querySelector(`#mf_cols_${idx}`);
 
   function renderHints(){
 
     hintsWrap.innerHTML="";
+
+    if(f.type==="table"){
+
+      const cols=f.columns||[];
+
+      f.hints.forEach((rule,ruleIdx)=>{
+
+        if(
+          !Array.isArray(rule.conditions) ||
+          !rule.conditions.length
+        ){
+          rule.conditions=[{
+            colId:cols[0]?cols[0].id:"",
+            op:"eq",
+            value:""
+          }];
+        }
+
+        rule.conditions.forEach(cond=>{
+          if(!cols.find(c=>c.id===cond.colId)){
+            cond.colId=cols[0]?cols[0].id:"";
+          }
+        });
+
+        const ruleBox=el(`
+          <div class="card" style="padding:8px;margin-bottom:10px;background:#fff;">
+            <div id="mf_rule_conds_${idx}_${ruleIdx}"></div>
+            <button type="button" class="btn btn-sm btn-outline" id="mf_rule_addcond_${idx}_${ruleIdx}" style="margin-top:2px;">
+              + Ja ehto
+            </button>
+            <input
+              type="text"
+              id="mf_ruleText_${idx}_${ruleIdx}"
+              placeholder="Apulause, esim. Rakenne kostunut, jatkotutkimus tarpeen"
+              value="${escapeAttribute(rule.text||"")}"
+              style="margin-top:8px;"
+            >
+            <button type="button" class="btn btn-sm btn-danger" id="mf_rule_del_${idx}_${ruleIdx}" style="margin-top:8px;">
+              Poista sääntö
+            </button>
+          </div>
+        `);
+
+        hintsWrap.appendChild(ruleBox);
+
+        const condsWrap=
+          ruleBox.querySelector(`#mf_rule_conds_${idx}_${ruleIdx}`);
+
+        function renderConds(){
+
+          condsWrap.innerHTML="";
+
+          rule.conditions.forEach((cond,condIdx)=>{
+
+            const col=
+              cols.find(c=>c.id===cond.colId)||cols[0];
+
+            const ops=
+              hintOpsForType(col?col.type:"text");
+
+            if(!ops.find(o=>o.value===cond.op)){
+              cond.op=ops[0]?ops[0].value:"eq";
+            }
+
+            const condRow=el(`
+              <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
+                ${condIdx>0?`<span style="font-size:11px;color:#8a8574;flex:0 0 auto;">JA</span>`:""}
+                <select id="mf_ruleCond_col_${idx}_${ruleIdx}_${condIdx}" style="flex:1;width:auto;">
+                  ${cols.map(c=>`
+                    <option value="${escapeAttribute(c.id)}" ${c.id===cond.colId?"selected":""}>${escapeHtml(c.label||"")}</option>
+                  `).join("")}
+                </select>
+                <select id="mf_ruleCond_op_${idx}_${ruleIdx}_${condIdx}" style="flex:0 0 auto;width:auto;">
+                  ${ops.map(o=>`
+                    <option value="${o.value}" ${o.value===cond.op?"selected":""}>${o.label}</option>
+                  `).join("")}
+                </select>
+                <input
+                  type="text"
+                  id="mf_ruleCond_val_${idx}_${ruleIdx}_${condIdx}"
+                  placeholder="Arvo"
+                  value="${escapeAttribute(cond.value||"")}"
+                  style="width:80px;flex:0 0 auto;"
+                >
+                ${rule.conditions.length>1?`
+                  <button type="button" class="btn btn-sm btn-danger" id="mf_ruleCond_del_${idx}_${ruleIdx}_${condIdx}">✕</button>
+                `:""}
+              </div>
+            `);
+
+            condsWrap.appendChild(condRow);
+
+            condRow.querySelector(`#mf_ruleCond_col_${idx}_${ruleIdx}_${condIdx}`).onchange=e=>{
+              syncFieldTableHintsFromDom(f,idx);
+              cond.colId=e.target.value;
+              renderConds();
+            };
+
+            if(rule.conditions.length>1){
+              condRow.querySelector(`#mf_ruleCond_del_${idx}_${ruleIdx}_${condIdx}`).onclick=()=>{
+                syncFieldTableHintsFromDom(f,idx);
+                rule.conditions.splice(condIdx,1);
+                renderConds();
+              };
+            }
+          });
+        }
+
+        renderConds();
+
+        ruleBox.querySelector(`#mf_rule_addcond_${idx}_${ruleIdx}`).onclick=()=>{
+          syncFieldTableHintsFromDom(f,idx);
+          rule.conditions.push({
+            colId:cols[0]?cols[0].id:"",
+            op:"eq",
+            value:""
+          });
+          renderConds();
+        };
+
+        ruleBox.querySelector(`#mf_rule_del_${idx}_${ruleIdx}`).onclick=()=>{
+          syncFieldTableHintsFromDom(f,idx);
+          f.hints.splice(ruleIdx,1);
+          renderHints();
+        };
+      });
+
+      return;
+    }
 
     const ops=hintOpsForType(f.type);
 
@@ -3278,24 +3597,125 @@ function renderMethodFieldRow(f,idx,fields){
     });
   }
 
+  function renderColumns(){
+
+    colsWrap.innerHTML="";
+
+    f.columns.forEach((col,cIdx)=>{
+
+      const cr=el(`
+        <div class="card" style="padding:8px;margin-bottom:8px;background:#fff;">
+          <div style="display:flex;gap:6px;align-items:center;">
+            <input
+              type="text"
+              id="mf_col_label_${idx}_${cIdx}"
+              placeholder="Sarakkeen nimi"
+              value="${escapeAttribute(col.label||"")}"
+              style="flex:1;"
+            >
+            <select id="mf_col_type_${idx}_${cIdx}" style="flex:0 0 auto;width:auto;">
+              <option value="text" ${col.type==="text"?"selected":""}>Teksti</option>
+              <option value="number" ${col.type==="number"?"selected":""}>Numero</option>
+            </select>
+            <button type="button" class="btn btn-sm btn-danger" id="mf_col_del_${idx}_${cIdx}">✕</button>
+          </div>
+        </div>
+      `);
+
+      colsWrap.appendChild(cr);
+
+      cr.querySelector(`#mf_col_type_${idx}_${cIdx}`).onchange=()=>{
+        syncFieldColumnsFromDom(f,idx);
+        renderHints();
+      };
+
+      cr.querySelector(`#mf_col_del_${idx}_${cIdx}`).onclick=()=>{
+        syncFieldColumnsFromDom(f,idx);
+        f.columns.splice(cIdx,1);
+        renderColumns();
+        renderHints();
+      };
+    });
+  }
+
   renderHints();
+  renderColumns();
 
   row.querySelector(`#mf_addhint_${idx}`).onclick=()=>{
-    syncFieldHintsFromDom(f,idx);
-    f.hints.push({
+
+    if(f.type==="table"){
+
+      syncFieldTableHintsFromDom(f,idx);
+
+      f.hints.push({
+        id:genFieldId(),
+        conditions:[{
+          colId:f.columns[0]?f.columns[0].id:"",
+          op:"eq",
+          value:""
+        }],
+        text:""
+      });
+
+    }else{
+
+      syncFieldHintsFromDom(f,idx);
+
+      f.hints.push({
+        id:genFieldId(),
+        op:hintOpsForType(f.type)[0].value,
+        value:"",
+        text:""
+      });
+    }
+
+    renderHints();
+  };
+
+  row.querySelector(`#mf_addcol_${idx}`).onclick=()=>{
+    syncFieldColumnsFromDom(f,idx);
+    f.columns.push({
       id:genFieldId(),
-      op:hintOpsForType(f.type)[0].value,
-      value:"",
-      text:""
+      label:"",
+      type:"text"
     });
+    renderColumns();
     renderHints();
   };
 
   typeSelect.onchange=()=>{
-    optionsWrap.style.display=
-      typeSelect.value==="select"?"":"none";
-    syncFieldHintsFromDom(f,idx);
+
+    const prevType=f.type;
+
     f.type=typeSelect.value;
+
+    optionsWrap.style.display=
+      f.type==="select"?"":"none";
+
+    tableWrap.style.display=
+      f.type==="table"?"":"none";
+
+    placeholderWrap.style.display=
+      f.type==="table"?"none":"";
+
+    if(prevType==="table"){
+      syncFieldTableHintsFromDom(f,idx);
+    }else{
+      syncFieldHintsFromDom(f,idx);
+    }
+
+    /*
+     * Apulauseiden muoto on erilainen taulukkokentälle (usean ehdon
+     * säännöt) kuin muille kentille (yksi ehto), joten kentän tyyppiä
+     * vaihdettaessa vanhat apulauseet eivät sellaisenaan sovi uuteen
+     * muotoon — nollataan lista, ettei jää virheellistä dataa.
+     */
+    if(
+      (f.type==="table") !== (prevType==="table")
+    ){
+      f.hints=[];
+    }
+
     renderHints();
   };
 
@@ -3349,7 +3769,12 @@ function syncMethodFieldsFromDom(fields){
           .filter(Boolean);
     }
 
-    syncFieldHintsFromDom(f,idx);
+    if(f.type==="table"){
+      syncFieldTableHintsFromDom(f,idx);
+    }else{
+      syncFieldHintsFromDom(f,idx);
+    }
+    syncFieldColumnsFromDom(f,idx);
   });
 }
 
@@ -3396,7 +3821,8 @@ function renderMethodEditCard(){
       req:false,
       placeholder:"",
       options:[],
-      hints:[]
+      hints:[],
+      columns:[]
     });
     renderMethodEditFieldsInto(fieldsListEl,editingMethod.fields);
   };
@@ -3451,20 +3877,78 @@ function saveMethodEdit(){
       delete fields[i].options;
     }
 
-    syncFieldHintsFromDom(fields[i],i);
+    if(fields[i].type==="table"){
 
-    fields[i].hints=
-      (fields[i].hints||[])
-        .map(r=>({
-          id:r.id||genFieldId(),
-          op:r.op,
-          value:String(r.value||"").trim(),
-          text:String(r.text||"").trim()
-        }))
-        .filter(r=>
-          r.text!=="" &&
-          r.value!==""
-        );
+      syncFieldColumnsFromDom(fields[i],i);
+
+      fields[i].columns=
+        (fields[i].columns||[])
+          .map(col=>({
+            id:col.id||genFieldId(),
+            label:String(col.label||"").trim(),
+            type:col.type==="number"?"number":"text"
+          }));
+
+      if(fields[i].columns.some(col=>col.label==="")){
+        toast('Anna jokaiselle "'+label+'" -taulukon sarakkeelle nimi');
+        return;
+      }
+
+      if(!fields[i].columns.length){
+        toast('Lisää "'+label+'" -taulukolle vähintään yksi sarake');
+        return;
+      }
+
+    }else{
+      fields[i].columns=[];
+    }
+
+    if(fields[i].type==="table"){
+
+      syncFieldTableHintsFromDom(fields[i],i);
+
+      const validColIds=
+        new Set(fields[i].columns.map(c=>c.id));
+
+      fields[i].hints=
+        (fields[i].hints||[])
+          .map(rule=>({
+            id:rule.id||genFieldId(),
+            conditions:
+              (rule.conditions||[])
+                .map(c=>({
+                  colId:c.colId,
+                  op:c.op,
+                  value:String(c.value||"").trim()
+                }))
+                .filter(c=>
+                  validColIds.has(c.colId) &&
+                  c.value!==""
+                ),
+            text:String(rule.text||"").trim()
+          }))
+          .filter(rule=>
+            rule.text!=="" &&
+            rule.conditions.length>0
+          );
+
+    }else{
+
+      syncFieldHintsFromDom(fields[i],i);
+
+      fields[i].hints=
+        (fields[i].hints||[])
+          .map(r=>({
+            id:r.id||genFieldId(),
+            op:r.op,
+            value:String(r.value||"").trim(),
+            text:String(r.text||"").trim()
+          }))
+          .filter(r=>
+            r.text!=="" &&
+            r.value!==""
+          );
+    }
 
     if(!fields[i].id) fields[i].id=genFieldId();
   }
@@ -3862,6 +4346,10 @@ function renderEntryForm(){
 
 function renderField(f,values){
 
+  if(f.type==="table"){
+    return renderTableField(f,values);
+  }
+
   const rawValue=
     values[f.id];
 
@@ -4036,6 +4524,241 @@ function renderField(f,values){
 }
 
 
+/*
+ * TAULUKKOKENTTÄ (esim. rakenneavauksen rakennekerrokset)
+ *
+ * values[f.id] on lista rivejä, jokainen rivi { [sarakeId]: arvo }.
+ * Tutkija voi lisätä ja poistaa rivejä vapaasti lomakkeella.
+ */
+function renderTableField(f,values){
+
+  if(!Array.isArray(values[f.id])){
+    values[f.id]=[];
+  }
+
+  const rows=
+    values[f.id];
+
+  const cols=
+    Array.isArray(f.columns) &&
+    f.columns.length
+      ?f.columns
+      :[{ id:"col1", label:"Arvo", type:"text" }];
+
+  const hasHints=
+    Array.isArray(f.hints) &&
+    f.hints.length>0;
+
+
+  const wrap=
+    el(`
+      <div class="table-field">
+
+        <label class="${f.req?"req":""}">
+          ${escapeHtml(f.label)}
+        </label>
+
+        <div class="table-field-scroll">
+          <table class="table-field-table">
+            <thead>
+              <tr>
+                ${cols.map(c=>`
+                  <th>${escapeHtml(c.label||"")}</th>
+                `).join("")}
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="tblbody_${escapeAttribute(f.id)}"></tbody>
+          </table>
+        </div>
+
+        <button
+          type="button"
+          class="btn btn-sm btn-outline"
+          id="tbladd_${escapeAttribute(f.id)}"
+        >
+          + Lisää rivi
+        </button>
+
+      </div>
+    `);
+
+
+  const tbody=
+    wrap.querySelector(
+      `#tblbody_${CSS.escape(f.id)}`
+    );
+
+
+  function renderRows(){
+
+    tbody.innerHTML="";
+
+    rows.forEach((row,rIdx)=>{
+
+      const tr=
+        el(`
+          <tr>
+            ${cols.map(c=>`
+              <td>
+                <input
+                  type="${c.type==="number"?"number":"text"}"
+                  id="tblcell_${escapeAttribute(f.id)}_${rIdx}_${escapeAttribute(c.id)}"
+                  autocomplete="off"
+                  ${c.type==="number"?'step="any"':""}
+                  value="${escapeAttribute(
+                    row[c.id]!==undefined && row[c.id]!==null
+                      ?row[c.id]
+                      :""
+                  )}"
+                >
+              </td>
+            `).join("")}
+            <td>
+              <div style="display:flex;gap:4px;align-items:center;">
+                ${hasHints?`
+                  <button
+                    type="button"
+                    class="field-hint-btn-inline"
+                    id="tblhint_${escapeAttribute(f.id)}_${rIdx}"
+                    title="Näytä apulause"
+                    style="display:none;"
+                  >!</button>
+                `:""}
+                <button
+                  type="button"
+                  class="btn btn-sm btn-danger"
+                  id="tblrm_${escapeAttribute(f.id)}_${rIdx}"
+                >✕</button>
+              </div>
+            </td>
+          </tr>
+        `);
+
+      tbody.appendChild(tr);
+
+
+      let hintRowEl=null;
+
+      if(hasHints){
+
+        hintRowEl=
+          el(`
+            <tr id="tblhintrow_${escapeAttribute(f.id)}_${rIdx}" style="display:none;">
+              <td colspan="${cols.length+1}" style="border-bottom:1px solid var(--line);">
+                <div class="field-hint-box open" id="tblhintbox_${escapeAttribute(f.id)}_${rIdx}"></div>
+              </td>
+            </tr>
+          `);
+
+        tbody.appendChild(hintRowEl);
+      }
+
+
+      function refreshRowHint(){
+
+        if(!hasHints)return;
+
+        const matches=
+          matchingTableRowHints(f,cols,row);
+
+        const btn=
+          tr.querySelector(
+            `#tblhint_${CSS.escape(f.id)}_${rIdx}`
+          );
+
+        if(matches.length){
+
+          btn.style.display="flex";
+
+          hintRowEl.querySelector(
+            `#tblhintbox_${CSS.escape(f.id)}_${rIdx}`
+          ).innerHTML=
+            matches
+              .map(t=>escapeHtml(t))
+              .join("<br>");
+
+        }else{
+
+          btn.style.display="none";
+          hintRowEl.style.display="none";
+        }
+      }
+
+
+      if(hasHints){
+
+        tr.querySelector(
+          `#tblhint_${CSS.escape(f.id)}_${rIdx}`
+        ).onclick=()=>{
+
+          hintRowEl.style.display=
+            hintRowEl.style.display==="none"
+              ?"table-row"
+              :"none";
+        };
+
+        refreshRowHint();
+      }
+
+
+      cols.forEach(c=>{
+
+        const inp=
+          tr.querySelector(
+            `#tblcell_${CSS.escape(f.id)}_${rIdx}_${CSS.escape(c.id)}`
+          );
+
+        inp.oninput=e=>{
+          row[c.id]=e.target.value;
+          refreshRowHint();
+          scheduleAutosave();
+        };
+
+        inp.onchange=e=>{
+          row[c.id]=e.target.value;
+          refreshRowHint();
+          scheduleAutosave();
+        };
+      });
+
+      tr.querySelector(
+        `#tblrm_${CSS.escape(f.id)}_${rIdx}`
+      ).onclick=()=>{
+
+        rows.splice(rIdx,1);
+
+        renderRows();
+
+        scheduleAutosave();
+      };
+    });
+  }
+
+  renderRows();
+
+  wrap.querySelector(
+    `#tbladd_${CSS.escape(f.id)}`
+  ).onclick=()=>{
+
+    const emptyRow={};
+
+    cols.forEach(c=>{
+      emptyRow[c.id]="";
+    });
+
+    rows.push(emptyRow);
+
+    renderRows();
+
+    scheduleAutosave();
+  };
+
+  return wrap;
+}
+
+
+
 /* ============================================================
    MENETELMÄN TALLENNUS
    ============================================================ */
@@ -4058,6 +4781,30 @@ function saveEntryForm(){
 
   const missing=
     req.filter(f=>{
+
+      if(f.type==="table"){
+
+        const tRows=
+          Array.isArray(editingEntry.values[f.id])
+            ?editingEntry.values[f.id]
+            :[];
+
+        const cols=
+          Array.isArray(f.columns)
+            ?f.columns
+            :[];
+
+        const hasData=
+          tRows.some(r=>
+            cols.some(c=>
+              r[c.id]!==undefined &&
+              r[c.id]!==null &&
+              String(r[c.id]).trim()!==""
+            )
+          );
+
+        return !hasData;
+      }
 
       const value=
         editingEntry.values[f.id];
@@ -4087,6 +4834,50 @@ function saveEntryForm(){
    * Tarkistetaan numeroarvot.
    */
   for(const f of m.fields){
+
+    if(f.type==="table"){
+
+      const tRows=
+        Array.isArray(editingEntry.values[f.id])
+          ?editingEntry.values[f.id]
+          :[];
+
+      const cols=
+        Array.isArray(f.columns)
+          ?f.columns
+          :[];
+
+      for(const col of cols){
+
+        if(col.type!=="number")continue;
+
+        for(const row of tRows){
+
+          const value=
+            row[col.id];
+
+          if(
+            value===undefined ||
+            value===null ||
+            String(value).trim()===""
+          )continue;
+
+          const n=
+            Number(value);
+
+          if(!Number.isFinite(n)){
+
+            toast(
+              `Kentän "${f.label} – ${col.label}" arvo ei ole kelvollinen numero.`
+            );
+
+            return;
+          }
+        }
+      }
+
+      continue;
+    }
 
     if(f.type!=="number")continue;
 
@@ -4971,12 +5762,41 @@ async function exportWord(){
 
 
     const rows=[];
+    const tableFieldsToRender=[];
 
 
     [
       ...COMMON_FIELDS,
       ...m.fields
     ].forEach(f=>{
+
+      if(f.type==="table"){
+
+        const tRows=
+          Array.isArray(e.values[f.id])
+            ?e.values[f.id]
+            :[];
+
+        const cols=
+          Array.isArray(f.columns)
+            ?f.columns.filter(c=>c.label&&c.label.trim())
+            :[];
+
+        const dataRows=
+          tRows.filter(r=>
+            cols.some(c=>
+              r[c.id]!==undefined &&
+              r[c.id]!==null &&
+              String(r[c.id]).trim()!==""
+            )
+          );
+
+        if(cols.length&&dataRows.length){
+          tableFieldsToRender.push({f,cols,dataRows});
+        }
+
+        return;
+      }
 
       const v=
         e.values[f.id];
@@ -5031,6 +5851,51 @@ async function exportWord(){
 
       fieldRows(rows);
     }
+
+
+    tableFieldsToRender.forEach(({f,cols,dataRows})=>{
+
+      bodyParts.push(
+        engine.paraXml(
+          f.label,
+          {
+            font:s.fonts.body,
+            sz:engine.pt2hp(s.fonts.bodySize),
+            color:"666666",
+            after:60
+          }
+        )
+      );
+
+      const docRows=[
+        cols.map(c=>c.label),
+        ...dataRows.map(r=>
+          cols.map(c=>
+            r[c.id]!==undefined && r[c.id]!==null
+              ?String(r[c.id])
+              :""
+          )
+        )
+      ];
+
+      bodyParts.push(
+        engine.tableXml(
+          docRows,
+          {
+            headerRowCount:1,
+            colWidthPercents:
+              cols.map(()=>Math.floor(100/cols.length)),
+            font:s.fonts.body,
+            sz:engine.pt2hp(s.fonts.bodySize),
+            color:s.colors.body
+          }
+        )
+      );
+
+      bodyParts.push(
+        engine.paraXml("",{after:120})
+      );
+    });
 
 
     if(
