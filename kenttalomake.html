@@ -894,11 +894,17 @@ const DEFAULT_METHODS=[
 /*
  * METHODS on muokattava kopio DEFAULT_METHODS-listasta. Käyttäjä voi
  * lisätä/muokata/poistaa menetelmiä "Muokkaa menetelmiä" -näkymässä.
- * Muutokset tallennetaan laitekohtaisesti localStorageen (avain
- * METHODS_STORAGE_KEY) — ne eivät tällä hetkellä synkronoidu pilveen
- * eivätkä muille laitteille.
+ *
+ * Muutokset tallennetaan ensisijaisesti käyttäjäkohtaisesti Supabaseen
+ * (tauluun CUSTOM_METHODS_TABLE, yksi rivi per kirjautunut käyttäjä),
+ * jotta ne näkyvät samalla tunnuksella kaikilla laitteilla.
+ * localStorageen (avain METHODS_STORAGE_KEY) tallennetaan aina myös
+ * laitekohtainen kopio, jota käytetään heti sivun latauksen
+ * yhteydessä (nopea, ei vaadi verkkoa) sekä varalla, jos
+ * pilviyhteyttä ei ole.
  */
 const METHODS_STORAGE_KEY="kenttalomake_custom_methods_v1";
+const CUSTOM_METHODS_TABLE="custom_methods";
 
 let METHODS=cloneMethods(DEFAULT_METHODS);
 
@@ -927,13 +933,93 @@ function loadCustomMethods(){
   }
 }
 
-function persistMethods(){
+/*
+ * Hakee kirjautuneen käyttäjän tallentamat menetelmät Supabasesta ja
+ * korvaa METHODS-listan niillä (RLS rajaa haun automaattisesti vain
+ * omaan riviin, joten mitään user_id-suodatinta ei tarvita tässä).
+ *
+ * Jos pilvessä ei vielä ole tätä käyttäjää varten riviä mutta tällä
+ * laitteella on paikallisesti (localStorage) muokattuja menetelmiä
+ * — esim. ennen tätä päivitystä tehtyjä — viedään ne pilveen kertaalleen,
+ * jotta ne eivät katoa ja tulevat käyttöön myös muilla laitteilla.
+ */
+async function syncCustomMethodsFromCloud(){
+  if(!window.__supabaseClient)return;
+
+  try{
+    const {data,error}=
+      await window.__supabaseClient
+        .from(CUSTOM_METHODS_TABLE)
+        .select("methods")
+        .maybeSingle();
+
+    if(error){
+      console.warn("Menetelmien lataus pilvestä epäonnistui",error);
+      return;
+    }
+
+    if(data && Array.isArray(data.methods) && data.methods.length){
+      METHODS=data.methods;
+      try{
+        localStorage.setItem(METHODS_STORAGE_KEY,JSON.stringify(METHODS));
+      }catch(err){
+        console.warn("Menetelmien paikallinen välimuistitallennus epäonnistui",err);
+      }
+      return;
+    }
+
+    if(JSON.stringify(METHODS)!==JSON.stringify(DEFAULT_METHODS)){
+      await pushMethodsToCloud();
+    }
+  }catch(err){
+    console.warn("Menetelmien synkronointi pilvestä epäonnistui",err);
+  }
+}
+
+/*
+ * Vie nykyisen METHODS-listan Supabaseen kirjautuneen käyttäjän
+ * riville (upsert user_id-sarakkeen mukaan; user_id täyttyy
+ * automaattisesti sarakkeen oletusarvosta auth.uid()).
+ */
+async function pushMethodsToCloud(){
+  if(!window.__supabaseClient)return false;
+
+  try{
+    const {error}=
+      await window.__supabaseClient
+        .from(CUSTOM_METHODS_TABLE)
+        .upsert(
+          {
+            methods:METHODS,
+            updated_at:new Date().toISOString()
+          },
+          {onConflict:"user_id"}
+        );
+
+    if(error){
+      console.warn("Menetelmien tallennus pilveen epäonnistui",error);
+      toast("Menetelmät tallennettu vain tälle laitteelle (pilvitallennus epäonnistui).");
+      return false;
+    }
+
+    return true;
+
+  }catch(err){
+    console.warn("Menetelmien tallennus pilveen epäonnistui",err);
+    toast("Menetelmät tallennettu vain tälle laitteelle (pilvitallennus epäonnistui).");
+    return false;
+  }
+}
+
+async function persistMethods(){
   try{
     localStorage.setItem(METHODS_STORAGE_KEY,JSON.stringify(METHODS));
   }catch(err){
     console.warn("Menetelmien tallennus localStorageen epäonnistui",err);
     toast("Menetelmien tallennus epäonnistui laitteelle.");
   }
+
+  await pushMethodsToCloud();
 }
 
 const COMMON_FIELDS=[
@@ -2482,7 +2568,7 @@ function render(){
 
     document
       .getElementById("btnResetMethods")
-      .onclick=()=>{
+      .onclick=async ()=>{
         if(
           confirm(
             "Palautetaanko oletusmenetelmät?\n\n"+
@@ -2494,7 +2580,7 @@ function render(){
           )
         ){
           METHODS=cloneMethods(DEFAULT_METHODS);
-          persistMethods();
+          await persistMethods();
           render();
         }
       };
@@ -3360,7 +3446,7 @@ function renderMethodsManageCard(){
       render();
     };
 
-    row.querySelector('[data-act="del"]').onclick=()=>{
+    row.querySelector('[data-act="del"]').onclick=async ()=>{
       const warn=
         usedCount
           ?("Menetelmää on käytetty "+usedCount+" kirjatussa menetelmässä. "+
@@ -3374,7 +3460,7 @@ function renderMethodsManageCard(){
         )
       ){
         METHODS.splice(idx,1);
-        persistMethods();
+        await persistMethods();
         render();
       }
     };
@@ -3883,7 +3969,7 @@ function renderMethodEditCard(){
   return container;
 }
 
-function saveMethodEdit(){
+async function saveMethodEdit(){
 
   const name=document.getElementById("me_name").value.trim();
   const short=document.getElementById("me_short").value.trim();
@@ -4049,7 +4135,7 @@ function saveMethodEdit(){
     }
   }
 
-  persistMethods();
+  await persistMethods();
 
   editingMethod=null;
   editingMethodIsNew=false;
@@ -8929,6 +9015,8 @@ function waitForSupabaseClient(
       }
     );
 
+
+    await syncCustomMethodsFromCloud();
 
     await loadState();
 
