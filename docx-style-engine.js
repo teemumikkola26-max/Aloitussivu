@@ -156,9 +156,9 @@ window.DocxStyleEngine = (function(){
    * extraXml: tuodusta .docx-liitteestä poimitut (uudelleennimetyt)
    * abstractNum/num-määritelmät, jotka lisätään perään.
    */
-  function numberingXml(extraXml){
+  function numberingXml(extraXml, extraNsAttrs){
     return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
-      '<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+      '<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"' + (extraNsAttrs || '') + '>' +
       '<w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="bullet"/>' +
       '<w:lvlText w:val="•"/><w:lvlJc w:val="left"/><w:pPr><w:ind w:left="432" w:hanging="432"/></w:pPr>' +
       '<w:rPr><w:rFonts w:ascii="Symbol" w:hAnsi="Symbol" w:hint="default"/></w:rPr></w:lvl></w:abstractNum>' +
@@ -227,6 +227,24 @@ window.DocxStyleEngine = (function(){
     const relsXml = relsFile ? await relsFile.async("string") : "";
 
     const importIdx = ++ctx.importCounter;
+
+    // Nykyaikaiset Wordin tallentamat tiedostot käyttävät kymmeniä lisä-
+    // nimiavaruusetuliitteitä juuritasolla (w14, w15, mc, wp14, w16cid, ...),
+    // ja niitä käytetään usein suoraan runko-XML:ssä (esim. w14:paraId JOKA
+    // kappaleessa, mc:AlternateContent kuvien ympärillä). Jos emme poimi ja
+    // lisää näitä myös OMAAN juurielementtiimme, tuloksena on "unbound
+    // prefix" -virhe eikä Word avaa tiedostoa lainkaan. Poimitaan siis kaikki
+    // lähteen ilmoittamat xmlns:-liitteet ja kerätään ne ctx:ään, josta
+    // assembleDocx lisää ne kaikkiin generoimiinsa juurielementteihin.
+    function collectNamespaceDecls(openTagStr){
+      const re = /xmlns:([a-zA-Z0-9]+)="([^"]*)"/g;
+      let m;
+      while ((m = re.exec(openTagStr))){
+        if (!(m[1] in ctx.extraNamespaces)) ctx.extraNamespaces[m[1]] = m[2];
+      }
+    }
+    const rootTagMatch = /^<w:document\b[^>]*>/.exec(docXml.replace(/^\uFEFF?<\?xml[^>]*\?>\s*/, ""));
+    if (rootTagMatch) collectNamespaceDecls(rootTagMatch[0]);
 
     function parseRelationships(xmlText){
       const map = {};
@@ -306,6 +324,8 @@ window.DocxStyleEngine = (function(){
     const stylesFile = zip.file("word/styles.xml");
     if (stylesFile){
       const stylesXmlSrc = await stylesFile.async("string");
+      const stylesRootMatch = /^<w:styles\b[^>]*>/.exec(stylesXmlSrc.replace(/^\uFEFF?<\?xml[^>]*\?>\s*/, ""));
+      if (stylesRootMatch) collectNamespaceDecls(stylesRootMatch[0]);
       const styleBlocks = extractTopLevelBlocks(stylesXmlSrc, "w:style");
       const prefix = "imp" + importIdx + "_";
       styleBlocks.forEach(block => {
@@ -332,6 +352,8 @@ window.DocxStyleEngine = (function(){
     const numberingFile = zip.file("word/numbering.xml");
     if (numberingFile){
       const numXmlSrc = await numberingFile.async("string");
+      const numRootMatch = /^<w:numbering\b[^>]*>/.exec(numXmlSrc.replace(/^\uFEFF?<\?xml[^>]*\?>\s*/, ""));
+      if (numRootMatch) collectNamespaceDecls(numRootMatch[0]);
       const absBlocks = extractTopLevelBlocks(numXmlSrc, "w:abstractNum");
       const numBlocks = extractTopLevelBlocks(numXmlSrc, "w:num");
       const absIdMap = {}, numIdMap = {};
@@ -547,6 +569,7 @@ window.DocxStyleEngine = (function(){
       importedStyleDefs: [],
       importedNumDefs: [],
       extraDefaultExts: new Set(),
+      extraNamespaces: {},
       theme: { xml: null }
     };
 
@@ -744,14 +767,21 @@ window.DocxStyleEngine = (function(){
     const finalSectPr = '<w:sectPr>' + headerRefXml + footerRefXml +
       '<w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1417" w:right="1417" w:bottom="1417" w:left="1417"/></w:sectPr>';
 
+    function nsAttrsExcluding(exclude){
+      return Object.keys(importCtx.extraNamespaces)
+        .filter(p => exclude.indexOf(p) === -1)
+        .map(p => ' xmlns:' + p + '="' + xmlEsc(importCtx.extraNamespaces[p]) + '"').join('');
+    }
+    const extraNsAttrs = nsAttrsExcluding(["w","wp","r"]);
+
     const documentXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
       '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" ' +
       'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" ' +
-      'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+      'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"' + extraNsAttrs + '>' +
       '<w:body>' + finalBodyParts.join('') + finalSectPr + '</w:body></w:document>';
 
     const stylesXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
-      '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
+      '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"' + nsAttrsExcluding(["w"]) + '>' +
       '<w:docDefaults><w:rPrDefault><w:rPr>' + fontRpr(style.fonts.body) + '<w:color w:val="' + (style.colors.body||"#1c2430").replace("#","") + '"/><w:sz w:val="' + pt2hp(style.fonts.bodySize||10.5) + '"/></w:rPr></w:rPrDefault></w:docDefaults>' +
       '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>' +
       '<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:qFormat/>' +
@@ -802,7 +832,7 @@ window.DocxStyleEngine = (function(){
     const wordFolder = zip.folder("word");
     wordFolder.file("document.xml", documentXml);
     wordFolder.file("styles.xml", stylesXml);
-    wordFolder.file("numbering.xml", numberingXml(importCtx.importedNumDefs.join('')));
+    wordFolder.file("numbering.xml", numberingXml(importCtx.importedNumDefs.join(''), nsAttrsExcluding(["w"])));
     wordFolder.folder("_rels").file("document.xml.rels", docRelsXml);
     headerFolderFiles.forEach(f => wordFolder.file(f.name, f.content));
     if (headerRelsFiles.length){
