@@ -4524,14 +4524,51 @@ async function exportWord(){
   ]);
 
 
-  for(
-    let i=0;
-    i<entries.length;
-    i++
-  ){
+  /*
+   * Vientiä varten merkinnät ryhmitellään menetelmätyypin mukaan
+   * (esim. kaikki rakenneavaukset peräkkäin) sen sijaan, että ne
+   * tulostetaan siinä sekalaisessa järjestyksessä, jossa ne on
+   * kirjattu. Ryhmien järjestys noudattaa METHODS-listan järjestystä
+   * (sama kuin "Muokkaa menetelmiä" -näkymässä), ja saman ryhmän
+   * sisällä alkuperäinen kirjaamisjärjestys säilyy.
+   *
+   * Otsikon numero ("Menetelmä N") pysyy kunkin merkinnän
+   * ALKUPERÄISENÄ paikkana entries-taulukossa (originalIndex+1), ei
+   * uutena järjestysnumerona. Tämä on tärkeää, koska sama numero on
+   * poltettu pohjakuvan PDF-merkintöihin (ks. kohta jossa
+   * "Menetelmä ${idx+1}" muodostetaan annotaatioihin) — jos
+   * numeroitaisiin uudelleen ryhmittelyn mukaan, Word-raportin
+   * numerot eivät enää täsmäisi pohjakuvan merkintöihin.
+   */
+  const exportOrder=
+    entries
+      .map((e,originalIndex)=>({e,originalIndex}))
+      .sort((a,b)=>{
 
-    const e=
-      entries[i];
+        const ai=
+          METHODS.findIndex(
+            x=>x.id===a.e.methodId
+          );
+
+        const bi=
+          METHODS.findIndex(
+            x=>x.id===b.e.methodId
+          );
+
+        const aOrder=
+          ai===-1?METHODS.length:ai;
+
+        const bOrder=
+          bi===-1?METHODS.length:bi;
+
+        if(aOrder!==bOrder)return aOrder-bOrder;
+
+        return a.originalIndex-b.originalIndex;
+      });
+
+  for(
+    const {e,originalIndex:i} of exportOrder
+  ){
 
     const m=
       METHODS.find(
