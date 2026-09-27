@@ -9075,6 +9075,28 @@ function waitForSupabaseClient(
     );
 
 
+    /*
+     * KORJAUS: window.__supabaseClient on olemassa heti kun
+     * auth-gate.js on ajettu, mutta kirjautumisistunto (session) ei
+     * välttämättä ole vielä ehtinyt latautua selaimen tallennustilasta
+     * Supabase-clientin sisäiseen muistiin. Jos pilvihaku tehdään
+     * liian aikaisin, pyyntö voi lähteä ilman istuntoa, jolloin
+     * rivikohtainen käyttöoikeussääntö (RLS) ei löydä käyttäjän omaa
+     * menetelmärivi — ja pilvessä olevat, esim. toisella laitteella
+     * tallennetut menetelmät jäävät hakematta. auth.getSession()
+     * odottaa Supabase-clientin sisäisen alustuksen valmiiksi ennen
+     * kuin palauttaa, joten sen kutsuminen tässä varmistaa, että
+     * seuraava pilvihaku tehdään vasta kun istunto on käytettävissä.
+     */
+    if(window.__supabaseClient){
+      try{
+        await window.__supabaseClient.auth.getSession();
+      }catch(err){
+        console.warn("Istunnon lataus epäonnistui",err);
+      }
+    }
+
+
     await syncCustomMethodsFromCloud();
 
     await loadState();
