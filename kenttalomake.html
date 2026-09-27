@@ -5778,6 +5778,7 @@ async function exportWord(){
 
   let imgRelCounter=200;
   let imgDocPrCounter=1000;
+  let photoNumber=1;
 
 
   function fieldRows(rows){
@@ -6232,19 +6233,27 @@ async function exportWord(){
             cx,
             cy,
             imgDocPrCounter++,
-            "center"
+            "left"
           )
         );
 
 
-        if(
-          p.caption &&
-          p.caption.trim()
-        ){
+        {
+
+          const captionText=
+            `Kuva ${photoNumber}.`+
+            (
+              p.caption &&
+              p.caption.trim()
+                ? " "+p.caption.trim()
+                : ""
+            );
+
+          photoNumber++;
 
           bodyParts.push(
             engine.paraXml(
-              p.caption.trim(),
+              captionText,
               {
                 italic:true,
                 align:"left",
@@ -6255,7 +6264,7 @@ async function exportWord(){
                     s.fonts.bodySize-1
                   )
                 ),
-                color:"666666",
+                color:"000000",
                 after:160
               }
             )
