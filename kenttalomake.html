@@ -5809,14 +5809,14 @@ async function exportWord(){
   }
 
 
+  // Pääotsikko pidetään aina 16 pt:n kokoisena riippumatta raportin
+  // muista otsikkotyylin asetuksista.
   bodyParts.push(
     engine.paraXml(
       "Kenttämuistiinpano",
       {
         bold:true,
-        sz:engine.pt2hp(
-          s.fonts.headingSize+6
-        ),
+        sz:engine.pt2hp(16),
         font:s.fonts.heading,
         color:s.colors.heading,
         pStyle:"Heading1",
@@ -5933,9 +5933,40 @@ async function exportWord(){
     }
 
 
+    /*
+     * Rakenneavaukset nimetään Word-raportissa niiden omalla tunnuksella
+     * (esim. "Rakenneavaus RA1") eikä yleisellä "Menetelmä N" -otsikolla.
+     * Tunnus haetaan ensisijaisesti menetelmän kentästä, jonka otsikossa
+     * esiintyy "Rakenneavauksen tunnus". Näin tämä toimii myös käyttäjän
+     * muokkaamassa menetelmämäärittelyssä.
+     */
+    let entryHeading;
+
+    if(m.id === "avaus"){
+      const tunnusField =
+        m.fields.find(f =>
+          /rakenneavauksen\s+tunnus/i.test(String(f.label || ""))
+        );
+
+      const tunnus =
+        tunnusField &&
+        e.values &&
+        e.values[tunnusField.id] != null
+          ? String(e.values[tunnusField.id]).trim()
+          : "";
+
+      // Jos tunnuskenttää ei ole tai se on tyhjä, käytetään kuitenkin
+      // selkeää rakenneavausotsikkoa ilman tyhjää tunnusta.
+      entryHeading = tunnus
+        ? `Rakenneavaus ${tunnus}`
+        : "Rakenneavaus";
+    }else{
+      entryHeading = `Menetelmä ${i+1}: ${m.name}`;
+    }
+
     bodyParts.push(
       engine.paraXml(
-        `Menetelmä ${i+1}: ${m.name}`,
+        entryHeading,
         {
           bold:true,
           sz:engine.pt2hp(
@@ -6068,13 +6099,43 @@ async function exportWord(){
         )
       ];
 
+      /*
+       * Jaetaan sarakeleveydet otsikoiden perusteella. Tasalevyinen jako
+       * tekee helposti kapeista sarakkeista niin pieniä, että Word alkaa
+       * katkaista otsikot kirjain kerrallaan (esim. "Materiaali").
+       * Vähimmäisleveys pitää sarakkeet luettavina ja pisimmät otsikot
+       * saavat hieman enemmän tilaa.
+       */
+      const colWidthPercents = (() => {
+        const minPct = 12;
+        const maxPct = 28;
+        const raw = cols.map(c => {
+          const len = String(c.label || "").trim().length;
+          return Math.max(1, Math.min(1.8, len / 8));
+        });
+        const minTotal = minPct * raw.length;
+
+        if(minTotal >= 100){
+          return raw.map(() => Math.floor(100 / raw.length));
+        }
+
+        const remaining = 100 - minTotal;
+        const rawSum = raw.reduce((a,b) => a+b, 0);
+        const values = raw.map(r => minPct + remaining * (r / rawSum));
+        const capped = values.map(v => Math.min(maxPct, v));
+        const sum = capped.reduce((a,b) => a+b, 0);
+        const normalized = capped.map(v => v * 100 / sum);
+
+        // Pyöristyskorjaus tehdään tableXml:ssa viimeiseen sarakkeeseen.
+        return normalized;
+      })();
+
       bodyParts.push(
         engine.tableXml(
           docRows,
           {
             headerRowCount:1,
-            colWidthPercents:
-              cols.map(()=>Math.floor(100/cols.length)),
+            colWidthPercents,
             font:s.fonts.body,
             sz:engine.pt2hp(s.fonts.bodySize),
             color:s.colors.body

@@ -539,7 +539,17 @@ window.DocxStyleEngine = (function(){
     // renderöityä lähes nollaleveinä, jolloin teksti pilkkoutui kirjain
     // kerrallaan omille riveilleen.
     return '<w:tbl>' +
-      '<w:tblPr><w:tblW w:w="'+totalWidth+'" w:type="dxa"/><w:tblLayout w:type="fixed"/>' + borderXml + '</w:tblPr>' +
+      '<w:tblPr>' +
+      '<w:tblW w:w="'+totalWidth+'" w:type="dxa"/>' +
+      '<w:tblLayout w:type="fixed"/>' +
+      '<w:tblCellMar>' +
+      '<w:top w:w="70" w:type="dxa"/>' +
+      '<w:left w:w="70" w:type="dxa"/>' +
+      '<w:bottom w:w="70" w:type="dxa"/>' +
+      '<w:right w:w="70" w:type="dxa"/>' +
+      '</w:tblCellMar>' +
+      borderXml +
+      '</w:tblPr>' +
       '<w:tblGrid>' + gridCols + '</w:tblGrid>' +
       trXml + '</w:tbl>';
   }
