@@ -1025,10 +1025,10 @@ async function persistMethods(){
 const COMMON_FIELDS=[
   {
     id:"paikka",
-    label:"Tutkimuskohta / rakenneosa / tila",
+    label:"Tunnus/Tila",
     type:"text",
     req:true,
-    placeholder:"esim. Kylpyhuone 1. krs, ulkoseinä"
+    placeholder:"esim. RA1 / Makuuhuone"
   }
 ];
 
@@ -5934,35 +5934,22 @@ async function exportWord(){
 
 
     /*
-     * Rakenneavaukset nimetään Word-raportissa niiden omalla tunnuksella
-     * (esim. "Rakenneavaus RA1") eikä yleisellä "Menetelmä N" -otsikolla.
-     * Tunnus haetaan ensisijaisesti menetelmän kentästä, jonka otsikossa
-     * esiintyy "Rakenneavauksen tunnus". Näin tämä toimii myös käyttäjän
-     * muokkaamassa menetelmämäärittelyssä.
+     * Merkinnät nimetään Word-raportissa menetelmän nimellä ja perässä
+     * käyttäjän syöttämällä Tunnus/Tila-tiedolla (COMMON_FIELDS-kentä
+     * "paikka", esim. "RA1 / Makuuhuone") — ei enää yleisellä
+     * "Menetelmä N" -otsikolla. Jos Tunnus/Tila on tyhjä, käytetään
+     * pelkkää menetelmän nimeä.
      */
-    let entryHeading;
+    const tunnusTila=
+      e.values &&
+      e.values.paikka != null
+        ? String(e.values.paikka).trim()
+        : "";
 
-    if(m.id === "avaus"){
-      const tunnusField =
-        m.fields.find(f =>
-          /rakenneavauksen\s+tunnus/i.test(String(f.label || ""))
-        );
-
-      const tunnus =
-        tunnusField &&
-        e.values &&
-        e.values[tunnusField.id] != null
-          ? String(e.values[tunnusField.id]).trim()
-          : "";
-
-      // Jos tunnuskenttää ei ole tai se on tyhjä, käytetään kuitenkin
-      // selkeää rakenneavausotsikkoa ilman tyhjää tunnusta.
-      entryHeading = tunnus
-        ? `Rakenneavaus ${tunnus}`
-        : "Rakenneavaus";
-    }else{
-      entryHeading = `Menetelmä ${i+1}: ${m.name}`;
-    }
+    const entryHeading=
+      tunnusTila
+        ? `${m.name} ${tunnusTila}`
+        : m.name;
 
     bodyParts.push(
       engine.paraXml(
@@ -6208,6 +6195,7 @@ async function exportWord(){
 
 
         const maxCx=4200000;
+        const maxCy=2700000; // 7,5 cm — pystysuuntaisen kuvan enimmäiskorkeus
 
         const {
           cx,
@@ -6216,7 +6204,8 @@ async function exportWord(){
           engine.scaledDims(
             n.width,
             n.height,
-            maxCx
+            maxCx,
+            maxCy
           );
 
 
@@ -6258,7 +6247,7 @@ async function exportWord(){
               p.caption.trim(),
               {
                 italic:true,
-                align:"center",
+                align:"left",
                 font:s.fonts.body,
                 sz:engine.pt2hp(
                   Math.max(

@@ -569,10 +569,12 @@ window.DocxStyleEngine = (function(){
 
   function pxToEmu(px){ return Math.round(px * 9525); }
 
-  function scaledDims(w, h, maxCxEmu){
+  function scaledDims(w, h, maxCxEmu, maxCyEmu){
     let cx = pxToEmu(w), cy = pxToEmu(h);
-    if (cx > maxCxEmu){
-      const s = maxCxEmu / cx;
+    let s = 1;
+    if (cx > maxCxEmu) s = Math.min(s, maxCxEmu / cx);
+    if (maxCyEmu && cy > maxCyEmu) s = Math.min(s, maxCyEmu / cy);
+    if (s < 1){
       cx = Math.round(cx * s);
       cy = Math.round(cy * s);
     }
