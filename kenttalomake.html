@@ -955,6 +955,7 @@ async function syncCustomMethodsFromCloud(){
 
     if(error){
       console.warn("Menetelmien lataus pilvestä epäonnistui",error);
+      toast("Menetelmien haku pilvestä epäonnistui: "+(error.message||error.code||"tuntematon"));
       return;
     }
 
@@ -998,7 +999,7 @@ async function pushMethodsToCloud(){
 
     if(error){
       console.warn("Menetelmien tallennus pilveen epäonnistui",error);
-      toast("Menetelmät tallennettu vain tälle laitteelle (pilvitallennus epäonnistui).");
+      toast("Menetelmät tallennettu vain tälle laitteelle. Pilvivirhe: "+(error.message||error.code||"tuntematon"));
       return false;
     }
 
