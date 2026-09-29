@@ -433,3 +433,30 @@
   .bottom-actions{
     display:flex; gap:8px; padding:16px 14px 30px;
   }
+
+  /* ---- Ohjeiden editori ---- */
+  .hints-editor{
+    margin-top:10px; border:1px solid #c3cfdc; border-radius:8px; background:#f3f6f9; padding:0 10px;
+  }
+  .hints-editor > summary{
+    cursor:pointer; padding:9px 0; font-size:.8rem; font-weight:600; color:var(--brand-deep);
+  }
+  .hints-editor[open] > summary{ border-bottom:1px solid #d8e0e8; margin-bottom:10px; }
+  .hint-edit-block{
+    border:1px solid var(--line-strong); border-radius:8px; background:#fff;
+    padding:10px; margin-bottom:10px;
+  }
+  .cond-row{
+    border:1px dashed var(--line-strong); border-radius:7px; padding:8px; margin-bottom:8px;
+    background:#fbfaf7;
+  }
+  .cond-values{ display:flex; flex-wrap:wrap; gap:6px 12px; margin-top:6px; }
+  .cond-values label{ display:flex; align-items:center; gap:4px; font-size:.8rem; }
+  .cond-num{
+    width:90px; border:1px solid var(--line-strong); border-radius:6px; padding:6px 7px; font-size:.85rem;
+  }
+  .hint-text-input{
+    width:100%; border:1px solid var(--line-strong); border-radius:7px; padding:8px 9px;
+    font-size:.85rem; font-family:inherit; min-height:74px; margin-top:6px; box-sizing:border-box;
+  }
+  .hint-note{ font-size:.74rem; color:var(--ink-soft); margin:2px 0 6px; }

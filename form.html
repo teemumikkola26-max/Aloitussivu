@@ -378,6 +378,22 @@
   .toast.show{opacity:1;}
 
   input[type=file]{display:none;}
+
+  /* ---- Ehdolliset ohjeet ---- */
+  .hint-holder:empty{display:none;}
+  .hint-holder-section{padding:10px 14px 0;}
+  .hint-box{
+    border:1px solid;border-radius:8px;padding:9px 11px;margin:0 0 8px;
+    font-size:.84rem;line-height:1.4;
+  }
+  .hint-info{background:#e8edf3;border-color:#c3cfdc;color:#233043;}
+  .hint-warn{background:var(--note-bg);border-color:#e2c3a4;color:#6e3d12;}
+  .hint-label{font-weight:700;font-size:.72rem;letter-spacing:.03em;text-transform:uppercase;margin-bottom:3px;}
+  .hint-text{white-space:pre-line;}
+  .hint-badge{
+    font-size:.72rem;font-weight:600;color:var(--brand);background:#e8edf3;
+    border-radius:99px;padding:1px 7px;flex-shrink:0;white-space:nowrap;margin-left:auto;
+  }
 </style>
 </head>
 <body>

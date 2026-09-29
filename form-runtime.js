@@ -14,11 +14,16 @@
        { id, title,
          fields: [
            { id, type: "checklist"|"text"|"number"|"date"|"select",
-             label, allowPhoto?, allowAction?, actionLabel?, unit?, options? }
-         ]
+             label, allowPhoto?, allowAction?, actionLabel?, unit?, options?,
+             hints?: [ { id, text, level:"info"|"warn", match:"all"|"any",
+                         conditions:[ { source:"h:<headerFieldId>"|"f:<secId>_<fieldId>",
+                                        op, values?, value?, value2? } ] } ] }
+         ],
+         hints?: [ ...samat kuin kentällä, näytetään osion alussa ]
        }
      ]
    }
+   headerFields-kentän type voi olla myös "number" tai "select" (options).
    ========================================================================= */
 
 let DEF = null;
@@ -29,6 +34,8 @@ let state = { header:{}, items:{} };
 let saveTimer = null;
 let db = null;
 const openSections = new Set();
+let hintHolders = [];   // { el, hints, sec }
+let sectionBadges = []; // { el, sec }
 
 function fatalError(message){
   document.documentElement.style.visibility = "visible";
@@ -319,19 +326,101 @@ function renderHeaderFields(){
     let input;
     if (f.type === "textarea"){
       input = document.createElement("textarea");
+    } else if (f.type === "select"){
+      input = document.createElement("select");
+      input.style.cssText = "width:100%;border:1px solid var(--line-strong);border-radius:7px;padding:9px 10px;font-size:.95rem;font-family:inherit;background:#fff;";
+      const emptyOpt = document.createElement("option");
+      emptyOpt.value = ""; emptyOpt.textContent = "— valitse —";
+      input.appendChild(emptyOpt);
+      (f.options || []).forEach(optText => {
+        const o = document.createElement("option");
+        o.value = optText; o.textContent = optText;
+        input.appendChild(o);
+      });
     } else {
       input = document.createElement("input");
-      input.type = f.type === "date" ? "date" : "text";
+      input.type = f.type === "date" ? "date" : (f.type === "number" ? "number" : "text");
+      if (f.type === "number"){ input.inputMode = "decimal"; input.step = "any"; }
     }
     input.id = "hf_" + f.id;
     input.autocomplete = "off";
     input.value = state.header[f.id] || "";
     input.addEventListener("input", () => {
       state.header[f.id] = input.value;
+      refreshHints();
       saveDebounced();
     });
     div.appendChild(input);
     wrap.appendChild(div);
+  });
+}
+
+/* ---------- Ehdolliset ohjeet ---------- */
+function getSourceValue(src){
+  if (typeof src !== "string") return null;
+  if (src.indexOf("h:") === 0) return state.header[src.slice(2)];
+  if (src.indexOf("f:") === 0){
+    const it = state.items[src.slice(2)];
+    return it ? it.value : null;
+  }
+  return null;
+}
+
+function condMet(c){
+  const raw = getSourceValue(c.source);
+  if (raw == null || String(raw).trim() === "") return false;   // ei vielä vastattu -> ehto ei täyty
+  if (c.op === "is") return (c.values || []).indexOf(String(raw)) !== -1;
+  if (c.op === "isnot") return (c.values || []).indexOf(String(raw)) === -1;
+  const n = parseFloat(String(raw).replace(",", "."));
+  if (isNaN(n)) return false;
+  const a = parseFloat(String(c.value).replace(",", "."));
+  const b = parseFloat(String(c.value2).replace(",", "."));
+  switch (c.op){
+    case "lt":  return !isNaN(a) && n <  a;
+    case "lte": return !isNaN(a) && n <= a;
+    case "gt":  return !isNaN(a) && n >  a;
+    case "gte": return !isNaN(a) && n >= a;
+    case "eq":  return !isNaN(a) && n === a;
+    case "between": return !isNaN(a) && !isNaN(b) && n >= Math.min(a,b) && n <= Math.max(a,b);
+  }
+  return false;
+}
+
+function hintActive(h){
+  if (!h || !h.text || !String(h.text).trim()) return false;
+  const conds = h.conditions || [];
+  if (!conds.length) return true;                                // ei ehtoja -> näytetään aina
+  return h.match === "any" ? conds.some(condMet) : conds.every(condMet);
+}
+
+function renderHintBoxes(container, active){
+  container.innerHTML = "";
+  active.forEach(h => {
+    const box = document.createElement("div");
+    box.className = "hint-box " + (h.level === "warn" ? "hint-warn" : "hint-info");
+    const label = document.createElement("div");
+    label.className = "hint-label";
+    label.textContent = h.level === "warn" ? "⚠️ Huomio" : "💡 Ohje";
+    const text = document.createElement("div");
+    text.className = "hint-text";
+    text.textContent = h.text;
+    box.appendChild(label);
+    box.appendChild(text);
+    container.appendChild(box);
+  });
+}
+
+function refreshHints(){
+  const counts = new Map();
+  hintHolders.forEach(h => {
+    const active = (h.hints || []).filter(hintActive);
+    renderHintBoxes(h.el, active);
+    counts.set(h.sec, (counts.get(h.sec) || 0) + active.length);
+  });
+  sectionBadges.forEach(b => {
+    const n = counts.get(b.sec) || 0;
+    b.el.textContent = n ? ("💡" + n) : "";
+    b.el.style.display = n ? "" : "none";
   });
 }
 
@@ -358,6 +447,8 @@ function colorWithAlpha(hex, alpha){
 function renderSections(){
   const main = document.getElementById("sections");
   main.innerHTML = "";
+  hintHolders = [];
+  sectionBadges = [];
   DEF.sections.forEach((sec, secIdx) => {
     const { done, total, notes } = fieldCounts(sec);
     const secDiv = document.createElement("div");
@@ -369,8 +460,10 @@ function renderSections(){
     head.innerHTML =
       '<div class="section-title-wrap"><span class="section-num">' + (secIdx+1) + '</span>' +
       '<h2>' + escapeHtml(sec.title) + '</h2></div>' +
+      '<span class="hint-badge" data-badge style="display:none"></span>' +
       '<span class="section-count ' + (done===total?'complete':(notes>0?'has-notes':'')) + '">' + done + '/' + total + '</span>' +
       '<span class="chevron"></span>';
+    sectionBadges.push({ el: head.querySelector("[data-badge]"), sec });
     head.addEventListener("click", () => {
       if (openSections.has(sec.id)) openSections.delete(sec.id); else openSections.add(sec.id);
       renderSections();
@@ -379,6 +472,11 @@ function renderSections(){
 
     const itemsWrap = document.createElement("div");
     itemsWrap.className = "section-items";
+
+    const secHintHolder = document.createElement("div");
+    secHintHolder.className = "hint-holder hint-holder-section";
+    itemsWrap.appendChild(secHintHolder);
+    hintHolders.push({ el: secHintHolder, hints: sec.hints || [], sec });
 
     sec.fields.forEach((field) => {
       const itemId = sec.id + "_" + field.id;
@@ -390,6 +488,11 @@ function renderSections(){
       textDiv.className = "item-text";
       textDiv.textContent = field.label;
       itemDiv.appendChild(textDiv);
+
+      const fieldHintHolder = document.createElement("div");
+      fieldHintHolder.className = "hint-holder";
+      itemDiv.appendChild(fieldHintHolder);
+      hintHolders.push({ el: fieldHintHolder, hints: field.hints || [], sec });
 
       if (field.type === "checklist"){
         const statusRow = document.createElement("div");
@@ -517,6 +620,7 @@ function renderSections(){
         input.value = itState.value || "";
         input.addEventListener("input", () => {
           itState.value = input.value;
+          refreshHints();
           saveDebounced();
         });
         valArea.appendChild(input);
@@ -565,6 +669,7 @@ function renderSections(){
     main.appendChild(secDiv);
   });
 
+  refreshHints();
   updateProgress();
   renderQuickNav();
 }
