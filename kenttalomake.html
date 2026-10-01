@@ -3395,6 +3395,142 @@ function syncFieldTableHintsFromDom(f,fieldIdx){
 }
 
 
+/*
+ * KENTTIEN EHDOT JA SIIRTYMÄT
+ *
+ * Kentälle voi määrittää kahdenlaista logiikkaa:
+ *
+ *  - f.showIf = [{fieldId,op,value}, ...]
+ *    Kenttä näytetään lomakkeella vain, jos KAIKKI ehdot täyttyvät (JA).
+ *    Ehto voi viitata vain aiempaan (ylempänä olevaan) kenttään.
+ *
+ *  - f.jumps = [{id,op,value,target}, ...]
+ *    Kun TÄMÄN kentän arvo täyttää ehdon, siirrytään suoraan kohdekenttään
+ *    (target = kentän id tai JUMP_END) ja välissä olevat kentät piilotetaan.
+ *    Kohteen pitää olla myöhemmin kuin lähdekenttä. Ensimmäinen täsmäävä
+ *    siirtymä voittaa.
+ *
+ * Piilotetun kentän arvoa ei vaadita, ei validoida eikä viedä raporttiin,
+ * ja muut ehdot käsittelevät sitä tyhjänä.
+ */
+const JUMP_END="__end";
+
+function condOpsForType(type){
+  let ops=hintOpsForType(type);
+  if(type==="select"){
+    ops=ops.filter(o=>o.value!=="contains");
+  }
+  return ops.concat([
+    { value:"filled", label:"on täytetty" },
+    { value:"empty", label:"on tyhjä" }
+  ]);
+}
+
+function condNeedsValue(op){
+  return op!=="filled" && op!=="empty";
+}
+
+/*
+ * strictEmpty=true (siirtymät): tyhjä kenttä ei täytä muita ehtoja kuin
+ * "on tyhjä" — muuten esim. "ei ole Y" hyppäisi yli kenttiä ennen kuin
+ * tutkija on ehtinyt vastata mitään.
+ */
+function evalCondition(cond,type,rawValue,strictEmpty){
+
+  const isEmpty=
+    rawValue===undefined ||
+    rawValue===null ||
+    String(rawValue).trim()==="";
+
+  if(cond.op==="filled")return !isEmpty;
+  if(cond.op==="empty")return isEmpty;
+
+  if(isEmpty)return strictEmpty?false:cond.op==="neq";
+
+  return evalHintRule(cond,type,rawValue);
+}
+
+function computeFieldVisibility(fields,values){
+
+  const vis={};
+  const byId={};
+
+  fields.forEach((f,i)=>{ byId[f.id]=i; });
+
+  let skipUntil=0;
+
+  fields.forEach((f,i)=>{
+
+    if(i<skipUntil){
+      vis[f.id]=false;
+      return;
+    }
+
+    let ok=true;
+
+    (Array.isArray(f.showIf)?f.showIf:[]).forEach(c=>{
+
+      const si=byId[c.fieldId];
+
+      /* Virheellinen viittaus (poistettu / väärässä suunnassa) ohitetaan. */
+      if(si===undefined || si>=i)return;
+
+      const src=fields[si];
+
+      if(src.type==="table")return;
+
+      const raw=vis[src.id]?values[src.id]:undefined;
+
+      if(!evalCondition(c,src.type,raw,false))ok=false;
+    });
+
+    if(!ok){
+      vis[f.id]=false;
+      return;
+    }
+
+    vis[f.id]=true;
+
+    if(f.type==="table")return;
+
+    const jumps=Array.isArray(f.jumps)?f.jumps:[];
+
+    for(const j of jumps){
+
+      const t=j.target===JUMP_END?fields.length:byId[j.target];
+
+      if(t===undefined || t<=i)continue;
+
+      if(evalCondition(j,f.type,values[f.id],true)){
+        skipUntil=Math.max(skipUntil,t);
+        break;
+      }
+    }
+  });
+
+  return vis;
+}
+
+function mkSelect(items,current,style){
+
+  const sel=document.createElement("select");
+
+  if(style)sel.style.cssText=style;
+
+  items.forEach(([v,l])=>{
+    const o=document.createElement("option");
+    o.value=v;
+    o.textContent=l;
+    if(v===current)o.selected=true;
+    sel.appendChild(o);
+  });
+
+  return sel;
+}
+
+/* Kenttäriveillä käytettävä "onko kenttä käytössä" -tila (säilyy uudelleenpiirroissa). */
+const logicOpenIds=new Set();
+
 function renderMethodsManageCard(){
 
   const c=el(`
@@ -3476,9 +3612,17 @@ function renderMethodFieldRow(f,idx,fields){
 
   if(!Array.isArray(f.hints))f.hints=[];
   if(!Array.isArray(f.columns))f.columns=[];
+  if(!Array.isArray(f.showIf))f.showIf=[];
+  if(!Array.isArray(f.jumps))f.jumps=[];
 
   const row=el(`
     <div class="card" style="padding:12px;margin-bottom:10px;background:var(--paper);">
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
+        <span class="badge">Kenttä ${idx+1}</span>
+        <span style="flex:1;"></span>
+        <button type="button" class="btn btn-sm btn-outline" id="mf_up_${idx}" title="Siirrä ylös" aria-label="Siirrä ylös" ${idx===0?'disabled style="opacity:.35;"':""}>▲</button>
+        <button type="button" class="btn btn-sm btn-outline" id="mf_down_${idx}" title="Siirrä alas" aria-label="Siirrä alas" ${idx===fields.length-1?'disabled style="opacity:.35;"':""}>▼</button>
+      </div>
       <div style="display:flex;gap:8px;align-items:flex-start;">
         <div style="flex:1;">
           <label>Kentän nimi</label>
@@ -3536,6 +3680,13 @@ function renderMethodFieldRow(f,idx,fields){
           + Lisää apulause
         </button>
       </div>
+
+      <details class="mf-logic" style="margin-top:10px;border-top:1px solid var(--line);padding-top:10px;" ${logicOpenIds.has(f.id)?"open":""}>
+        <summary style="cursor:pointer;font-weight:700;">
+          Ehdot ja siirtymät<span class="mf-logic-count"></span>
+        </summary>
+        <div class="mf-logic-body" style="margin-top:8px;"></div>
+      </details>
     </div>
   `);
 
@@ -3854,13 +4005,378 @@ function renderMethodFieldRow(f,idx,fields){
     }
 
     renderHints();
+    renderLogic();
   };
 
   row.querySelector(`#mf_del_${idx}`).onclick=()=>{
     syncMethodFieldsFromDom(fields);
-    fields.splice(idx,1);
+    const removed=fields.splice(idx,1)[0];
+
+    /* Poistetaan ehdot, jotka viittasivat poistettuun kenttään. */
+    let cleaned=0;
+    if(removed){
+      fields.forEach(ff=>{
+        if(Array.isArray(ff.showIf)){
+          const before=ff.showIf.length;
+          ff.showIf=ff.showIf.filter(c=>c.fieldId!==removed.id);
+          cleaned+=before-ff.showIf.length;
+        }
+        if(Array.isArray(ff.jumps)){
+          const before=ff.jumps.length;
+          ff.jumps=ff.jumps.filter(j=>j.target!==removed.id);
+          cleaned+=before-ff.jumps.length;
+        }
+      });
+    }
+
     renderMethodEditFieldsInto(fieldsListEl,fields);
+
+    if(cleaned){
+      toast("Poistettiin myös "+cleaned+" ehtoa, jotka viittasivat poistettuun kenttään");
+    }
   };
+
+  /* ---- Järjestyksen vaihto ---- */
+
+  function moveField(delta){
+
+    const to=idx+delta;
+
+    if(to<0 || to>=fields.length)return;
+
+    syncMethodFieldsFromDom(fields);
+
+    const tmp=fields[idx];
+    fields[idx]=fields[to];
+    fields[to]=tmp;
+
+    renderMethodEditFieldsInto(fieldsListEl,fields);
+
+    const moved=fieldsListEl.children[to];
+    if(moved && moved.scrollIntoView){
+      moved.scrollIntoView({block:"nearest",behavior:"smooth"});
+    }
+  }
+
+  row.querySelector(`#mf_up_${idx}`).onclick=()=>moveField(-1);
+  row.querySelector(`#mf_down_${idx}`).onclick=()=>moveField(1);
+
+  /* ---- Ehdot ja siirtymät ---- */
+
+  const logicBox=row.querySelector("details.mf-logic");
+  const logicBody=row.querySelector(".mf-logic-body");
+  const logicCount=row.querySelector(".mf-logic-count");
+
+  /* Pidetään mallin nimet/vaihtoehdot ajan tasalla, jotta muiden kenttien
+     ehtovalikot näyttävät oikeat tiedot kun ne avataan. */
+  row.querySelector(`#mf_label_${idx}`).addEventListener("input",e=>{
+    f.label=e.target.value;
+  });
+
+  const optionsTa=row.querySelector(`#mf_options_${idx}`);
+  if(optionsTa){
+    optionsTa.addEventListener("input",e=>{
+      f.options=
+        e.target.value
+          .split("\n")
+          .map(x=>x.trim())
+          .filter(Boolean);
+    });
+  }
+
+  function fieldName(i){
+    return (i+1)+". "+(fields[i].label||"(nimetön kenttä)");
+  }
+
+  function eligibleSources(){
+    const list=[];
+    for(let i=0;i<idx;i++){
+      if(fields[i].type!=="table")list.push(i);
+    }
+    return list;
+  }
+
+  function showIfInvalid(c){
+    const si=fields.findIndex(x=>x.id===c.fieldId);
+    return si===-1 || si>=idx || fields[si].type==="table";
+  }
+
+  function jumpInvalid(j){
+    if(j.target===JUMP_END)return idx>=fields.length-1;
+    const ti=fields.findIndex(x=>x.id===j.target);
+    return ti===-1 || ti<=idx;
+  }
+
+  function updateLogicSummary(){
+
+    const jumps=f.type==="table"?[]:f.jumps;
+    const n=f.showIf.length+jumps.length;
+    const bad=
+      f.showIf.some(showIfInvalid) ||
+      jumps.some(jumpInvalid);
+
+    logicCount.innerHTML=
+      (n?` (${n})`:"")+
+      (bad?` <span style="color:var(--warn);">⚠</span>`:"");
+  }
+
+  function buildValueControl(cond,srcField){
+
+    if(!condNeedsValue(cond.op))return null;
+
+    if(srcField.type==="select"){
+
+      const opts=(srcField.options||[]).slice();
+      const items=[["","Valitse..."]];
+
+      opts.forEach(o=>items.push([o,o]));
+
+      if(cond.value && !opts.includes(cond.value)){
+        items.push([cond.value,cond.value+" (ei enää vaihtoehtona)"]);
+      }
+
+      const sel=mkSelect(items,cond.value||"","flex:1;width:auto;min-width:90px;");
+
+      sel.onchange=e=>{ cond.value=e.target.value; };
+
+      return sel;
+    }
+
+    const inp=document.createElement("input");
+    inp.type="text";
+    if(srcField.type==="number")inp.inputMode="decimal";
+    inp.placeholder="Arvo";
+    inp.value=cond.value||"";
+    inp.style.cssText="width:90px;flex:0 0 auto;";
+    inp.oninput=e=>{ cond.value=e.target.value; };
+
+    return inp;
+  }
+
+  function buildOpControl(cond,srcField){
+
+    const ops=condOpsForType(srcField.type);
+
+    if(!ops.find(o=>o.value===cond.op)){
+      cond.op=ops[0].value;
+    }
+
+    const sel=mkSelect(
+      ops.map(o=>[o.value,o.label]),
+      cond.op,
+      "flex:0 0 auto;width:auto;"
+    );
+
+    sel.onchange=e=>{
+      cond.op=e.target.value;
+      renderLogic();
+    };
+
+    return sel;
+  }
+
+  function warnEl(text){
+    return el(`<div style="font-size:12px;color:var(--warn);margin:2px 0 6px;">⚠ ${escapeHtml(text)}</div>`);
+  }
+
+  function renderLogic(){
+
+    updateLogicSummary();
+
+    logicBody.innerHTML="";
+
+    logicBody.appendChild(el(`
+      <div class="hint">
+        Ehdot vaikuttavat vain lomakkeeseen. Piilotetun kentän tietoja
+        ei vaadita eikä viedä raporttiin, vaikka kenttä olisi pakollinen.
+      </div>
+    `));
+
+    /* ---------- Näyttöehdot ---------- */
+
+    logicBody.appendChild(el(`<div style="font-weight:700;font-size:13px;margin-top:8px;">Näytä tämä kenttä vain, jos</div>`));
+
+    const sources=eligibleSources();
+
+    if(!sources.length){
+
+      logicBody.appendChild(el(`
+        <div class="hint">
+          ${idx===0
+            ?"Ensimmäiselle kentälle ei voi asettaa näyttöehtoa, koska sen yläpuolella ei ole kenttiä."
+            :"Yläpuolella ei ole kenttiä, joiden arvoon ehdon voisi sitoa (taulukkokenttiä ei voi käyttää ehdon lähteenä)."}
+        </div>
+      `));
+
+    }else{
+
+      f.showIf.forEach((c,cIdx)=>{
+
+        const invalid=showIfInvalid(c);
+        const srcIdx=fields.findIndex(x=>x.id===c.fieldId);
+        const src=(!invalid)?fields[srcIdx]:fields[sources[0]];
+
+        const items=sources.map(i=>[fields[i].id,fieldName(i)]);
+
+        if(invalid)items.unshift(["","⚠ Valitse kenttä"]);
+
+        const box=el(`<div style="margin-bottom:8px;"></div>`);
+        const line=el(`<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;"></div>`);
+
+        if(cIdx>0){
+          line.appendChild(el(`<span style="font-size:11px;color:#8a8574;flex:0 0 auto;">JA</span>`));
+        }
+
+        const srcSel=mkSelect(items,invalid?"":c.fieldId,"flex:1;width:auto;min-width:120px;");
+
+        srcSel.onchange=e=>{
+          c.fieldId=e.target.value;
+          c.value="";
+          renderLogic();
+        };
+
+        line.appendChild(srcSel);
+
+        if(!invalid){
+
+          line.appendChild(buildOpControl(c,src));
+
+          const vc=buildValueControl(c,src);
+          if(vc)line.appendChild(vc);
+        }
+
+        const del=el(`<button type="button" class="btn btn-sm btn-danger" title="Poista ehto">✕</button>`);
+
+        del.onclick=()=>{
+          f.showIf.splice(cIdx,1);
+          renderLogic();
+        };
+
+        line.appendChild(del);
+        box.appendChild(line);
+
+        if(invalid && c.fieldId){
+          box.appendChild(warnEl("Ehto viittaa kenttään, joka ei ole enää tämän kentän yläpuolella. Valitse kenttä uudelleen tai poista ehto."));
+        }
+
+        logicBody.appendChild(box);
+      });
+
+      const addShow=el(`<button type="button" class="btn btn-sm btn-outline">+ Lisää näyttöehto</button>`);
+
+      addShow.onclick=()=>{
+        const last=fields[sources[sources.length-1]];
+        f.showIf.push({
+          fieldId:last.id,
+          op:condOpsForType(last.type)[0].value,
+          value:""
+        });
+        renderLogic();
+      };
+
+      logicBody.appendChild(addShow);
+    }
+
+    /* ---------- Siirtymät ---------- */
+
+    logicBody.appendChild(el(`<div style="font-weight:700;font-size:13px;margin-top:14px;">Kun tämän kentän arvo täyttää ehdon</div>`));
+
+    if(f.type==="table"){
+
+      logicBody.appendChild(el(`<div class="hint">Siirtymiä ei voi asettaa taulukkokentälle.</div>`));
+      return;
+    }
+
+    if(idx>=fields.length-1){
+
+      logicBody.appendChild(el(`<div class="hint">Tämän kentän jälkeen ei ole kenttiä, joihin voisi siirtyä.</div>`));
+      return;
+    }
+
+    f.jumps.forEach((j,jIdx)=>{
+
+      const invalid=jumpInvalid(j);
+
+      const box=el(`<div class="card" style="padding:8px;margin-bottom:8px;background:#fff;"></div>`);
+      const line=el(`<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;"></div>`);
+
+      line.appendChild(el(`<span style="font-size:12px;color:#8a8574;flex:0 0 auto;">Jos arvo</span>`));
+      line.appendChild(buildOpControl(j,f));
+
+      const vc=buildValueControl(j,f);
+      if(vc)line.appendChild(vc);
+
+      box.appendChild(line);
+
+      const tItems=[];
+
+      for(let i=idx+1;i<fields.length;i++){
+        tItems.push([fields[i].id,fieldName(i)]);
+      }
+
+      tItems.push([JUMP_END,"Lomakkeen loppu (ohita loput kentät)"]);
+
+      if(invalid)tItems.unshift(["","⚠ Valitse kohdekenttä"]);
+
+      const line2=el(`<div style="display:flex;gap:6px;align-items:center;margin-top:6px;"></div>`);
+
+      line2.appendChild(el(`<span style="font-size:12px;color:#8a8574;flex:0 0 auto;">siirry kenttään</span>`));
+
+      const tSel=mkSelect(tItems,invalid?"":j.target,"flex:1;width:auto;min-width:120px;");
+
+      tSel.onchange=e=>{
+        j.target=e.target.value;
+        renderLogic();
+      };
+
+      line2.appendChild(tSel);
+
+      const del=el(`<button type="button" class="btn btn-sm btn-danger" title="Poista siirtymä">✕</button>`);
+
+      del.onclick=()=>{
+        f.jumps.splice(jIdx,1);
+        renderLogic();
+      };
+
+      line2.appendChild(del);
+      box.appendChild(line2);
+
+      box.appendChild(el(`<div style="font-size:12px;color:#8a8574;margin-top:4px;">Välissä olevat kentät piilotetaan.</div>`));
+
+      if(invalid && j.target){
+        box.appendChild(warnEl("Kohdekenttä ei ole enää tämän kentän jälkeen. Valitse kohde uudelleen tai poista siirtymä."));
+      }
+
+      logicBody.appendChild(box);
+    });
+
+    const addJump=el(`<button type="button" class="btn btn-sm btn-outline">+ Lisää siirtymä</button>`);
+
+    addJump.onclick=()=>{
+      f.jumps.push({
+        id:genFieldId(),
+        op:condOpsForType(f.type)[0].value,
+        value:"",
+        target:fields[idx+1].id
+      });
+      renderLogic();
+    };
+
+    logicBody.appendChild(addJump);
+  }
+
+  /* Sisältö piirretään uudelleen aina kun osio avataan, jotta valikoissa
+     on muiden kenttien ajantasaiset nimet ja vaihtoehdot. */
+  logicBox.addEventListener("toggle",()=>{
+    if(logicBox.open){
+      logicOpenIds.add(f.id);
+      renderLogic();
+    }else{
+      logicOpenIds.delete(f.id);
+    }
+  });
+
+  renderLogic();
 
   return row;
 }
@@ -3959,7 +4475,9 @@ function renderMethodEditCard(){
       placeholder:"",
       options:[],
       hints:[],
-      columns:[]
+      columns:[],
+      showIf:[],
+      jumps:[]
     });
     renderMethodEditFieldsInto(fieldsListEl,editingMethod.fields);
   };
@@ -4122,6 +4640,82 @@ async function saveMethodEdit(){
     return;
   }
 
+  /*
+   * Ehtojen ja siirtymien tarkistus: näyttöehdon lähteen pitää olla
+   * ylempänä kuin kenttä itse, ja siirtymän kohteen alempana. Tarkistus
+   * tehdään ennen kuin mitään muutetaan, ettei virhe jätä mallia
+   * puolittain siivotuksi.
+   */
+  const idxById={};
+  fields.forEach((ff,i)=>{ idxById[ff.id]=i; });
+
+  for(let i=0;i<fields.length;i++){
+
+    const ff=fields[i];
+
+    for(const c of (Array.isArray(ff.showIf)?ff.showIf:[])){
+
+      const si=idxById[c.fieldId];
+
+      if(si===undefined || si>=i || fields[si].type==="table"){
+        toast('Kentän "'+ff.label+'" näyttöehto viittaa kenttään, jonka pitää olla ennen tätä kenttää. Korjaa tai poista ehto.');
+        return;
+      }
+    }
+
+    if(ff.type==="table")continue;
+
+    for(const j of (Array.isArray(ff.jumps)?ff.jumps:[])){
+
+      if(j.target===JUMP_END){
+
+        if(i>=fields.length-1){
+          toast('Kentän "'+ff.label+'" siirtymän kohde on virheellinen. Korjaa tai poista siirtymä.');
+          return;
+        }
+
+        continue;
+      }
+
+      const ti=idxById[j.target];
+
+      if(ti===undefined || ti<=i){
+        toast('Kentän "'+ff.label+'" siirtymän kohdekentän pitää olla tämän kentän jälkeen. Korjaa tai poista siirtymä.');
+        return;
+      }
+    }
+  }
+
+  /* Siivotaan keskeneräiset rivit (arvo puuttuu) ja tyhjät listat. */
+  const condDone=x=>!condNeedsValue(x.op) || String(x.value||"").trim()!=="";
+
+  fields.forEach(ff=>{
+
+    ff.showIf=
+      (Array.isArray(ff.showIf)?ff.showIf:[])
+        .filter(condDone)
+        .map(c=>({
+          fieldId:c.fieldId,
+          op:c.op,
+          value:condNeedsValue(c.op)?String(c.value).trim():""
+        }));
+
+    ff.jumps=
+      ff.type==="table"
+        ?[]
+        :(Array.isArray(ff.jumps)?ff.jumps:[])
+          .filter(condDone)
+          .map(j=>({
+            id:j.id||genFieldId(),
+            op:j.op,
+            value:condNeedsValue(j.op)?String(j.value).trim():"",
+            target:j.target
+          }));
+
+    if(!ff.showIf.length)delete ff.showIf;
+    if(!ff.jumps.length)delete ff.jumps;
+  });
+
   editingMethod.name=name;
   editingMethod.short=short||name;
 
@@ -4195,15 +4789,50 @@ function renderEntryForm(){
     `);
 
 
+  const fieldWrappers={};
+
   m.fields.forEach(f=>{
 
-    spec.appendChild(
+    const w=
       renderField(
         f,
         editingEntry.values
-      )
-    );
+      );
+
+    fieldWrappers[f.id]=w;
+
+    spec.appendChild(w);
   });
+
+
+  /*
+   * Ehdolliset kentät: piilotetaan/näytetään kenttiä lennossa aina kun
+   * jokin arvo muuttuu (ei koko lomaketta uudelleen piirtäen, ettei
+   * kohdistus katoa kirjoittaessa).
+   */
+  function applyFieldVisibility(){
+
+    const vis=
+      computeFieldVisibility(
+        m.fields,
+        editingEntry.values
+      );
+
+    m.fields.forEach(f=>{
+
+      const w=fieldWrappers[f.id];
+
+      if(w){
+        w.style.display=
+          vis[f.id]===false?"none":"";
+      }
+    });
+  }
+
+  applyFieldVisibility();
+
+  spec.addEventListener("input",applyFieldVisibility);
+  spec.addEventListener("change",applyFieldVisibility);
 
 
   container.appendChild(spec);
@@ -4962,11 +5591,22 @@ function saveEntryForm(){
     );
 
 
+  /* Piilotettuja (ehdolla tai siirtymällä ohitettuja) kenttiä ei vaadita. */
+  const visMap=
+    computeFieldVisibility(
+      m.fields,
+      editingEntry.values
+    );
+
+  const isVisible=
+    f=>visMap[f.id]!==false;
+
+
   const req=[
     ...COMMON_FIELDS,
     ...m.fields
   ].filter(
-    f=>f.req
+    f=>f.req && isVisible(f)
   );
 
 
@@ -5025,6 +5665,8 @@ function saveEntryForm(){
    * Tarkistetaan numeroarvot.
    */
   for(const f of m.fields){
+
+    if(!isVisible(f))continue;
 
     if(f.type==="table"){
 
@@ -5974,11 +6616,20 @@ async function exportWord(){
     const rows=[];
     const tableFieldsToRender=[];
 
+    /* Ehdolla tai siirtymällä piilotettujen kenttien tietoja ei viedä raporttiin. */
+    const exportVis=
+      computeFieldVisibility(
+        m.fields,
+        e.values
+      );
+
 
     [
       ...COMMON_FIELDS,
       ...m.fields
     ].forEach(f=>{
+
+      if(exportVis[f.id]===false)return;
 
       if(f.type==="table"){
 
