@@ -247,35 +247,24 @@ input[type=number]::-webkit-outer-spin-button{
   border-color:var(--safety)
 }
 
-.method-tile-wrap{
-  position:relative;
-  display:flex
-}
-
-.method-tile-wrap .method-tile{
-  width:100%
-}
-
-.method-tile.has-guide{
-  padding-right:42px
-}
-
-.guide-open{
-  position:absolute;
-  top:6px;
-  right:6px;
-  width:32px;
-  height:32px;
-  padding:0;
+.field-guide-btn{
+  display:inline-flex;
+  align-items:center;
+  gap:4px;
+  margin-left:8px;
+  vertical-align:middle;
+  padding:3px 9px;
   border:1.5px solid var(--line);
-  border-radius:8px;
+  border-radius:999px;
   background:#fff;
-  font-size:16px;
-  line-height:1;
+  color:var(--ink);
+  font-size:12px;
+  font-weight:700;
+  line-height:1.2;
   cursor:pointer
 }
 
-.guide-open:active{
+.field-guide-btn:active{
   border-color:var(--safety)
 }
 
@@ -283,11 +272,11 @@ input[type=number]::-webkit-outer-spin-button{
   display:flex;
   align-items:center;
   gap:10px;
-  margin:10px 0
+  margin:8px 0
 }
 
 .guide-file .guide-ico{
-  font-size:26px
+  font-size:24px
 }
 
 .guide-actions{
@@ -2629,10 +2618,10 @@ function render(){
             "löydy uudelleenmuokattavaksi."
           )
         ){
-          const oldGuides=METHODS.filter(m=>m.guide).map(m=>m.guide);
+          const oldGuides=[].concat(...METHODS.map(methodGuides));
           METHODS=cloneMethods(DEFAULT_METHODS);
           await persistMethods();
-          oldGuides.forEach(g=>deleteGuideFile(g));
+          oldGuides.forEach(deleteGuideFile);
           render();
         }
       };
@@ -2654,7 +2643,7 @@ function render(){
 
     app.appendChild(
       renderBack(()=>{
-        discardUnsavedGuide();
+        discardUnsavedGuides();
         editingMethod=null;
         editingMethodIsNew=false;
         view="methodsManage";
@@ -3144,7 +3133,7 @@ function renderMethodGrid(){
       el(`
         <button
           type="button"
-          class="method-tile${m.guide?' has-guide':''}"
+          class="method-tile"
         >
           <span class="num">
             ${String(i+1).padStart(2,"0")}
@@ -3184,14 +3173,7 @@ function renderMethodGrid(){
     };
 
 
-    if(m.guide&&m.guide.path){
-      const wrap=el('<div class="method-tile-wrap"></div>');
-      wrap.appendChild(t);
-      wrap.appendChild(makeGuideButton(m.guide,"guide-open"));
-      w.appendChild(wrap);
-    }else{
-      w.appendChild(t);
-    }
+    w.appendChild(t);
   });
 
 
@@ -3200,14 +3182,19 @@ function renderMethodGrid(){
 
 
 /* ============================================================
-   MENETELMÄKOHTAISET PDF-OHJEET / RT-KORTIT
+   KENTTÄKOHTAISET PDF-OHJEET / RT-KORTIT
    ============================================================
- * Menetelmään voi liittää yhden PDF-tiedoston (method.guide =
- * {name,path,size}). Tiedosto tallennetaan Supabase Storageen
- * (submission-photos, polku <user_id>/_ohjeet/<menetelmä>-<versio>.pdf)
- * ja välimuistitetaan laitteen IndexedDB:hen (oma tietokanta), jotta
- * ohje aukeaa myös ilman verkkoa. Välimuistin avain on tiedoston polku,
- * joka on aina uniikki per ladattu versio.
+ * Jokaiseen menetelmän kenttään voi liittää yhden PDF-tiedoston
+ * (field.guide = {name,path,size}). Menetelmällä voi siis olla useita
+ * ohjeita, yksi per kenttä. Ohjepainike on osa kentän omaa elementtiä,
+ * joten se piiloutuu automaattisesti, kun kenttä piilotetaan
+ * (näyttöehto tai siirtymä).
+ *
+ * Tiedosto tallennetaan Supabase Storageen (submission-photos, polku
+ * <user_id>/_ohjeet/<menetelmä>-<kenttä>-<versio>.pdf) ja välimuistitetaan
+ * laitteen IndexedDB:hen (oma tietokanta), jotta ohje aukeaa myös ilman
+ * verkkoa. Välimuistin avain on tiedoston polku, joka on uniikki per
+ * ladattu versio.
  */
 const GUIDE_MAX_BYTES=25*1024*1024;
 const GUIDE_DB="kenttalomakeGuides";
@@ -3262,6 +3249,13 @@ function formatGuideSize(n){
   if(!n)return "";
   if(n<1024*1024)return Math.max(1,Math.round(n/1024))+" kt";
   return (n/1024/1024).toFixed(1).replace(".",",")+" Mt";
+}
+
+/* Menetelmän kaikki ohjeet (yksi per kenttä, jos kentällä on ohje). */
+function methodGuides(m){
+  return (m&&Array.isArray(m.fields)?m.fields:[])
+    .map(f=>f&&f.guide)
+    .filter(g=>g&&g.path);
 }
 
 async function getGuideBlob(guide){
@@ -3334,59 +3328,57 @@ async function deleteGuideFile(guide){
 /* Lataa kaikkien menetelmien ohjeet laitteelle taustalla (offline-käyttöä varten). */
 async function prefetchGuides(){
   for(const m of METHODS){
-    if(!m.guide||!m.guide.path)continue;
-    try{
-      const cached=await guideCacheGet(m.guide.path);
-      if(!cached)await getGuideBlob(m.guide);
-    }catch(err){
-      console.warn("Ohjeen esilataus epäonnistui",err);
+    for(const g of methodGuides(m)){
+      try{
+        const cached=await guideCacheGet(g.path);
+        if(!cached)await getGuideBlob(g);
+      }catch(err){
+        console.warn("Ohjeen esilataus epäonnistui",err);
+      }
     }
   }
 }
 
 /*
- * Poistaa muokkausnäkymässä ladatun, mutta vielä tallentamattoman
- * ohjetiedoston (esim. kun käyttäjä poistuu tallentamatta).
+ * Poistaa ohjetiedoston pilvestä ja välimuistista, jos se on ladattu
+ * tässä muokkauksessa eikä vielä tallennettu menetelmään.
  */
-function discardUnsavedGuide(){
-  if(!editingMethod||!editingMethod.guide)return;
+function dropGuideIfUnsaved(g){
+  if(!g||!g.path||!editingMethod)return;
   const stored=METHODS.find(x=>x.id===editingMethod.id);
-  const storedPath=stored&&stored.guide?stored.guide.path:null;
-  if(editingMethod.guide.path!==storedPath){
-    deleteGuideFile(editingMethod.guide);
-  }
+  const savedPaths=new Set(methodGuides(stored).map(x=>x.path));
+  if(!savedPaths.has(g.path))deleteGuideFile(g);
 }
 
-function makeGuideButton(guide,extraClass){
+/* Poistuttaessa tallentamatta siivotaan kaikki tallentamattomat ohjeet. */
+function discardUnsavedGuides(){
+  if(!editingMethod)return;
+  methodGuides(editingMethod).forEach(dropGuideIfUnsaved);
+}
+
+/*
+ * Ohjepainike kentän otsikon perään. Painike on osa kentän omaa
+ * elementtiä, joten se piiloutuu kentän mukana.
+ */
+function attachFieldGuide(wrapper,f){
+  if(!wrapper||!f||!f.guide||!f.guide.path)return;
+  const label=wrapper.querySelector("label");
+  if(!label)return;
   const b=el(
-    '<button type="button" class="'+(extraClass||"btn btn-sm btn-outline")+
-    '" title="Avaa ohje" aria-label="Avaa ohje (PDF)">'+
-    (extraClass?'📄':'📄 Ohje')+
-    '</button>'
+    '<button type="button" class="field-guide-btn" title="Avaa ohje" '+
+    'aria-label="Avaa ohje (PDF)">📄 Ohje</button>'
   );
   b.onclick=ev=>{
+    ev.preventDefault();
     ev.stopPropagation();
-    openMethodGuide(guide);
+    openMethodGuide(f.guide);
   };
-  return b;
+  label.style.display="inline-block";
+  label.insertAdjacentElement("afterend",b);
 }
 
-function renderMethodGuideCard(){
-
-  const card=el(`
-    <div class="card">
-      <h2>Ohje (PDF)</h2>
-      <div class="hint">
-        Liitä menetelmään PDF-ohje tai RT-kortti. Menetelmän kohdalle
-        ilmestyy painike, josta tiedosto aukeaa. Tiedosto tallennetaan
-        pilveen ja ladataan laitteelle, jotta se toimii myös ilman verkkoa.
-        Tallenna menetelmä lopuksi.
-      </div>
-      <div class="guide-body"></div>
-    </div>
-  `);
-
-  const body=card.querySelector(".guide-body");
+/* Kentän ohjeen muokkaus menetelmän muokkausnäkymässä. */
+function renderFieldGuideEditor(body,f){
 
   const input=el(
     '<input type="file" accept="application/pdf,.pdf" style="display:none">'
@@ -3398,9 +3390,9 @@ function renderMethodGuideCard(){
 
     body.innerHTML="";
 
-    const g=editingMethod.guide;
+    const g=f.guide;
 
-    if(g){
+    if(g&&g.path){
       body.appendChild(el(`
         <div class="guide-file">
           <span class="guide-ico">📄</span>
@@ -3414,30 +3406,33 @@ function renderMethodGuideCard(){
 
     const actions=el('<div class="guide-actions"></div>');
 
-    if(g){
-      const bOpen=makeGuideButton(g);
+    if(g&&g.path){
+      const bOpen=el(
+        '<button type="button" class="btn btn-sm btn-outline">📄 Avaa</button>'
+      );
       bOpen.disabled=busy;
+      bOpen.onclick=()=>openMethodGuide(g);
       actions.appendChild(bOpen);
     }
 
     const bPick=el(
       '<button type="button" class="btn btn-sm btn-outline">'+
-      (busy?"Ladataan...":(g?"Vaihda PDF":"+ Lisää PDF"))+
+      (busy?"Ladataan...":(g&&g.path?"Vaihda PDF":"+ Lisää PDF"))+
       '</button>'
     );
     bPick.disabled=busy;
     bPick.onclick=()=>input.click();
     actions.appendChild(bPick);
 
-    if(g){
+    if(g&&g.path){
       const bDel=el(
         '<button type="button" class="btn btn-sm btn-danger">Poista ohje</button>'
       );
       bDel.disabled=busy;
       bDel.onclick=()=>{
-        if(!confirm("Poistetaanko ohje tästä menetelmästä?"))return;
-        discardUnsavedGuide();
-        editingMethod.guide=null;
+        if(!confirm("Poistetaanko ohje tästä kentästä?"))return;
+        dropGuideIfUnsaved(g);
+        delete f.guide;
         draw();
       };
       actions.appendChild(bDel);
@@ -3475,11 +3470,13 @@ function renderMethodGuideCard(){
     try{
 
       const v=Date.now().toString(36);
-      const safeId=String(editingMethod.id).replace(/[^\w-]/g,"_");
+      const safeName=
+        String(editingMethod.id).replace(/[^\w-]/g,"_")+"-"+
+        String(f.id).replace(/[^\w-]/g,"_");
 
       const path=await window.SubmissionSync.uploadPhoto(
         "_ohjeet",
-        safeId+"-"+v+".pdf",
+        safeName+"-"+v+".pdf",
         new Blob([file],{type:"application/pdf"})
       );
 
@@ -3490,9 +3487,9 @@ function renderMethodGuideCard(){
       }
 
       /* Poistetaan aiempi tallentamaton versio, jos sellainen on. */
-      discardUnsavedGuide();
+      dropGuideIfUnsaved(f.guide);
 
-      editingMethod.guide={
+      f.guide={
         name:file.name,
         path:path,
         size:file.size
@@ -3510,8 +3507,6 @@ function renderMethodGuideCard(){
   };
 
   draw();
-
-  return card;
 }
 
 
@@ -3940,7 +3935,7 @@ function renderMethodsManageCard(){
             <div class="entry-title">${escapeHtml(m.name||"(nimetön menetelmä)")}</div>
             <div class="entry-sub">
               ${m.fields.length} kenttää
-              ${m.guide?" · PDF-ohje":""}
+              ${methodGuides(m).length?(" · "+methodGuides(m).length+" PDF-ohjetta"):""}
               ${usedCount?(" · käytössä "+usedCount+" kirjauksessa"):""}
             </div>
           </div>
@@ -3974,7 +3969,7 @@ function renderMethodsManageCard(){
       ){
         METHODS.splice(idx,1);
         await persistMethods();
-        deleteGuideFile(m.guide);
+        methodGuides(m).forEach(deleteGuideFile);
         render();
       }
     };
@@ -4043,6 +4038,16 @@ function renderMethodFieldRow(f,idx,fields){
         Pakollinen kenttä
       </label>
 
+      <div style="margin-top:10px;border-top:1px solid var(--line);padding-top:10px;">
+        <label>Ohje (PDF, valinnainen)</label>
+        <div class="hint">
+          Liitä kenttään PDF-ohje tai RT-kortti. Kentän otsikon viereen
+          tulee painike, josta tiedosto aukeaa. Painike piiloutuu, kun
+          kenttä piilotetaan.
+        </div>
+        <div class="mf-guide-body"></div>
+      </div>
+
       <div id="mf_hints_wrap_${idx}" style="margin-top:10px;border-top:1px solid var(--line);padding-top:10px;">
         <label>Apulauseet tutkijalle (valinnainen)</label>
         <div class="hint">
@@ -4073,6 +4078,8 @@ function renderMethodFieldRow(f,idx,fields){
   const placeholderWrap=row.querySelector(`#mf_placeholder_wrap_${idx}`);
   const hintsWrap=row.querySelector(`#mf_hints_${idx}`);
   const colsWrap=row.querySelector(`#mf_cols_${idx}`);
+
+  renderFieldGuideEditor(row.querySelector(".mf-guide-body"),f);
 
   function renderHints(){
 
@@ -4388,6 +4395,7 @@ function renderMethodFieldRow(f,idx,fields){
   row.querySelector(`#mf_del_${idx}`).onclick=()=>{
     syncMethodFieldsFromDom(fields);
     const removed=fields.splice(idx,1)[0];
+    if(removed&&removed.guide)dropGuideIfUnsaved(removed.guide);
 
     /* Poistetaan ehdot, jotka viittasivat poistettuun kenttään. */
     let cleaned=0;
@@ -4861,7 +4869,6 @@ function renderMethodEditCard(){
 
   const container=el("<div></div>");
   container.appendChild(c);
-  container.appendChild(renderMethodGuideCard());
   container.appendChild(fieldsCard);
   return container;
 }
@@ -5097,10 +5104,11 @@ async function saveMethodEdit(){
   editingMethod.name=name;
   editingMethod.short=short||name;
 
-  const prevMethod=METHODS.find(m=>m.id===editingMethod.id);
-  const prevGuide=prevMethod&&prevMethod.guide?prevMethod.guide:null;
+  const prevGuides=methodGuides(METHODS.find(m=>m.id===editingMethod.id));
 
-  if(!editingMethod.guide)delete editingMethod.guide;
+  fields.forEach(ff=>{
+    if(!ff.guide||!ff.guide.path)delete ff.guide;
+  });
 
   if(editingMethodIsNew){
     METHODS.push(editingMethod);
@@ -5115,13 +5123,11 @@ async function saveMethodEdit(){
 
   await persistMethods();
 
-  /* Poistetaan korvattu tai poistettu vanha ohjetiedosto. */
-  if(
-    prevGuide &&
-    (!editingMethod.guide || editingMethod.guide.path!==prevGuide.path)
-  ){
-    deleteGuideFile(prevGuide);
-  }
+  /* Poistetaan korvatut ja poistetut vanhat ohjetiedostot. */
+  const nowPaths=new Set(methodGuides(editingMethod).map(g=>g.path));
+  prevGuides.forEach(g=>{
+    if(!nowPaths.has(g.path))deleteGuideFile(g);
+  });
 
   editingMethod=null;
   editingMethodIsNew=false;
@@ -5180,10 +5186,6 @@ function renderEntryForm(){
     `);
 
 
-  if(m.guide&&m.guide.path){
-    spec.querySelector("h2").appendChild(makeGuideButton(m.guide));
-  }
-
   const fieldWrappers={};
 
   m.fields.forEach(f=>{
@@ -5195,6 +5197,8 @@ function renderEntryForm(){
       );
 
     fieldWrappers[f.id]=w;
+
+    attachFieldGuide(w,f);
 
     spec.appendChild(w);
   });
