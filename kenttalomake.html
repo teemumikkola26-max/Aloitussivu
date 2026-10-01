@@ -247,6 +247,55 @@ input[type=number]::-webkit-outer-spin-button{
   border-color:var(--safety)
 }
 
+.method-tile-wrap{
+  position:relative;
+  display:flex
+}
+
+.method-tile-wrap .method-tile{
+  width:100%
+}
+
+.method-tile.has-guide{
+  padding-right:42px
+}
+
+.guide-open{
+  position:absolute;
+  top:6px;
+  right:6px;
+  width:32px;
+  height:32px;
+  padding:0;
+  border:1.5px solid var(--line);
+  border-radius:8px;
+  background:#fff;
+  font-size:16px;
+  line-height:1;
+  cursor:pointer
+}
+
+.guide-open:active{
+  border-color:var(--safety)
+}
+
+.guide-file{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  margin:10px 0
+}
+
+.guide-file .guide-ico{
+  font-size:26px
+}
+
+.guide-actions{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px
+}
+
 .entry-card{
   border:1.5px solid var(--line);
   border-left:5px solid var(--safety);
@@ -2580,8 +2629,10 @@ function render(){
             "löydy uudelleenmuokattavaksi."
           )
         ){
+          const oldGuides=METHODS.filter(m=>m.guide).map(m=>m.guide);
           METHODS=cloneMethods(DEFAULT_METHODS);
           await persistMethods();
+          oldGuides.forEach(g=>deleteGuideFile(g));
           render();
         }
       };
@@ -2603,6 +2654,7 @@ function render(){
 
     app.appendChild(
       renderBack(()=>{
+        discardUnsavedGuide();
         editingMethod=null;
         editingMethodIsNew=false;
         view="methodsManage";
@@ -3092,7 +3144,7 @@ function renderMethodGrid(){
       el(`
         <button
           type="button"
-          class="method-tile"
+          class="method-tile${m.guide?' has-guide':''}"
         >
           <span class="num">
             ${String(i+1).padStart(2,"0")}
@@ -3132,11 +3184,334 @@ function renderMethodGrid(){
     };
 
 
-    w.appendChild(t);
+    if(m.guide&&m.guide.path){
+      const wrap=el('<div class="method-tile-wrap"></div>');
+      wrap.appendChild(t);
+      wrap.appendChild(makeGuideButton(m.guide,"guide-open"));
+      w.appendChild(wrap);
+    }else{
+      w.appendChild(t);
+    }
   });
 
 
   return w;
+}
+
+
+/* ============================================================
+   MENETELMÄKOHTAISET PDF-OHJEET / RT-KORTIT
+   ============================================================
+ * Menetelmään voi liittää yhden PDF-tiedoston (method.guide =
+ * {name,path,size}). Tiedosto tallennetaan Supabase Storageen
+ * (submission-photos, polku <user_id>/_ohjeet/<menetelmä>-<versio>.pdf)
+ * ja välimuistitetaan laitteen IndexedDB:hen (oma tietokanta), jotta
+ * ohje aukeaa myös ilman verkkoa. Välimuistin avain on tiedoston polku,
+ * joka on aina uniikki per ladattu versio.
+ */
+const GUIDE_MAX_BYTES=25*1024*1024;
+const GUIDE_DB="kenttalomakeGuides";
+const GUIDE_STORE="files";
+
+function guideDb(){
+  return new Promise((resolve,reject)=>{
+    if(!window.indexedDB){
+      reject(new Error("no-idb"));
+      return;
+    }
+    const req=indexedDB.open(GUIDE_DB,1);
+    req.onupgradeneeded=()=>{
+      if(!req.result.objectStoreNames.contains(GUIDE_STORE)){
+        req.result.createObjectStore(GUIDE_STORE);
+      }
+    };
+    req.onsuccess=()=>resolve(req.result);
+    req.onerror=()=>reject(req.error);
+  });
+}
+
+function guideCacheGet(key){
+  return guideDb().then(db=>new Promise((resolve,reject)=>{
+    const tx=db.transaction(GUIDE_STORE,"readonly");
+    const q=tx.objectStore(GUIDE_STORE).get(key);
+    q.onsuccess=()=>resolve(q.result||null);
+    q.onerror=()=>reject(q.error);
+    tx.oncomplete=()=>db.close();
+  }));
+}
+
+function guideCachePut(key,buf){
+  return guideDb().then(db=>new Promise((resolve,reject)=>{
+    const tx=db.transaction(GUIDE_STORE,"readwrite");
+    tx.objectStore(GUIDE_STORE).put(buf,key);
+    tx.oncomplete=()=>{db.close();resolve();};
+    tx.onerror=()=>{db.close();reject(tx.error);};
+  }));
+}
+
+function guideCacheDel(key){
+  return guideDb().then(db=>new Promise((resolve,reject)=>{
+    const tx=db.transaction(GUIDE_STORE,"readwrite");
+    tx.objectStore(GUIDE_STORE).delete(key);
+    tx.oncomplete=()=>{db.close();resolve();};
+    tx.onerror=()=>{db.close();reject(tx.error);};
+  }));
+}
+
+function formatGuideSize(n){
+  if(!n)return "";
+  if(n<1024*1024)return Math.max(1,Math.round(n/1024))+" kt";
+  return (n/1024/1024).toFixed(1).replace(".",",")+" Mt";
+}
+
+async function getGuideBlob(guide){
+  try{
+    const cached=await guideCacheGet(guide.path);
+    if(cached)return new Blob([cached],{type:"application/pdf"});
+  }catch(err){
+    console.warn("Ohjeen välimuistihaku epäonnistui",err);
+  }
+  if(!window.SubmissionSync)throw new Error("Pilviyhteyttä ei ole");
+  const blob=await window.SubmissionSync.downloadPhoto(guide.path);
+  const buf=await blob.arrayBuffer();
+  try{
+    await guideCachePut(guide.path,buf);
+  }catch(err){
+    console.warn("Ohjeen välimuistitallennus epäonnistui",err);
+  }
+  return new Blob([buf],{type:"application/pdf"});
+}
+
+/*
+ * Ikkuna avataan heti napin painalluksella (ennen asynkronista latausta),
+ * koska mobiiliselaimet (erityisesti iOS Safari) estävät ikkunan
+ * avaamisen, jos se tehdään vasta latauksen jälkeen.
+ */
+async function openMethodGuide(guide){
+  if(!guide||!guide.path)return;
+  const win=window.open("","_blank");
+  if(win){
+    try{
+      win.document.title=guide.name||"Ohje";
+      win.document.body.style.cssText="font-family:sans-serif;padding:24px;color:#555";
+      win.document.body.textContent="Ladataan ohjetta...";
+    }catch(err){}
+  }
+  try{
+    const blob=await getGuideBlob(guide);
+    const url=URL.createObjectURL(blob);
+    if(win&&!win.closed){
+      win.location.href=url;
+    }else{
+      const a=document.createElement("a");
+      a.href=url;
+      a.target="_blank";
+      a.rel="noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+    setTimeout(()=>URL.revokeObjectURL(url),10*60*1000);
+  }catch(err){
+    console.warn("Ohjeen avaus epäonnistui",err);
+    if(win){
+      try{win.close();}catch(e){}
+    }
+    toast("Ohjeen avaus epäonnistui. Ei verkkoyhteyttä eikä tiedostoa laitteella.");
+  }
+}
+
+async function deleteGuideFile(guide){
+  if(!guide||!guide.path)return;
+  try{
+    if(window.SubmissionSync)await window.SubmissionSync.deletePhotoFile(guide.path);
+  }catch(err){
+    console.warn("Ohjetiedoston poisto epäonnistui",err);
+  }
+  guideCacheDel(guide.path).catch(()=>{});
+}
+
+/* Lataa kaikkien menetelmien ohjeet laitteelle taustalla (offline-käyttöä varten). */
+async function prefetchGuides(){
+  for(const m of METHODS){
+    if(!m.guide||!m.guide.path)continue;
+    try{
+      const cached=await guideCacheGet(m.guide.path);
+      if(!cached)await getGuideBlob(m.guide);
+    }catch(err){
+      console.warn("Ohjeen esilataus epäonnistui",err);
+    }
+  }
+}
+
+/*
+ * Poistaa muokkausnäkymässä ladatun, mutta vielä tallentamattoman
+ * ohjetiedoston (esim. kun käyttäjä poistuu tallentamatta).
+ */
+function discardUnsavedGuide(){
+  if(!editingMethod||!editingMethod.guide)return;
+  const stored=METHODS.find(x=>x.id===editingMethod.id);
+  const storedPath=stored&&stored.guide?stored.guide.path:null;
+  if(editingMethod.guide.path!==storedPath){
+    deleteGuideFile(editingMethod.guide);
+  }
+}
+
+function makeGuideButton(guide,extraClass){
+  const b=el(
+    '<button type="button" class="'+(extraClass||"btn btn-sm btn-outline")+
+    '" title="Avaa ohje" aria-label="Avaa ohje (PDF)">'+
+    (extraClass?'📄':'📄 Ohje')+
+    '</button>'
+  );
+  b.onclick=ev=>{
+    ev.stopPropagation();
+    openMethodGuide(guide);
+  };
+  return b;
+}
+
+function renderMethodGuideCard(){
+
+  const card=el(`
+    <div class="card">
+      <h2>Ohje (PDF)</h2>
+      <div class="hint">
+        Liitä menetelmään PDF-ohje tai RT-kortti. Menetelmän kohdalle
+        ilmestyy painike, josta tiedosto aukeaa. Tiedosto tallennetaan
+        pilveen ja ladataan laitteelle, jotta se toimii myös ilman verkkoa.
+        Tallenna menetelmä lopuksi.
+      </div>
+      <div class="guide-body"></div>
+    </div>
+  `);
+
+  const body=card.querySelector(".guide-body");
+
+  const input=el(
+    '<input type="file" accept="application/pdf,.pdf" style="display:none">'
+  );
+
+  let busy=false;
+
+  function draw(){
+
+    body.innerHTML="";
+
+    const g=editingMethod.guide;
+
+    if(g){
+      body.appendChild(el(`
+        <div class="guide-file">
+          <span class="guide-ico">📄</span>
+          <div>
+            <div class="entry-title">${escapeHtml(g.name||"ohje.pdf")}</div>
+            <div class="entry-sub">${escapeHtml(formatGuideSize(g.size))}</div>
+          </div>
+        </div>
+      `));
+    }
+
+    const actions=el('<div class="guide-actions"></div>');
+
+    if(g){
+      const bOpen=makeGuideButton(g);
+      bOpen.disabled=busy;
+      actions.appendChild(bOpen);
+    }
+
+    const bPick=el(
+      '<button type="button" class="btn btn-sm btn-outline">'+
+      (busy?"Ladataan...":(g?"Vaihda PDF":"+ Lisää PDF"))+
+      '</button>'
+    );
+    bPick.disabled=busy;
+    bPick.onclick=()=>input.click();
+    actions.appendChild(bPick);
+
+    if(g){
+      const bDel=el(
+        '<button type="button" class="btn btn-sm btn-danger">Poista ohje</button>'
+      );
+      bDel.disabled=busy;
+      bDel.onclick=()=>{
+        if(!confirm("Poistetaanko ohje tästä menetelmästä?"))return;
+        discardUnsavedGuide();
+        editingMethod.guide=null;
+        draw();
+      };
+      actions.appendChild(bDel);
+    }
+
+    body.appendChild(actions);
+    body.appendChild(input);
+  }
+
+  input.onchange=async ()=>{
+
+    const file=input.files&&input.files[0];
+    input.value="";
+
+    if(!file)return;
+
+    if(file.type!=="application/pdf"&&!/\.pdf$/i.test(file.name)){
+      toast("Valitse PDF-tiedosto");
+      return;
+    }
+
+    if(file.size>GUIDE_MAX_BYTES){
+      toast("PDF on liian suuri (enintään 25 Mt)");
+      return;
+    }
+
+    if(!window.SubmissionSync||!window.__supabaseClient){
+      toast("Pilviyhteys puuttuu, ohjetta ei voi tallentaa");
+      return;
+    }
+
+    busy=true;
+    draw();
+
+    try{
+
+      const v=Date.now().toString(36);
+      const safeId=String(editingMethod.id).replace(/[^\w-]/g,"_");
+
+      const path=await window.SubmissionSync.uploadPhoto(
+        "_ohjeet",
+        safeId+"-"+v+".pdf",
+        new Blob([file],{type:"application/pdf"})
+      );
+
+      try{
+        await guideCachePut(path,await file.arrayBuffer());
+      }catch(err){
+        console.warn("Ohjeen välimuistitallennus epäonnistui",err);
+      }
+
+      /* Poistetaan aiempi tallentamaton versio, jos sellainen on. */
+      discardUnsavedGuide();
+
+      editingMethod.guide={
+        name:file.name,
+        path:path,
+        size:file.size
+      };
+
+      toast("PDF ladattu. Muista tallentaa menetelmä.");
+
+    }catch(err){
+      console.warn("Ohjeen lataus epäonnistui",err);
+      toast("PDF:n lataus epäonnistui: "+(err.message||err.statusCode||"tuntematon virhe"));
+    }
+
+    busy=false;
+    draw();
+  };
+
+  draw();
+
+  return card;
 }
 
 
@@ -3565,6 +3940,7 @@ function renderMethodsManageCard(){
             <div class="entry-title">${escapeHtml(m.name||"(nimetön menetelmä)")}</div>
             <div class="entry-sub">
               ${m.fields.length} kenttää
+              ${m.guide?" · PDF-ohje":""}
               ${usedCount?(" · käytössä "+usedCount+" kirjauksessa"):""}
             </div>
           </div>
@@ -3598,6 +3974,7 @@ function renderMethodsManageCard(){
       ){
         METHODS.splice(idx,1);
         await persistMethods();
+        deleteGuideFile(m.guide);
         render();
       }
     };
@@ -4484,6 +4861,7 @@ function renderMethodEditCard(){
 
   const container=el("<div></div>");
   container.appendChild(c);
+  container.appendChild(renderMethodGuideCard());
   container.appendChild(fieldsCard);
   return container;
 }
@@ -4719,6 +5097,11 @@ async function saveMethodEdit(){
   editingMethod.name=name;
   editingMethod.short=short||name;
 
+  const prevMethod=METHODS.find(m=>m.id===editingMethod.id);
+  const prevGuide=prevMethod&&prevMethod.guide?prevMethod.guide:null;
+
+  if(!editingMethod.guide)delete editingMethod.guide;
+
   if(editingMethodIsNew){
     METHODS.push(editingMethod);
   }else{
@@ -4731,6 +5114,14 @@ async function saveMethodEdit(){
   }
 
   await persistMethods();
+
+  /* Poistetaan korvattu tai poistettu vanha ohjetiedosto. */
+  if(
+    prevGuide &&
+    (!editingMethod.guide || editingMethod.guide.path!==prevGuide.path)
+  ){
+    deleteGuideFile(prevGuide);
+  }
 
   editingMethod=null;
   editingMethodIsNew=false;
@@ -4788,6 +5179,10 @@ function renderEntryForm(){
       </div>
     `);
 
+
+  if(m.guide&&m.guide.path){
+    spec.querySelector("h2").appendChild(makeGuideButton(m.guide));
+  }
 
   const fieldWrappers={};
 
@@ -9750,6 +10145,8 @@ function waitForSupabaseClient(
 
 
     await syncCustomMethodsFromCloud();
+
+    prefetchGuides().catch(()=>{});
 
     await loadState();
 
