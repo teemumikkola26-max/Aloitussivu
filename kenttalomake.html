@@ -3771,7 +3771,9 @@ function syncFieldTableHintsFromDom(f,fieldIdx){
  * Kentälle voi määrittää kahdenlaista logiikkaa:
  *
  *  - f.showIf = [{fieldId,op,value}, ...]
- *    Kenttä näytetään lomakkeella vain, jos KAIKKI ehdot täyttyvät (JA).
+ *    Oletuksena kenttä näytetään lomakkeella vain, jos KAIKKI ehdot
+ *    täyttyvät (JA). Jos f.showMode==="any", kenttä näytetään kun
+ *    JOKIN ehdoista täyttyy (TAI).
  *    Ehto voi viitata vain aiempaan (ylempänä olevaan) kenttään.
  *
  *  - f.jumps = [{id,op,value,target}, ...]
@@ -3836,7 +3838,10 @@ function computeFieldVisibility(fields,values){
       return;
     }
 
+    const anyMode=f.showMode==="any";
     let ok=true;
+    let checked=0;
+    let anyPassed=false;
 
     (Array.isArray(f.showIf)?f.showIf:[]).forEach(c=>{
 
@@ -3851,8 +3856,15 @@ function computeFieldVisibility(fields,values){
 
       const raw=vis[src.id]?values[src.id]:undefined;
 
-      if(!evalCondition(c,src.type,raw,false))ok=false;
+      checked++;
+
+      if(evalCondition(c,src.type,raw,false))anyPassed=true;
+      else ok=false;
     });
+
+    /* TAI-tilassa riittää yksi täyttyvä ehto. Jos yhtään kelvollista
+       ehtoa ei ole, kenttä näytetään (kuten JA-tilassa). */
+    if(anyMode && checked>0)ok=anyPassed;
 
     if(!ok){
       vis[f.id]=false;
@@ -4595,6 +4607,31 @@ function renderMethodFieldRow(f,idx,fields){
 
     }else{
 
+      if(f.showIf.length>1){
+
+        const modeLine=el(`<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px;"></div>`);
+
+        modeLine.appendChild(el(`<span style="font-size:12px;color:#8a8574;flex:0 0 auto;">Ehtojen yhdistäminen:</span>`));
+
+        const modeSel=mkSelect(
+          [
+            ["all","JA — kaikkien ehtojen pitää täyttyä"],
+            ["any","TAI — riittää, että jokin ehdoista täyttyy"]
+          ],
+          f.showMode==="any"?"any":"all",
+          "flex:1;width:auto;min-width:140px;"
+        );
+
+        modeSel.onchange=e=>{
+          if(e.target.value==="any")f.showMode="any";
+          else delete f.showMode;
+          renderLogic();
+        };
+
+        modeLine.appendChild(modeSel);
+        logicBody.appendChild(modeLine);
+      }
+
       f.showIf.forEach((c,cIdx)=>{
 
         const invalid=showIfInvalid(c);
@@ -4609,7 +4646,7 @@ function renderMethodFieldRow(f,idx,fields){
         const line=el(`<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;"></div>`);
 
         if(cIdx>0){
-          line.appendChild(el(`<span style="font-size:11px;color:#8a8574;flex:0 0 auto;">JA</span>`));
+          line.appendChild(el(`<span style="font-size:11px;color:#8a8574;flex:0 0 auto;">${f.showMode==="any"?"TAI":"JA"}</span>`));
         }
 
         const srcSel=mkSelect(items,invalid?"":c.fieldId,"flex:1;width:auto;min-width:120px;");
@@ -5098,6 +5135,9 @@ async function saveMethodEdit(){
           }));
 
     if(!ff.showIf.length)delete ff.showIf;
+
+    /* TAI-tila säilytetään vain, jos ehtoja on useampi kuin yksi. */
+    if(ff.showMode!=="any" || !ff.showIf || ff.showIf.length<2)delete ff.showMode;
     if(!ff.jumps.length)delete ff.jumps;
   });
 
