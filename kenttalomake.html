@@ -5443,19 +5443,36 @@ function renderEntryForm(){
   /*
    * Kuvien lisääminen.
    *
-   * KORJAUS: aiemmin input-elementissä oli sekä `capture="environment"`
-   * että `multiple`, mikä toimii epäluotettavasti monilla mobiiliselaimilla
-   * (osa laitteista avaa suoraan kameran eikä salli monivalintaa).
-   * `capture`-määre poistettu, jolloin käyttöjärjestelmän oma valitsin
-   * tarjoaa sekä kameran että galleria-/monivalinnan luotettavasti.
+   * Kaksi erillistä painiketta:
+   *  - 📷 avaa puhelimen kameran suoraan (`capture="environment"`,
+   *    yksi kuva kerrallaan)
+   *  - 🖼 avaa gallerian / tiedostovalitsimen monivalinnalla
+   * `capture` ja `multiple` eivät toimi luotettavasti samassa
+   * input-elementissä, siksi ne on eroteltu.
    */
-  const add=
+  const addCam=
     el(`
       <label
         class="photo-add"
-        title="Lisää valokuvia"
+        title="Ota kuva kameralla"
       >
-        +
+        📷
+        <input
+          type="file"
+          accept="image/*"
+          capture="environment"
+          style="display:none;"
+        >
+      </label>
+    `);
+
+  const addGal=
+    el(`
+      <label
+        class="photo-add"
+        title="Valitse kuvia galleriasta"
+      >
+        🖼
         <input
           type="file"
           accept="image/*"
@@ -5465,23 +5482,28 @@ function renderEntryForm(){
       </label>
     `);
 
+  [addCam,addGal].forEach(lbl=>{
 
-  add.querySelector("input").onchange=
-    async e=>{
+    const inp=lbl.querySelector("input");
 
-      const fs=[
-        ...(e.target.files||[])
-      ];
+    inp.onchange=
+      async e=>{
 
+        const fs=[
+          ...(e.target.files||[])
+        ];
 
-      if(!fs.length)return;
+        /* Nollataan, jotta sama kuva/kamera voidaan valita uudelleen. */
+        e.target.value="";
 
+        if(!fs.length)return;
 
-      addPhotos(fs);
-    };
+        addPhotos(fs);
+      };
+  });
 
-
-  thumbs.appendChild(add);
+  thumbs.appendChild(addCam);
+  thumbs.appendChild(addGal);
 
   pc.appendChild(thumbs);
 

@@ -143,6 +143,7 @@ window.DocxStyleEngine = (function(){
     if (opts.before || opts.after){
       pPr.push('<w:spacing' + (opts.before?' w:before="'+opts.before+'"':'') + (opts.after?' w:after="'+opts.after+'"':'') + '/>');
     }
+    if (opts.ind0) pPr.push('<w:ind w:left="0" w:right="0" w:firstLine="0"/>');
     if (opts.align) pPr.push('<w:jc w:val="' + opts.align + '"/>');
     const lines = String(text == null ? "" : text).split(/\r?\n/);
     const runs = lines.map((line,i) => (i>0?"<w:br/>":"") + '<w:t xml:space="preserve">' + xmlEsc(line) + '</w:t>').join("");
@@ -523,6 +524,7 @@ window.DocxStyleEngine = (function(){
         const bold = isHeaderRow || isHeaderCol;
         const w = colWidths[cIdx] || Math.floor(totalWidth / (colCount||1));
         const p = paraXml(cellText || "", {
+          align: "left", ind0: true,
           bold, font: opts.font, sz: opts.sz, color: (isHeaderCol && !isHeaderRow && opts.labelColor) ? opts.labelColor : opts.color
         });
         return '<w:tc><w:tcPr><w:tcW w:w="'+w+'" w:type="dxa"/>' +
