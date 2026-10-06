@@ -65,6 +65,7 @@
 
 <div class="toast" id="toast"></div>
 
+<script src="kuntoarvio-talo2000.def.js"></script>
 <script>
 "use strict";
 
@@ -75,7 +76,8 @@ let supabaseClient = null;
 
 const FORMS_TO_IMPORT = [
   { slug: "kuntoarvio",      title: "Kiinteistön kuntoarvio",       def: null, oldPage: "kuntoarvio.html" },
-  { slug: "kuntotarkastus",  title: "Asuntokaupan kuntotarkastus",  def: null, oldPage: "kuntotarkastus.html" }
+  { slug: "kuntotarkastus",  title: "Asuntokaupan kuntotarkastus",  def: null, oldPage: "kuntotarkastus.html" },
+  { slug: "kuntoarvio-talo2000", title: "Kuntoarvio (Talo 2000)", def: null, oldPage: "kuntoarvio-talo2000.html" }
 ];
 
 function toast(msg){
@@ -213,6 +215,7 @@ waitForSupabaseClient(async (client) => {
   supabaseClient = client;
   FORMS_TO_IMPORT[0].def = KA_DEF;
   FORMS_TO_IMPORT[1].def = KT_DEF;
+  FORMS_TO_IMPORT[2].def = window.KA_T2000_DEF;
   await refreshStatus();
 });
 </script>

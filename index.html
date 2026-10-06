@@ -213,6 +213,15 @@ const FORMS = [
     external: false
   },
   {
+    id: "kuntoarvio-talo2000",
+    title: "Kuntoarvio (Talo 2000)",
+    tag: "Talo 2000 / kosteus- ja sisäilmakuntoarvio",
+    desc: "Kuntoarvion kenttälomake Talo 2000 -otsikoiden mukaan: KL 1–5, jatkotoimenpide-ehdotukset sekä rakennustyypin ja -vuoden mukaiset ohjeet ja haitta-ainehuomiot.",
+    icon: "🏗️",
+    url: "kuntoarvio-talo2000.html",
+    external: false
+  },
+  {
     id: "kuntotutkimus",
     title: "Kosteus- ja sisäilmatekninen kuntotutkimus",
     tag: "Kenttätutkimus",
@@ -320,6 +329,7 @@ function renderCustomForms(rows){
 const STATIC_FORM_URLS = {
   kuntotarkastus: "kuntotarkastus.html",
   kuntoarvio: "kuntoarvio.html",
+  "kuntoarvio-talo2000": "kuntoarvio-talo2000.html",
   kenttalomake: "kenttalomake.html"
 };
 function resumeUrl(sub){

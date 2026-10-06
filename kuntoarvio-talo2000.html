@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<style>html{visibility:hidden}</style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.4"></script>
+<script src="auth-gate.js" defer></script>
+<title>Kuntoarvio (Talo 2000)</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="wrap" style="max-width:480px;margin:60px auto;">
+  <section class="card">
+    <h2>Kuntoarvio (Talo 2000)</h2>
+    <div class="hint" id="msg">Siirretään uuteen lomakenäkymään…</div>
+    <div class="loading" id="spinner" style="margin-top:14px;">⏳</div>
+    <a class="btn btn-outline btn-block" id="manualLink" href="migroi-lomakkeet.html" style="display:none;margin-top:14px;">
+      Avaa siirtotyökalu
+    </a>
+  </section>
+</div>
+
+<script>
+"use strict";
+
+const LEGACY_SLUG = "kuntoarvio-talo2000";
+
+function waitForSupabaseClient(cb, triesLeft){
+  if (typeof triesLeft !== "number") triesLeft = 100;
+  if (window.__supabaseClient) return cb(window.__supabaseClient);
+  if (triesLeft <= 0){ showFallback("Kirjautumista ei saatu vahvistettua."); return; }
+  setTimeout(() => waitForSupabaseClient(cb, triesLeft - 1), 50);
+}
+
+function showFallback(reason){
+  document.getElementById("spinner").style.display = "none";
+  document.getElementById("msg").textContent =
+    "Lomaketta ei löytynyt uudesta lomakemoottorista vielä (" + reason + "). " +
+    "Aja siirtotyökalu ensin, sitten tämä linkki toimii automaattisesti.";
+  document.getElementById("manualLink").style.display = "block";
+}
+
+waitForSupabaseClient(async (client) => {
+  const res = await client
+    .from("forms")
+    .select("id")
+    .contains("definition", { meta: { legacySlug: LEGACY_SLUG } })
+    .limit(1);
+
+  if (res.error || !res.data || !res.data.length){
+    showFallback(res.error ? res.error.message : "lomaketta ei löytynyt");
+    return;
+  }
+
+  const formId = res.data[0].id;
+  const params = new URLSearchParams(window.location.search);
+  const submission = params.get("submission");
+
+  let target = "form.html?id=" + encodeURIComponent(formId);
+  if (submission) target += "&submission=" + encodeURIComponent(submission);
+
+  window.location.replace(target);
+});
+</script>
+
+</body>
+</html>
