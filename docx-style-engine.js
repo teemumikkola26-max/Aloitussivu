@@ -122,6 +122,7 @@ window.DocxStyleEngine = (function(){
 
   // opts: bold, italic, color (hex no #), sz (half-points), font, before, after, align("center"|"right"|"left"),
   //       bottomBorder: { color, sz } -- ohut viiva kappaleen alle, pStyle: "Heading1" -- viittaus tyyliin (TOC:ia varten)
+  //       noNum: true -- otsikkotyylin (Heading1-3) numerointi pois tältä kappaleelta
   //       numId: 1 (luettelomerkki) tai 2 (numeroitu) -- ks. numberingXml(); ilvl: sisennystaso (0 = ensimmäinen)
   function paraXml(text, opts){
     opts = opts || {};
@@ -136,6 +137,9 @@ window.DocxStyleEngine = (function(){
     if (opts.pStyle) pPr.push('<w:pStyle w:val="' + xmlEsc(opts.pStyle) + '"/>');
     if (opts.numId){
       pPr.push('<w:numPr><w:ilvl w:val="' + (opts.ilvl || 0) + '"/><w:numId w:val="' + opts.numId + '"/></w:numPr>');
+    } else if (opts.noNum){
+      // numId 0 = poistaa tyylin numeroinnin tältä kappaleelta (esim. raportin nimi tai liitesivun otsikko Heading1-tyylillä)
+      pPr.push('<w:numPr><w:ilvl w:val="0"/><w:numId w:val="0"/></w:numPr>');
     }
     if (opts.bottomBorder){
       pPr.push('<w:pBdr><w:bottom w:val="single" w:sz="' + (opts.bottomBorder.sz||16) + '" w:space="4" w:color="' + opts.bottomBorder.color.replace("#","") + '"/></w:pBdr>');
@@ -158,6 +162,27 @@ window.DocxStyleEngine = (function(){
    * (uudelleennimetyt) abstractNum- ja num-määritelmät. Ne annetaan erikseen,
    * jotta abstractNum-lohkot voidaan kirjoittaa ennen num-lohkoja.
    */
+  /*
+   * Otsikoiden monitasonumerointi (numId 3): Heading1 = 1, 2, 3 ...;
+   * Heading2 = 1.1, 1.2 ...; Heading3 = 1.1.1, 1.1.2 ... Tasot on sidottu
+   * otsikkotyyleihin (lvl/pStyle + tyylin numPr), joten numerointi seuraa
+   * kappaleen tyyliä eikä sitä tarvitse kirjoittaa tekstiin käsin.
+   */
+  function headingNumberingAbstractXml(){
+    const indents = [567, 709, 851];
+    let lvls = "";
+    for (let i = 0; i < 9; i++){
+      let text = "";
+      for (let k = 1; k <= i + 1; k++) text += (k > 1 ? "." : "") + "%" + k;
+      const ind = indents[i] || 992;
+      lvls += '<w:lvl w:ilvl="' + i + '"><w:start w:val="1"/><w:numFmt w:val="decimal"/>' +
+        (i < 3 ? '<w:pStyle w:val="Heading' + (i + 1) + '"/>' : '') +
+        '<w:lvlText w:val="' + text + '"/><w:lvlJc w:val="left"/>' +
+        '<w:pPr><w:ind w:left="' + ind + '" w:hanging="' + ind + '"/></w:pPr></w:lvl>';
+    }
+    return '<w:abstractNum w:abstractNumId="2"><w:multiLevelType w:val="multilevel"/>' + lvls + '</w:abstractNum>';
+  }
+
   function numberingXml(extraAbsXml, extraNumXml, extraNsAttrs){
     return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
       '<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"' + (extraNsAttrs || '') + '>' +
@@ -166,10 +191,12 @@ window.DocxStyleEngine = (function(){
       '<w:rPr><w:rFonts w:ascii="Symbol" w:hAnsi="Symbol" w:hint="default"/></w:rPr></w:lvl></w:abstractNum>' +
       '<w:abstractNum w:abstractNumId="1"><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="decimal"/>' +
       '<w:lvlText w:val="%1."/><w:lvlJc w:val="left"/><w:pPr><w:ind w:left="432" w:hanging="432"/></w:pPr></w:lvl></w:abstractNum>' +
+      headingNumberingAbstractXml() +
       // OOXML-skeema vaatii: kaikki abstractNum-lohkot ENNEN w:num-lohkoja
       (extraAbsXml || '') +
       '<w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>' +
       '<w:num w:numId="2"><w:abstractNumId w:val="1"/></w:num>' +
+      '<w:num w:numId="3"><w:abstractNumId w:val="2"/></w:num>' +
       (extraNumXml || '') +
       '</w:numbering>';
   }
@@ -975,7 +1002,7 @@ window.DocxStyleEngine = (function(){
     for (const page of (style.pagesBefore || [])){
       finalBodyParts.push(paraXml(page.title || "Sivu", {
         bold:true, sz: pt2hp(style.fonts.headingSize), font: style.fonts.heading, color: style.colors.heading,
-        pStyle:"Heading1", after:160
+        pStyle:"Heading1", noNum:true, after:160
       }));
       if (page.sourceMode === "docx"){
         if (page._docxBytes){
@@ -1008,7 +1035,7 @@ window.DocxStyleEngine = (function(){
       finalBodyParts.push(pageBreakXml());
       finalBodyParts.push(paraXml(page.title || "Sivu", {
         bold:true, sz: pt2hp(style.fonts.headingSize), font: style.fonts.heading, color: style.colors.heading,
-        pStyle:"Heading1", after:160
+        pStyle:"Heading1", noNum:true, after:160
       }));
       if (page.sourceMode === "docx"){
         if (page._docxBytes){
@@ -1054,11 +1081,15 @@ window.DocxStyleEngine = (function(){
       '<w:docDefaults><w:rPrDefault><w:rPr>' + fontRpr(style.fonts.body) + '<w:color w:val="' + (style.colors.body||"#1c2430").replace("#","") + '"/><w:sz w:val="' + pt2hp(style.fonts.bodySize||10.5) + '"/></w:rPr></w:rPrDefault></w:docDefaults>' +
       '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>' +
       '<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:qFormat/>' +
-      '<w:pPr><w:outlineLvl w:val="0"/></w:pPr>' +
+      '<w:pPr><w:numPr><w:numId w:val="3"/></w:numPr><w:outlineLvl w:val="0"/></w:pPr>' +
       '<w:rPr>' + fontRpr(style.fonts.heading) + '<w:b/><w:color w:val="' + (style.colors.heading||"#233043").replace("#","") + '"/><w:sz w:val="' + pt2hp(style.fonts.headingSize||14) + '"/></w:rPr>' +
       '</w:style>' +
       '<w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:basedOn w:val="Normal"/><w:qFormat/>' +
-      '<w:pPr><w:outlineLvl w:val="1"/></w:pPr>' +
+      '<w:pPr><w:numPr><w:ilvl w:val="1"/><w:numId w:val="3"/></w:numPr><w:outlineLvl w:val="1"/></w:pPr>' +
+      '<w:rPr>' + fontRpr(style.fonts.heading) + '<w:b/><w:color w:val="' + (style.colors.heading||"#233043").replace("#","") + '"/><w:sz w:val="' + pt2hp(style.fonts.subheadingSize||11) + '"/></w:rPr>' +
+      '</w:style>' +
+      '<w:style w:type="paragraph" w:styleId="Heading3"><w:name w:val="heading 3"/><w:basedOn w:val="Normal"/><w:qFormat/>' +
+      '<w:pPr><w:numPr><w:ilvl w:val="2"/><w:numId w:val="3"/></w:numPr><w:outlineLvl w:val="2"/></w:pPr>' +
       '<w:rPr>' + fontRpr(style.fonts.heading) + '<w:b/><w:color w:val="' + (style.colors.heading||"#233043").replace("#","") + '"/><w:sz w:val="' + pt2hp(style.fonts.subheadingSize||11) + '"/></w:rPr>' +
       '</w:style>' +
       importCtx.importedStyleDefs.join('') +
