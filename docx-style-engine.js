@@ -154,10 +154,11 @@ window.DocxStyleEngine = (function(){
    * Kiinteä numerointimääritelmä: numId=1 luettelomerkeille (•),
    * numId=2 numeroidulle listalle (1. 2. 3. ...). Sisällytetään aina
    * dokumenttiin -- ei haittaa vaikka mitään listaa ei käytettäisi.
-   * extraXml: tuodusta .docx-liitteestä poimitut (uudelleennimetyt)
-   * abstractNum/num-määritelmät, jotka lisätään perään.
+   * extraAbsXml / extraNumXml: tuodusta .docx-liitteestä poimitut
+   * (uudelleennimetyt) abstractNum- ja num-määritelmät. Ne annetaan erikseen,
+   * jotta abstractNum-lohkot voidaan kirjoittaa ennen num-lohkoja.
    */
-  function numberingXml(extraXml, extraNsAttrs){
+  function numberingXml(extraAbsXml, extraNumXml, extraNsAttrs){
     return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
       '<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"' + (extraNsAttrs || '') + '>' +
       '<w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="bullet"/>' +
@@ -165,9 +166,11 @@ window.DocxStyleEngine = (function(){
       '<w:rPr><w:rFonts w:ascii="Symbol" w:hAnsi="Symbol" w:hint="default"/></w:rPr></w:lvl></w:abstractNum>' +
       '<w:abstractNum w:abstractNumId="1"><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="decimal"/>' +
       '<w:lvlText w:val="%1."/><w:lvlJc w:val="left"/><w:pPr><w:ind w:left="432" w:hanging="432"/></w:pPr></w:lvl></w:abstractNum>' +
+      // OOXML-skeema vaatii: kaikki abstractNum-lohkot ENNEN w:num-lohkoja
+      (extraAbsXml || '') +
       '<w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>' +
       '<w:num w:numId="2"><w:abstractNumId w:val="1"/></w:num>' +
-      (extraXml || '') +
+      (extraNumXml || '') +
       '</w:numbering>';
   }
 
@@ -201,6 +204,132 @@ window.DocxStyleEngine = (function(){
     return blocks;
   }
 
+
+  /* -----------------------------------------------------------------------
+     Apufunktiot .docx-tuonnin tyyli-/oletusmuotoilun käsittelyyn
+     ----------------------------------------------------------------------- */
+
+  // Kenttien järjestys OOXML-skeeman mukaan (pPr / rPr) -- Word on järjestyksestä tarkka.
+  const PPR_ORDER = ["w:pStyle","w:keepNext","w:keepLines","w:pageBreakBefore","w:framePr","w:widowControl","w:numPr",
+    "w:suppressLineNumbers","w:pBdr","w:shd","w:tabs","w:suppressAutoHyphens","w:kinsoku","w:wordWrap","w:overflowPunct",
+    "w:topLinePunct","w:autoSpaceDE","w:autoSpaceDN","w:bidi","w:adjustRightInd","w:snapToGrid","w:spacing","w:ind",
+    "w:contextualSpacing","w:mirrorIndents","w:suppressOverlap","w:jc","w:textDirection","w:textAlignment",
+    "w:textboxTightWrap","w:outlineLvl","w:divId","w:cnfStyle","w:rPr","w:sectPr","w:pPrChange"];
+  const RPR_ORDER = ["w:rStyle","w:rFonts","w:b","w:bCs","w:i","w:iCs","w:caps","w:smallCaps","w:strike","w:dstrike",
+    "w:outline","w:shadow","w:emboss","w:imprint","w:noProof","w:snapToGrid","w:vanish","w:webHidden","w:color",
+    "w:spacing","w:w","w:kern","w:position","w:sz","w:szCs","w:highlight","w:u","w:effect","w:bdr","w:shd","w:fitText",
+    "w:vertAlign","w:rtl","w:cs","w:em","w:lang","w:eastAsianLayout","w:specVanish","w:oMath"];
+
+  // Jakaa pPr/rPr-sisällön ylätason lapsielementteihin (myös w14:-tyyppiset).
+  function splitChildren(xml){
+    const out = [];
+    const re = /<(\/?)([A-Za-z0-9]+:[A-Za-z0-9]+)\b[^>]*?(\/?)>/g;
+    let depth = 0, start = -1, name = "", m;
+    while ((m = re.exec(xml))){
+      const closing = m[1] === "/", selfc = m[3] === "/";
+      if (!closing){
+        if (depth === 0){ start = m.index; name = m[2]; }
+        if (selfc){ if (depth === 0) out.push({ name, xml: m[0] }); }
+        else depth++;
+      } else {
+        depth--;
+        if (depth === 0) out.push({ name, xml: xml.slice(start, m.index + m[0].length) });
+      }
+    }
+    return out;
+  }
+
+  // Yhdistää kaksi pPr/rPr-sisältöä (jälkimmäinen voittaa) ja järjestää skeeman mukaan.
+  function mergeProps(baseXml, overXml, order){
+    const map = new Map();
+    splitChildren(baseXml || "").forEach(c => map.set(c.name, c.xml));
+    splitChildren(overXml || "").forEach(c => map.set(c.name, c.xml));
+    const items = [];
+    let i = 0;
+    map.forEach((xml, name) => {
+      const idx = order.indexOf(name);
+      items.push({ xml, idx: idx < 0 ? order.length : idx, i: i++ });
+    });
+    items.sort((a, b) => (a.idx - b.idx) || (a.i - b.i));
+    return items.map(x => x.xml).join("");
+  }
+
+  /*
+   * Lähteen oletusmuotoilu (docDefaults) elää Wordissa dokumenttitasolla, mutta
+   * tämän moottorin docDefaults on yhteinen koko dokumentille eikä sitä voi
+   * vaihtaa tuotavan sivun mukaan. Siksi lähteen oletuskappaletyyli (Normal)
+   * saa mukaansa lähteen docDefaults-arvot (kappaleväli, riviväli, fontti, koko).
+   * Palauttaa:
+   *   normal -- täysi tyyli (docDefaults + Normalin omat arvot)
+   *   cell   -- sama ilman kappalemuotoilua (vain merkkimuotoilu + Normalin omat
+   *             kappalearvot); käytetään taulukkosolujen kappaleissa, kun
+   *             taulukkotyyli määrää itse kappaleväliä (OOXML: taulukkotyyli
+   *             voittaa docDefaultsin, mutta kappaletyyli voittaa taulukkotyylin).
+   */
+  function buildDefaultParaStyles(block, ddPPr, ddRPr, prefix, importIdx){
+    let pPrOwn = "", rPrOwn = "";
+    let rest = block.replace(/<w:pPr>([\s\S]*?)<\/w:pPr>|<w:pPr\s*\/>/, (m, inner) => { pPrOwn = inner || ""; return ""; });
+    rest = rest.replace(/<w:rPr>([\s\S]*?)<\/w:rPr>|<w:rPr\s*\/>/, (m, inner) => { rPrOwn = inner || ""; return ""; });
+    // Wordin oletukset, jos lähteen docDefaults ei määrää: väri automaattinen, 10 pt
+    const rFallback = '<w:color w:val="auto"/><w:sz w:val="20"/>';
+    const mergedR = mergeProps(rFallback + (ddRPr || ""), rPrOwn, RPR_ORDER);
+    const mergedP = mergeProps(ddPPr, pPrOwn, PPR_ORDER);
+    const cellP = mergeProps("", pPrOwn, PPR_ORDER);
+    const label = "(tuotu " + importIdx + ")";
+    // Nimi muutetaan, ettei dokumentissa ole kahta tyyliä nimeltä "Normal".
+    rest = rest.replace(/<w:name\s+w:val="[^"]*"\s*\/>/, '<w:name w:val="Normal ' + label + '"/>');
+    const tail = (mergedP ? '<w:pPr>' + mergedP + '</w:pPr>' : '') + (mergedR ? '<w:rPr>' + mergedR + '</w:rPr>' : '');
+    const normal = rest.replace(/<\/w:style>\s*$/, tail + '</w:style>');
+    const cell = '<w:style w:type="paragraph" w:customStyle="1" w:styleId="' + prefix + 'NormalCell">' +
+      '<w:name w:val="Normal cell ' + label + '"/>' +
+      (cellP ? '<w:pPr>' + cellP + '</w:pPr>' : '') + (mergedR ? '<w:rPr>' + mergedR + '</w:rPr>' : '') + '</w:style>';
+    return { normal, cell };
+  }
+
+  /*
+   * Lisää pStyle-viittauksen kappaleisiin, joilla ei ole omaa tyyliä. Wordin
+   * tallentamissa tiedostoissa tavallisilla kappaleilla ei ole pStyleä (ne ovat
+   * implisiittisesti "Normal"), ja ilman tätä ne saisivat HOSTIN Normal-tyylin
+   * eivätkä lähteen. Taulukon solun kappaleille käytetään cellId-tyyliä, jos
+   * taulukon tyyli (tblNeedsCell) määrää itse kappaleväliä.
+   */
+  function addDefaultParaStyle(xml, normalId, cellId, tblNeedsCell){
+    const re = /<w:tbl>|<\/w:tbl>|<w:tblStyle\s+w:val="([^"]+)"\s*\/>|<w:p(?:\s[^>]*?)?(\/?)>/g;
+    const stack = [];
+    let out = "", last = 0, m;
+    const ps = id => '<w:pStyle w:val="' + id + '"/>';
+    while ((m = re.exec(xml))){
+      const tag = m[0];
+      if (tag === "<w:tbl>"){ stack.push(false); continue; }
+      if (tag === "</w:tbl>"){ stack.pop(); continue; }
+      if (tag.indexOf("<w:tblStyle") === 0){
+        if (stack.length) stack[stack.length - 1] = !!tblNeedsCell(m[1]);
+        continue;
+      }
+      const id = (stack.length && stack[stack.length - 1]) ? cellId : normalId;
+      if (m[2] === "/"){ // <w:p .../>
+        out += xml.slice(last, m.index) + tag.slice(0, -2) + '><w:pPr>' + ps(id) + '</w:pPr></w:p>';
+        last = re.lastIndex;
+        continue;
+      }
+      const after = xml.slice(re.lastIndex, re.lastIndex + 400);
+      if (/^\s*<w:pPr>\s*<w:pStyle\b/.test(after)) continue;       // jo tyylitetty
+      const open = /^\s*<w:pPr>/.exec(after);
+      const selfPPr = /^\s*<w:pPr\s*\/>/.exec(after);
+      if (open){
+        out += xml.slice(last, re.lastIndex) + open[0] + ps(id);
+        last = re.lastIndex + open[0].length;
+      } else if (selfPPr){
+        out += xml.slice(last, re.lastIndex) + '<w:pPr>' + ps(id) + '</w:pPr>';
+        last = re.lastIndex + selfPPr[0].length;
+      } else {
+        out += xml.slice(last, re.lastIndex) + '<w:pPr>' + ps(id) + '</w:pPr>';
+        last = re.lastIndex;
+      }
+    }
+    return out + xml.slice(last);
+  }
+
   /*
    * Tuo käyttäjän lataaman .docx-tiedoston sisällön (kansilehti tai
    * vakiotekstisivu) suoraan osaksi tuotettavaa dokumenttia -- EI
@@ -214,7 +343,7 @@ window.DocxStyleEngine = (function(){
    *
    * ctx-oliossa jaetut, koko assembleDocx-kutsun ajan kertyvät taulukot:
    * relParts, contentTypeOverrides, mediaFiles, headerFolderFiles,
-   * headerRelsFiles, importedStyleDefs, importedNumDefs, extraDefaultExts
+   * headerRelsFiles, importedStyleDefs, importedAbsDefs, importedNumInstDefs, defaultStyleTypes, extraDefaultExts
    * (Set), sekä ctx.theme (ensimmäinen tuotu teema voittaa).
    * Palauttaa { bodyXml, sectPr } -- sectPr sisältää lähteen oman
    * sivukoon/marginaalit (ja ylä/alatunnisteen, jos sellainen löytyi).
@@ -321,35 +450,94 @@ window.DocxStyleEngine = (function(){
 
     // ---- tyylit: poimi, nimeä uudelleen törmäysten välttämiseksi ----
     const styleIdMap = {};
+    const prefix = "imp" + importIdx + "_";
+    const remapStyleIds = str => str.replace(
+      /(<w:(?:pStyle|rStyle|tblStyle|numStyleLink|styleLink|basedOn|next|link)\s+w:val=")([^"]+)(")/g,
+      (m,pre,val,post) => styleIdMap[val] ? pre+styleIdMap[val]+post : m
+    );
+    ctx.defaultStyleTypes = ctx.defaultStyleTypes || {};
     let importedStylesXml = "";
+    let normalStyleId = null, cellStyleId = null;
+    const tblSpacingStyleIds = {};   // taulukkotyylit, jotka määräävät kappalevälin itse
     const stylesFile = zip.file("word/styles.xml");
     if (stylesFile){
       const stylesXmlSrc = await stylesFile.async("string");
       const stylesRootMatch = /^<w:styles\b[^>]*>/.exec(stylesXmlSrc.replace(/^\uFEFF?<\?xml[^>]*\?>\s*/, ""));
       if (stylesRootMatch) collectNamespaceDecls(stylesRootMatch[0]);
       const styleBlocks = extractTopLevelBlocks(stylesXmlSrc, "w:style");
-      const prefix = "imp" + importIdx + "_";
+      const srcById = {};
       styleBlocks.forEach(block => {
         const idMatch = /w:styleId="([^"]+)"/.exec(block);
-        if (idMatch) styleIdMap[idMatch[1]] = prefix + idMatch[1];
+        if (idMatch){ styleIdMap[idMatch[1]] = prefix + idMatch[1]; srcById[idMatch[1]] = block; }
       });
-      const remapStyleRef = s => s.replace(
-        /(<w:(?:pStyle|rStyle|tblStyle|tblStylePr|basedOn|next|link|numStyleLink|styleLink)\s+w:val=")([^"]+)(")/g,
-        (m,pre,val,post) => styleIdMap[val] ? pre+styleIdMap[val]+post : m
-      );
+
+      // lähteen docDefaults (kappale- ja merkkimuotoilun oletukset)
+      const ddMatch = /<w:docDefaults>[\s\S]*?<\/w:docDefaults>/.exec(stylesXmlSrc);
+      const dd = ddMatch ? ddMatch[0] : "";
+      const ddPPr = (/<w:pPrDefault>\s*<w:pPr>([\s\S]*?)<\/w:pPr>/.exec(dd) || ["",""])[1];
+      const ddRPr = (/<w:rPrDefault>\s*<w:rPr>([\s\S]*?)<\/w:rPr>/.exec(dd) || ["",""])[1];
+
+      // määrääkö taulukkotyyli (tai sen perimä tyyli) itse kappalevälin?
+      const chainHasSpacing = (id, seen) => {
+        seen = seen || {};
+        if (!id || seen[id] || !srcById[id]) return false;
+        seen[id] = true;
+        const blk = srcById[id].replace(/<w:tblStylePr\b[\s\S]*?<\/w:tblStylePr>/g, "");
+        const pp = /<w:pPr>([\s\S]*?)<\/w:pPr>/.exec(blk);
+        if (pp && /<w:spacing\b/.test(pp[1])) return true;
+        const bo = /<w:basedOn\s+w:val="([^"]+)"/.exec(blk);
+        return bo ? chainHasSpacing(bo[1], seen) : false;
+      };
+
       importedStylesXml = styleBlocks.map(block => {
+        const openTag = (/^<w:style\b[^>]*>/.exec(block) || [""])[0];
+        const type = (/\sw:type="([^"]+)"/.exec(openTag) || [])[1];
+        const oldId = (/\sw:styleId="([^"]+)"/.exec(openTag) || [])[1];
+        const isDefault = /\sw:default="(?:1|true|on)"/.test(openTag);
         let b = block.replace(/w:styleId="([^"]+)"/, (m,id) => 'w:styleId="' + (styleIdMap[id] || id) + '"');
-        return remapStyleRef(b);
-      }).join('');
-      bodyInner = bodyInner.replace(
-        /(<w:(?:pStyle|rStyle|tblStyle|numStyleLink|styleLink)\s+w:val=")([^"]+)(")/g,
-        (m,pre,val,post) => styleIdMap[val] ? pre+styleIdMap[val]+post : m
-      );
+        b = remapStyleIds(b);
+        let extra = "";
+        let keepsName = false;
+        if (type === "table" && oldId && chainHasSpacing(oldId)) tblSpacingStyleIds[styleIdMap[oldId]] = true;
+        if (isDefault){
+          if (type === "paragraph"){
+            const res = buildDefaultParaStyles(b, ddPPr, ddRPr, prefix, importIdx);
+            b = res.normal; extra = res.cell;
+            normalStyleId = styleIdMap[oldId]; cellStyleId = prefix + "NormalCell";
+          }
+          // Samaa tyyppiä ei saa olla useaa oletustyyliä: hostilla on jo oletuskappaletyyli,
+          // ja muiden tyyppien (taulukko, merkki, luettelo) oletus on se, joka tuli ensin.
+          if (type === "paragraph" || ctx.defaultStyleTypes[type]){
+            b = b.replace(/\sw:default="(?:1|true|on)"/, "");
+          } else if (type){
+            ctx.defaultStyleTypes[type] = true;
+            keepsName = true;
+          }
+        }
+        // Tyylin NIMI (w:name) tunnistetaan Wordissa ja LibreOfficessa nimen perusteella:
+        // jos tuotu "heading 1" on samanniminen kuin hostin oma "heading 1", tyylit
+        // sekoittuvat (esim. tuodun otsikon numerointi valuisi hostin otsikoihin).
+        // Siksi kaikkiin tuotuihin tyyleihin lisätään tunniste, paitsi Normal-tyyliin
+        // (nimetty jo buildDefaultParaStyles:ssa) ja ensimmäiseen oletustyyliin.
+        if (!keepsName && !(type === "paragraph" && isDefault)){
+          b = b.replace(/<w:name\s+w:val="([^"]*)"\s*\/>/, (m, n) => '<w:name w:val="' + n + ' (tuotu ' + importIdx + ')"/>');
+        }
+        return b + extra;
+      }).join("");
+
+      // Ei oletuskappaletyyliä lähteessä mutta docDefaults löytyy -> luodaan tyyli
+      if (!normalStyleId && (ddPPr || ddRPr)){
+        const fake = '<w:style w:type="paragraph" w:styleId="' + prefix + 'Normal"><w:name w:val="Normal"/></w:style>';
+        const res = buildDefaultParaStyles(fake, ddPPr, ddRPr, prefix, importIdx);
+        importedStylesXml += res.normal + res.cell;
+        normalStyleId = prefix + "Normal"; cellStyleId = prefix + "NormalCell";
+      }
+      bodyInner = remapStyleIds(bodyInner);
     }
-    ctx.importedStyleDefs.push(importedStylesXml);
 
     // ---- numerointi: poimi, nimeä uudelleen ----
-    let importedNumXml = "";
+    // (tehdään ennen tyylien tallennusta, koska tyylien numPr/numId viittaa näihin)
+    let numIdMap = {};
     const numberingFile = zip.file("word/numbering.xml");
     if (numberingFile){
       const numXmlSrc = await numberingFile.async("string");
@@ -357,7 +545,7 @@ window.DocxStyleEngine = (function(){
       if (numRootMatch) collectNamespaceDecls(numRootMatch[0]);
       const absBlocks = extractTopLevelBlocks(numXmlSrc, "w:abstractNum");
       const numBlocks = extractTopLevelBlocks(numXmlSrc, "w:num");
-      const absIdMap = {}, numIdMap = {};
+      const absIdMap = {};
       const base = 9000 + importIdx * 500;
       absBlocks.forEach(b => {
         const m = /w:abstractNumId="([^"]+)"/.exec(b);
@@ -367,16 +555,30 @@ window.DocxStyleEngine = (function(){
         const m = /w:numId="([^"]+)"/.exec(b);
         if (m) numIdMap[m[1]] = String(base + 200 + parseInt(m[1], 10));
       });
-      const remappedAbs = absBlocks.map(b => b.replace(/w:abstractNumId="([^"]+)"/, (m,id) => 'w:abstractNumId="'+(absIdMap[id]||id)+'"'));
+      const remappedAbs = absBlocks.map(b => {
+        let o = b.replace(/w:abstractNumId="([^"]+)"/, (m,id) => 'w:abstractNumId="'+(absIdMap[id]||id)+'"');
+        o = remapStyleIds(o); // lvl/pStyle (numeroidut otsikot), numStyleLink, styleLink
+        // kuvaluettelomerkkejä (numPicBullet) ei tuoda -> poistetaan viittaukset niihin
+        o = o.replace(/<w:lvlPicBulletId\b[^>]*\/>/g, "");
+        return o;
+      });
       const remappedNum = numBlocks.map(b => {
         let out = b.replace(/w:numId="([^"]+)"/, (m,id) => 'w:numId="'+(numIdMap[id]||id)+'"');
         out = out.replace(/(<w:abstractNumId\s+w:val=")([^"]+)(")/, (m,pre,val,post) => absIdMap[val] ? pre+absIdMap[val]+post : m);
         return out;
       });
-      importedNumXml = remappedAbs.join('') + remappedNum.join('');
-      bodyInner = bodyInner.replace(/(<w:numId\s+w:val=")([^"]+)(")/g, (m,pre,val,post) => numIdMap[val] ? pre+numIdMap[val]+post : m);
+      ctx.importedAbsDefs.push(remappedAbs.join(''));
+      ctx.importedNumInstDefs.push(remappedNum.join(''));
     }
-    ctx.importedNumDefs.push(importedNumXml);
+    const remapNumIds = str => str.replace(/(<w:numId\s+w:val=")([^"]+)(")/g,
+      (m,pre,val,post) => numIdMap[val] ? pre+numIdMap[val]+post : m);
+
+    // numId:t päivitetään SEKÄ rungossa ETTÄ tyylimäärityksissä
+    importedStylesXml = remapNumIds(importedStylesXml);
+    ctx.importedStyleDefs.push(importedStylesXml);
+    bodyInner = remapNumIds(bodyInner);
+    const tblNeedsCell = id => !!tblSpacingStyleIds[id];
+    if (normalStyleId) bodyInner = addDefaultParaStyle(bodyInner, normalStyleId, cellStyleId, tblNeedsCell);
 
     // ---- teema (fontit/värit): vain ensimmäinen tuonti voittaa ----
     if (!ctx.theme.xml){
@@ -394,52 +596,61 @@ window.DocxStyleEngine = (function(){
     // omaa vakioylä-/alatunnistetta (ctx.mainHeaderRefXml/mainFooterRefXml),
     // jotta sivu näyttää samalta kuin muutkin sivut -- lähdetiedoston OMAA
     // ylä-/alatunnistetta ei tuoda tähän. "cover"-tyyppinen tuonti (kansilehti)
-    // säilyttää edelleen lähteensä oman ylä-/alatunnisteen (tai ei mitään).
+    // säilyttää lähteensä oman ylä-/alatunnisteen (default + first) tai ei mitään.
     let headerRefXml = "", footerRefXml = "";
     if (label === "page"){
       headerRefXml = ctx.mainHeaderRefXml || "";
       footerRefXml = ctx.mainFooterRefXml || "";
     } else if (sourceSectPr){
-      const hRefMatch = /<w:headerReference\s+w:type="default"\s+r:id="([^"]+)"/.exec(sourceSectPr);
-      const fRefMatch = /<w:footerReference\s+w:type="default"\s+r:id="([^"]+)"/.exec(sourceSectPr);
-      for (const ref of [{ m:hRefMatch, kind:"header", tag:"hdr" }, { m:fRefMatch, kind:"footer", tag:"ftr" }]){
-        if (!ref.m) continue;
-        const info = docRels[ref.m[1]];
-        if (!info) continue;
-        const partPath = "word/" + info.target;
-        const partFile = zip.file(partPath);
-        if (!partFile) continue;
-        let partXml = await partFile.async("string");
-        const partRelsPath = "word/_rels/" + info.target.split("/").pop() + ".rels";
-        const partRelsFile = zip.file(partRelsPath);
-        const partRels = partRelsFile ? parseRelationships(await partRelsFile.async("string")) : {};
-        const partIdMap = await importMediaFromRels(partRels, "word/", "imp" + importIdx + "_" + ref.kind);
-        partXml = remapRidsInXml(partXml, partIdMap);
-        if (Object.keys(styleIdMap).length){
-          partXml = partXml.replace(
-            /(<w:(?:pStyle|rStyle)\s+w:val=")([^"]+)(")/g,
-            (m,pre,val,post) => styleIdMap[val] ? pre+styleIdMap[val]+post : m
-          );
+      for (const kind of ["header", "footer"]){
+        for (const rtype of ["default", "first"]){
+          const refRe = new RegExp('<w:' + kind + 'Reference\\s+w:type="' + rtype + '"\\s+r:id="([^"]+)"');
+          const rm = refRe.exec(sourceSectPr);
+          if (!rm) continue;
+          const info = docRels[rm[1]];
+          if (!info) continue;
+          const partPath = "word/" + info.target;
+          const partFile = zip.file(partPath);
+          if (!partFile) continue;
+          let partXml = await partFile.async("string");
+          const partRelsPath = "word/_rels/" + info.target.split("/").pop() + ".rels";
+          const partRelsFile = zip.file(partRelsPath);
+          const partRels = partRelsFile ? parseRelationships(await partRelsFile.async("string")) : {};
+          const suffix = rtype === "first" ? "-first" : "";
+          const partIdMap = await importMediaFromRels(partRels, "word/", "imp" + importIdx + "_" + kind + (rtype === "first" ? "f" : ""));
+          partXml = remapRidsInXml(partXml, partIdMap);
+          partXml = remapNumIds(remapStyleIds(partXml));
+          if (normalStyleId) partXml = addDefaultParaStyle(partXml, normalStyleId, cellStyleId, tblNeedsCell);
+          const partName = "imp-" + kind + importIdx + suffix + ".xml";
+          ctx.headerFolderFiles.push({ name: partName, content: partXml });
+          const partRid = ctx.relCounter.value++;
+          ctx.relParts.push('<Relationship Id="rId'+partRid+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/'+kind+'" Target="'+partName+'"/>');
+          ctx.contentTypeOverrides.push('<Override PartName="/word/'+partName+'" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.'+kind+'+xml"/>');
+          const refXml = '<w:' + kind + 'Reference w:type="' + rtype + '" r:id="rId' + partRid + '"/>';
+          if (kind === "header") headerRefXml += refXml; else footerRefXml += refXml;
         }
-        const partName = "imp-" + ref.kind + importIdx + ".xml";
-        ctx.headerFolderFiles.push({ name: partName, content: partXml });
-        const partRid = ctx.relCounter.value++;
-        ctx.relParts.push('<Relationship Id="rId'+partRid+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/'+ref.kind+'" Target="'+partName+'"/>');
-        ctx.contentTypeOverrides.push('<Override PartName="/word/'+partName+'" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.'+ref.kind+'+xml"/>');
-        if (ref.kind === "header") headerRefXml = '<w:headerReference w:type="default" r:id="rId'+partRid+'"/>';
-        else footerRefXml = '<w:footerReference w:type="default" r:id="rId'+partRid+'"/>';
       }
     }
 
-    // ---- siisti sectPr: vain sivukoko/marginaalit/suunta + mahd. oma ylä/alatunniste ----
+    // ---- siisti sectPr: sivukoko, marginaalit, palstat, sivun reunaviivat, pystytasaus,
+    //      ruudukko (+ titlePg kansilehdelle) + mahd. oma ylä/alatunniste ----
+    // Kentät kirjoitetaan OOXML-skeeman mukaisessa järjestyksessä.
+    // titlePg jätetään pois "page"-tuonnista: muuten sivun ensimmäiseltä sivulta
+    // puuttuisi sovelluksen vakioylätunniste. pgNumType (numeroinnin uudelleenaloitus)
+    // jätetään pois, jotta tuotu sivu ei nollaa koko raportin sivunumerointia.
+    const defaultSect = '<w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1417" w:right="1417" w:bottom="1417" w:left="1417"/>';
     let cleanSectPr;
     if (sourceSectPr){
-      const pgSz = (/<w:pgSz\b[^/]*\/>/.exec(sourceSectPr) || [''])[0];
-      const pgMar = (/<w:pgMar\b[^/]*\/>/.exec(sourceSectPr) || [''])[0];
-      cleanSectPr = '<w:sectPr>' + headerRefXml + footerRefXml + pgSz + pgMar + '</w:sectPr>';
-    } else {
+      const grab = tag => {
+        const m = new RegExp('<w:' + tag + '\\b[^>]*?(?:\\/>|>[\\s\\S]*?<\\/w:' + tag + '>)').exec(sourceSectPr);
+        return m ? m[0] : "";
+      };
+      const titlePg = (label === "cover") ? grab("titlePg") : "";
       cleanSectPr = '<w:sectPr>' + headerRefXml + footerRefXml +
-        '<w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1417" w:right="1417" w:bottom="1417" w:left="1417"/></w:sectPr>';
+        grab("pgSz") + grab("pgMar") + grab("pgBorders") + grab("cols") + grab("vAlign") + titlePg + grab("docGrid") +
+        '</w:sectPr>';
+    } else {
+      cleanSectPr = '<w:sectPr>' + headerRefXml + footerRefXml + defaultSect + '</w:sectPr>';
     }
 
     return { bodyXml: bodyInner, sectPr: cleanSectPr };
@@ -609,7 +820,9 @@ window.DocxStyleEngine = (function(){
       relCounter: { value: 10 },
       importCounter: 0,
       importedStyleDefs: [],
-      importedNumDefs: [],
+      importedAbsDefs: [],
+      importedNumInstDefs: [],
+      defaultStyleTypes: {},
       extraDefaultExts: new Set(),
       extraNamespaces: {},
       theme: { xml: null }
@@ -892,7 +1105,7 @@ window.DocxStyleEngine = (function(){
     const wordFolder = zip.folder("word");
     wordFolder.file("document.xml", documentXml);
     wordFolder.file("styles.xml", stylesXml);
-    wordFolder.file("numbering.xml", numberingXml(importCtx.importedNumDefs.join(''), nsAttrsExcluding(["w"])));
+    wordFolder.file("numbering.xml", numberingXml(importCtx.importedAbsDefs.join(''), importCtx.importedNumInstDefs.join(''), nsAttrsExcluding(["w"])));
     wordFolder.folder("_rels").file("document.xml.rels", docRelsXml);
     headerFolderFiles.forEach(f => wordFolder.file(f.name, f.content));
     if (headerRelsFiles.length){
