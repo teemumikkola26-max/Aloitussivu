@@ -1,10 +1,11 @@
 <!DOCTYPE html>
-<html lang="fi">
+<html lang="fi" data-inline-logout>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>html{visibility:hidden}</style>
 
+<script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("sw.js").catch(function(){});});}</script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.4"></script>
 <script src="auth-gate.js" defer></script>
 <script src="submission-sync.js" defer></script>
@@ -21,8 +22,11 @@
   --paper:#f2f0e8;
   --card:#fff;
   --line:#d8d4c6;
-  --safety:#e8590c;
-  --safety-dark:#c44a08;
+  --safety:#c2410c;
+  --safety-dark:#9a3412;
+  --muted:#6b6656;
+  --footer-h:120px;
+  --focus:#1d4ed8;
   --ok:#2f6b3a;
   --warn:#b7791f;
   --error:#a3271b;
@@ -40,7 +44,7 @@ body{
   background:var(--paper);
   color:var(--ink);
   font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
-  padding-bottom:110px;
+  padding-bottom:calc(var(--footer-h) + 28px);
   -webkit-tap-highlight-color:transparent
 }
 
@@ -155,7 +159,7 @@ input[type=number]::-webkit-outer-spin-button{
 
 .hint{
   font-size:11.5px;
-  color:#8a8574;
+  color:#6b6656;
   margin-top:3px
 }
 
@@ -308,7 +312,7 @@ input[type=number]::-webkit-outer-spin-button{
 
 .entry-sub{
   font-size:12px;
-  color:#8a8574;
+  color:#6b6656;
   margin-top:2px;
   font-family:var(--mono)
 }
@@ -350,10 +354,10 @@ input[type=number]::-webkit-outer-spin-button{
   background:rgba(0,0,0,.65);
   color:#fff;
   border:none;
-  width:20px;
-  height:20px;
+  width:28px;
+  height:28px;
   border-radius:50%;
-  font-size:13px;
+  font-size:18px;
   line-height:1;
   padding:0;
   cursor:pointer
@@ -367,7 +371,7 @@ input[type=number]::-webkit-outer-spin-button{
   height:56px;
   border-radius:6px;
   border:1.5px dashed var(--line);
-  color:#8a8574;
+  color:#6b6656;
   font-size:22px;
   background:#fbfaf6;
   cursor:pointer
@@ -387,8 +391,8 @@ input[type=number]::-webkit-outer-spin-button{
 
 .photo-caption{
   width:100%;
-  font-size:11px;
-  padding:5px;
+  font-size:13px;
+  padding:6px 5px;
   border:1px solid var(--line);
   border-radius:4px
 }
@@ -396,7 +400,7 @@ input[type=number]::-webkit-outer-spin-button{
 .empty{
   text-align:center;
   padding:24px 10px;
-  color:#8a8574;
+  color:#6b6656;
   font-size:13.5px
 }
 
@@ -413,12 +417,16 @@ input[type=number]::-webkit-outer-spin-button{
 
 .step-back{
   font-family:var(--mono);
-  font-size:12px;
-  color:#8a8574;
-  display:flex;
+  font-size:14px;
+  color:var(--muted);
+  display:inline-flex;
   align-items:center;
   gap:4px;
-  margin-bottom:10px;
+  margin:0 0 6px -6px;
+  padding:10px 12px 10px 6px;
+  min-height:44px;
+  background:none;
+  border:none;
   cursor:pointer
 }
 
@@ -443,7 +451,7 @@ select{
 
 .toast{
   position:fixed;
-  bottom:105px;
+  bottom:calc(var(--footer-h) + 12px);
   left:50%;
   transform:translateX(-50%);
   background:var(--ink);
@@ -464,19 +472,15 @@ select{
 }
 
 .sync-status{
-  position:fixed;
-  top:7px;
-  right:10px;
-  z-index:40;
   font-family:var(--mono);
-  font-size:9.5px;
-  color:#c9c6b8;
-  opacity:.9;
-  pointer-events:none
+  font-size:12px;
+  color:#d9d6c8;
+  text-align:right;
+  line-height:1.3
 }
 
 .sync-status.ok{
-  color:#9bd0a4
+  color:#a7dcb0
 }
 
 .sync-status.warn{
@@ -490,7 +494,7 @@ select{
 .loading{
   text-align:center;
   padding:40px 20px;
-  color:#8a8574
+  color:#6b6656
 }
 
 .field-hint-host{
@@ -501,8 +505,8 @@ select{
   position:absolute;
   top:-4px;
   right:0;
-  width:22px;
-  height:22px;
+  width:28px;
+  height:28px;
   border-radius:50%;
   border:1.5px solid var(--warn);
   background:#fbf1de;
@@ -581,8 +585,8 @@ select{
 }
 
 .field-hint-btn-inline{
-  width:22px;
-  height:22px;
+  width:28px;
+  height:28px;
   border-radius:50%;
   border:1.5px solid var(--warn);
   background:#fbf1de;
@@ -615,21 +619,153 @@ select{
     grid-template-columns:repeat(3,1fr)
   }
 }
+
+/* ---- Käytettävyysparannukset ---- */
+:focus-visible{
+  outline:3px solid var(--focus);
+  outline-offset:2px
+}
+input:focus,select:focus,textarea:focus{
+  box-shadow:0 0 0 3px rgba(194,65,12,.25)
+}
+.toprow{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px
+}
+.toprow a{
+  color:#d9d6c8;
+  font-size:13px;
+  text-decoration:none;
+  font-family:var(--mono);
+  padding:8px 0;
+  display:inline-block
+}
+.has-error input,
+.has-error select,
+.has-error textarea{
+  border-color:var(--error);
+  background:#fff6f5
+}
+.has-error .chip-group{
+  outline:2px solid var(--error);
+  outline-offset:3px;
+  border-radius:10px
+}
+.field-error-msg{
+  color:var(--error);
+  font-size:13px;
+  font-weight:600;
+  margin:4px 0 2px
+}
+.chip-group{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin-top:2px
+}
+.chip{
+  flex:1 1 auto;
+  min-height:44px;
+  padding:8px 14px;
+  border:1.5px solid var(--line);
+  border-radius:10px;
+  background:#fff;
+  color:var(--ink);
+  font-size:15px;
+  font-weight:600;
+  cursor:pointer
+}
+.chip[aria-checked=true]{
+  background:var(--ink);
+  color:#fff;
+  border-color:var(--ink)
+}
+.jump-note{
+  font-size:13px;
+  color:var(--muted);
+  background:#f1efe6;
+  border-radius:8px;
+  padding:6px 10px;
+  margin:8px 0 2px
+}
+.entry-card.tappable{
+  cursor:pointer
+}
+.entry-card.tappable:active{
+  background:#f6f0e6
+}
+.entry-meta{
+  font-size:13px;
+  color:#3a3a34;
+  margin-top:4px
+}
+.entry-warn{
+  display:inline-block;
+  margin-top:6px;
+  font-size:12.5px;
+  font-weight:700;
+  color:#8a5a00;
+  background:#fbf1de;
+  border:1px solid var(--warn);
+  border-radius:6px;
+  padding:2px 8px
+}
+.footer-row{
+  display:flex;
+  gap:8px
+}
+.footer-row .btn{
+  flex:1
+}
+.more-menu{
+  padding:0
+}
+.more-menu summary{
+  list-style:none;
+  padding:14px;
+  font-weight:700;
+  cursor:pointer;
+  min-height:48px
+}
+.more-menu summary::-webkit-details-marker{
+  display:none
+}
+.more-menu .more-body{
+  padding:0 14px 14px;
+  display:flex;
+  flex-direction:column;
+  gap:8px
+}
+.net-banner{
+  display:none;
+  background:#fbf1de;
+  color:#6b4a00;
+  border-bottom:1px solid var(--warn);
+  font-size:13px;
+  padding:6px 14px;
+  text-align:center
+}
+.net-banner.show{
+  display:block
+}
 </style>
 </head>
 
 <body>
 
+<div id="bootSplash" style="visibility:visible;position:fixed;inset:0;z-index:99990;background:#233043;color:#f2efe6;display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:15px;">Ladataan lomaketta…</div>
+
 <div class="topbar">
-  <a href="index.html"
-     style="color:#c9c6b8;font-size:11px;text-decoration:none;display:inline-block;margin-bottom:4px;font-family:var(--mono);">
-    ← Omat lomakkeet
-  </a>
+  <div class="toprow">
+    <a href="index.html">← Omat lomakkeet</a>
+    <div class="sync-status" id="syncStatus" role="status" aria-live="polite">Käynnistetään...</div>
+  </div>
   <div class="eyebrow">Rakennustutkimus · kenttälomake</div>
   <h1 id="topTitle">Kohteen tiedot</h1>
 </div>
-
-<div class="sync-status" id="syncStatus">Käynnistetään...</div>
+<div class="net-banner" id="netBanner" role="status">Ei verkkoyhteyttä – tiedot tallentuvat laitteelle ja siirtyvät pilveen kun yhteys palaa.</div>
 <div class="wrap" id="app"><div class="loading">Ladataan lomaketta...</div></div>
 <div class="footerbar" id="footer"></div>
 <div class="toast" id="toast"></div>
@@ -1538,7 +1674,7 @@ async function autosave(){
 
     if(indexedDbSaved){
 
-      setSyncStatus("Tallennettu laitteelle","ok");
+      setSyncStatus(navigator.onLine?"Tallennettu laitteelle":"Offline – tallennettu laitteelle","ok");
 
     }else{
 
@@ -1756,7 +1892,7 @@ async function syncToCloud(){
     );
 
     setSyncStatus(
-      "Ei yhteyttä – tallennettu laitteelle",
+      "Ei yhteyttä – tallennettu laitteelle"+(pendingPhotoCount()?" ("+pendingPhotoCount()+" kuvaa odottaa)":""),
       "warn"
     );
 
@@ -2417,7 +2553,7 @@ function toast(msg){
 
   toastTimer=setTimeout(()=>{
     t.classList.remove("show");
-  },2200);
+  },Math.max(2200,String(msg).length*65));
 }
 
 
@@ -2467,7 +2603,217 @@ function escapeAttribute(s){
 }
 
 
+
+/* ============================================================
+   NAVIGOINTI (selaimen Takaisin-painike) JA POISTUMISVAROITUKSET
+   ============================================================ */
+let guardPushed=false;
+let refreshPhotoCard=()=>{};
+let programmaticBack=false;
+
 function render(){
+  _renderView();
+  syncHistory();
+  updateFooterHeight();
+}
+
+function syncHistory(){
+  if(view!=="project" && !guardPushed){
+    history.pushState({kl:1},"");
+    guardPushed=true;
+  }else if(view==="project" && guardPushed){
+    guardPushed=false;
+    programmaticBack=true;
+    history.back();
+  }
+}
+
+function entryHasData(e){
+  if(!e)return false;
+  const vals=Object.values(e.values||{});
+  const has=vals.some(v=>
+    Array.isArray(v)
+      ?v.some(r=>Object.values(r||{}).some(x=>String(x??"").trim()!==""))
+      :String(v??"").trim()!==""
+  );
+  return has || (e.photos||[]).length>0 || !!e.marker;
+}
+
+function leaveEntryForm(){
+  if(editingIsNew && entryHasData(editingEntry)){
+    if(!confirm("Hylätäänkö tämä keskeneräinen menetelmä?\n\nSyötetyt tiedot ja kuvat poistetaan.")){
+      return false;
+    }
+    (editingEntry.photos||[]).forEach(p=>{
+      if(p.url){
+        try{URL.revokeObjectURL(p.url);}catch(err){}
+      }
+    });
+  }
+  view=editingIsNew?"methodSelect":"project";
+  editingEntry=null;
+  editingIsNew=false;
+  autosave();
+  return true;
+}
+
+function navBack(){
+  if(view==="methodSelect"){
+    view="project";
+  }else if(view==="methodsManage"){
+    view="methodSelect";
+  }else if(view==="methodEdit"){
+    discardUnsavedGuides();
+    editingMethod=null;
+    editingMethodIsNew=false;
+    view="methodsManage";
+  }else if(view==="entryForm"){
+    if(!leaveEntryForm()){
+      syncHistory();
+      return;
+    }
+  }
+  render();
+}
+
+window.addEventListener("popstate",()=>{
+  if(programmaticBack){
+    programmaticBack=false;
+    return;
+  }
+  if(!guardPushed)return;
+  guardPushed=false;
+  navBack();
+});
+
+/* ============================================================
+   PAKOLLISTEN KENTTIEN TARKISTUS JA VIRHEIDEN NÄYTTÖ
+   ============================================================ */
+function isEmptyFieldValue(f,values){
+  if(f.type==="table"){
+    const tRows=Array.isArray(values[f.id])?values[f.id]:[];
+    const cols=Array.isArray(f.columns)?f.columns:[];
+    return !tRows.some(r=>cols.some(c=>
+      r[c.id]!==undefined && r[c.id]!==null && String(r[c.id]).trim()!==""
+    ));
+  }
+  const v=values[f.id];
+  return v===undefined || v===null || String(v).trim()==="";
+}
+
+function findMissingRequired(entry,m){
+  const values=entry.values||{};
+  const vis=computeFieldVisibility(m.fields,values);
+  return [...COMMON_FIELDS,...m.fields].filter(f=>
+    f.req && vis[f.id]!==false && isEmptyFieldValue(f,values)
+  );
+}
+
+function clearFieldErrors(root){
+  (root||document).querySelectorAll(".has-error").forEach(n=>n.classList.remove("has-error"));
+  (root||document).querySelectorAll(".field-error-msg").forEach(n=>n.remove());
+}
+
+function fieldHostFor(f){
+  const inp=document.getElementById("fld_"+f.id);
+  if(inp)return inp.closest(".field-hint-host")||inp.parentElement;
+  const tb=document.getElementById("tblbody_"+f.id);
+  if(tb)return tb.closest(".table-field");
+  return null;
+}
+
+/* pairs: [[kenttä, virheteksti], ...] */
+function showFieldErrors(pairs){
+  clearFieldErrors();
+  let first=null;
+  pairs.forEach(([f,msg])=>{
+    const host=fieldHostFor(f);
+    if(!host)return;
+    host.classList.add("has-error");
+    const label=host.querySelector("label");
+    const m=document.createElement("div");
+    m.className="field-error-msg";
+    m.setAttribute("role","alert");
+    m.textContent=msg;
+    if(label)label.after(m);else host.prepend(m);
+    if(!first)first={host,f};
+  });
+  if(first){
+    first.host.scrollIntoView({block:"center",behavior:"smooth"});
+    const focusable=first.host.querySelector("input:not([type=hidden]),select,textarea,.chip");
+    if(focusable){
+      setTimeout(()=>{try{focusable.focus({preventScroll:true});}catch(e){}},350);
+    }
+  }
+  return !!first;
+}
+
+function entrySummary(entry,m){
+  const parts=[];
+  const vis=computeFieldVisibility(m.fields,entry.values||{});
+  for(const f of m.fields){
+    if(parts.length>=2)break;
+    if(f.type==="table"||vis[f.id]===false)continue;
+    const v=(entry.values||{})[f.id];
+    if(v===undefined||v===null||String(v).trim()==="")continue;
+    const str=String(v).trim().replace(/\s+/g," ");
+    parts.push(str.length>40?str.slice(0,40)+"…":str);
+  }
+  return parts.join(" · ");
+}
+
+function newEntryId(){
+  return "e"+Date.now()+Math.random().toString(36).slice(2,7);
+}
+
+function duplicateEntry(entry){
+  const values=JSON.parse(JSON.stringify(entry.values||{}));
+  /* Tunnus/tila ja vapaa huomio ovat aina kohtakohtaisia. */
+  delete values.paikka;
+  delete values.huomiot;
+  editingEntry={
+    id:newEntryId(),
+    methodId:entry.methodId,
+    values,
+    photos:[],
+    marker:null
+  };
+  editingIsNew=true;
+  view="entryForm";
+  autosave();
+  render();
+  toast("Kopioitu – täytä tunnus/tila ja päivitä arvot");
+}
+
+function updateFooterHeight(){
+  const f=document.getElementById("footer");
+  if(!f)return;
+  document.documentElement.style.setProperty("--footer-h",f.offsetHeight+"px");
+}
+
+function pendingPhotoCount(){
+  let n=0;
+  entries.forEach(e=>(e.photos||[]).forEach(p=>{
+    if(!p.path && p.blob instanceof Blob)n++;
+  }));
+  return n;
+}
+
+function updateNetBanner(){
+  const b=document.getElementById("netBanner");
+  if(b)b.classList.toggle("show",!navigator.onLine);
+}
+window.addEventListener("offline",()=>{
+  updateNetBanner();
+  setSyncStatus("Ei verkkoa – tallennus laitteelle","warn");
+});
+window.addEventListener("online",()=>{
+  updateNetBanner();
+  toast("Yhteys palasi – synkronoidaan pilveen");
+  syncToCloud();
+});
+
+function _renderView(){
 
   const app=
     document.getElementById("app");
@@ -2501,41 +2847,21 @@ function render(){
 
 
     footer.innerHTML=
-      '<button class="btn btn-primary btn-block" id="btnAddMethod">'+
-      '+ Lisää menetelmä'+
-      '</button>'+
-      '<button class="btn btn-outline btn-block" id="btnStyle" style="margin-top:6px;">'+
-      '🎨 Muokkaa Word-ulkoasua'+
-      '</button>'+
-      '<button class="btn btn-ghost btn-block" id="btnClearForm" style="margin-top:6px;">'+
-      'Tyhjennä lomake'+
-      '</button>';
-
-
+      entries.length
+        ?'<div class="footer-row">'+
+          '<button class="btn btn-primary" id="btnAddMethod">+ Lisää menetelmä</button>'+
+          '<button class="btn btn-outline" id="btnExport">Word-muistiinpano</button>'+
+          '</div>'
+        :'<button class="btn btn-primary btn-block" id="btnAddMethod">+ Lisää menetelmä</button>';
     document
       .getElementById("btnAddMethod")
       .onclick=()=>{
         view="methodSelect";
         render();
       };
-
-
-    document
-      .getElementById("btnStyle")
-      .onclick=()=>{
-        window.location.href=
-          "style-editor.html?form="+
-          encodeURIComponent(FORM_KEY)+
-          "&label="+
-          encodeURIComponent(FORM_LABEL)+
-          "&back="+
-          encodeURIComponent("kenttalomake.html");
-      };
-
-
-    document
-      .getElementById("btnClearForm")
-      .onclick=confirmClearForm;
+    const exportBtn=document.getElementById("btnExport");
+    if(exportBtn)exportBtn.onclick=exportWord;
+    app.appendChild(renderMoreMenu());
   }
 
 
@@ -2692,19 +3018,7 @@ function render(){
     app.appendChild(
       renderBack(
         ()=>{
-          view=
-            editingIsNew
-              ?"methodSelect"
-              :"project";
-
-          if(editingIsNew){
-
-            editingEntry=null;
-            editingIsNew=false;
-          }
-
-          autosave();
-          render();
+          if(leaveEntryForm())render();
         },
         editingIsNew
           ?"Vaihda menetelmä"
@@ -2719,47 +3033,61 @@ function render(){
 
 
     footer.innerHTML=
-      (
-        editingIsNew
-          ?""
-          :
-          '<button class="btn btn-danger btn-block" id="btnDeleteEntry" style="margin-bottom:8px;">'+
-          'Poista tämä menetelmä'+
-          '</button>'
-      )+
       '<button class="btn btn-primary btn-block" id="btnSaveEntry">'+
-      'Tallenna menetelmä'+
-      '</button>';
-
-
+      (editingIsNew?'Tallenna menetelmä':'Valmis')+
+      '</button>'+
+      (editingIsNew
+        ?''
+        :'<div class="hint" style="text-align:center;margin-top:6px;">Muutokset tallentuvat automaattisesti</div>');
     document
       .getElementById("btnSaveEntry")
       .onclick=saveEntryForm;
-
-
-    if(!editingIsNew){
-
-      document
-        .getElementById("btnDeleteEntry")
-        .onclick=()=>{
-          deleteCurrentEntry();
-        };
-    }
   }
 }
 
 
 function renderBack(fn,label){
-
   const d=
     el(
-      `<div class="step-back">
+      `<button type="button" class="step-back">
         ‹ ${escapeHtml(label||"Takaisin")}
-      </div>`
+      </button>`
     );
+  d.onclick=()=>{
+    if(guardPushed){
+      history.back();
+    }else{
+      fn();
+    }
+  };
+  return d;
+}
 
-  d.onclick=fn;
-
+function renderMoreMenu(){
+  const d=el(`
+    <details class="card more-menu">
+      <summary>⋯ Lisää toimintoja</summary>
+      <div class="more-body">
+        <button type="button" class="btn btn-outline btn-block" id="btnStyle">🎨 Muokkaa Word-ulkoasua</button>
+        <button type="button" class="btn btn-outline btn-block" id="btnLogout">Kirjaudu ulos</button>
+        <button type="button" class="btn btn-danger btn-block" id="btnClearForm" style="margin-top:10px;">Tyhjennä koko lomake</button>
+      </div>
+    </details>
+  `);
+  d.querySelector("#btnStyle").onclick=()=>{
+    window.location.href=
+      "style-editor.html?form="+
+      encodeURIComponent(FORM_KEY)+
+      "&label="+
+      encodeURIComponent(FORM_LABEL)+
+      "&back="+
+      encodeURIComponent("kenttalomake.html");
+  };
+  d.querySelector("#btnLogout").onclick=async()=>{
+    if(!confirm("Kirjaudutaanko ulos?"))return;
+    try{await window.__supabaseClient.auth.signOut();}catch(err){toast("Uloskirjautuminen epäonnistui");}
+  };
+  d.querySelector("#btnClearForm").onclick=confirmClearForm;
   return d;
 }
 
@@ -2776,7 +3104,7 @@ function renderProjectCard(){
 
         <h2>Kohde</h2>
 
-        <label class="req">
+        <label class="req" for="p_nimi">
           Kohteen nimi / osoite
         </label>
 
@@ -2787,7 +3115,7 @@ function renderProjectCard(){
           placeholder="esim. Asunto Oy Kotikuja 3"
         >
 
-        <label>Tilaaja</label>
+        <label for="p_tilaaja">Tilaaja</label>
 
         <input
           type="text"
@@ -2796,7 +3124,7 @@ function renderProjectCard(){
           placeholder="Tilaajan nimi"
         >
 
-        <label class="req">
+        <label class="req" for="p_tutkija">
           Tutkijan nimi
         </label>
 
@@ -2807,7 +3135,7 @@ function renderProjectCard(){
           placeholder="Tutkimuksen tekijä"
         >
 
-        <label>Päivämäärä</label>
+        <label for="p_pvm">Päivämäärä</label>
 
         <input
           type="date"
@@ -2856,24 +3184,16 @@ function renderProjectCard(){
    ============================================================ */
 
 function renderEntriesCard(){
-
   const c=
     el(`
       <div class="card">
-
         <h2>
           Tehdyt menetelmät
-          <span class="badge">
-            ${entries.length}
-          </span>
+          <span class="badge">${entries.length}</span>
         </h2>
-
       </div>
     `);
-
-
   if(!entries.length){
-
     c.appendChild(
       el(`
         <div class="empty">
@@ -2882,169 +3202,74 @@ function renderEntriesCard(){
         </div>
       `)
     );
-
-  }else{
-
-    entries.forEach((entry,idx)=>{
-
-      const m=
-        METHODS.find(
-          x=>x.id===entry.methodId
-        );
-
-
-      if(!m)return;
-
-
-      const card=
-        el(`
-          <div class="entry-card">
-
-            <div class="entry-top">
-
-              <div>
-
-                <div class="entry-title">
-                  ${idx+1}. ${escapeHtml(m.name)}
-                </div>
-
-                <div class="entry-sub">
-                  ${escapeHtml(
-                    entry.values?.paikka||
-                    "Ei paikkaa merkitty"
-                  )}
-                </div>
-
-              </div>
-
-            </div>
-
-            <div class="entry-actions">
-
-              <button
-                type="button"
-                class="btn btn-outline btn-sm"
-                aria-label="Muokkaa menetelmää"
-              >
-                Muokkaa
-              </button>
-
-            </div>
-
-          </div>
-        `);
-
-
-      if(entry.photos?.length){
-
-        const thumbs=
-          el('<div class="thumbs"></div>');
-
-
-        entry.photos.forEach(p=>{
-
-          const wrapper=
-            el(`
-              <div
-                style="
-                  display:flex;
-                  flex-direction:column;
-                  align-items:center;
-                  width:56px;
-                "
-              >
-                <div class="thumb"></div>
-
-                <div
-                  style="
-                    font-size:9px;
-                    color:#666;
-                    text-align:center;
-                    margin-top:2px;
-                    white-space:nowrap;
-                    overflow:hidden;
-                    text-overflow:ellipsis;
-                    width:56px;
-                  "
-                >
-                  ${escapeHtml(p.caption||"")}
-                </div>
-
-              </div>
-            `);
-
-
-          const thumb=
-            wrapper.querySelector(".thumb");
-
-
-          appendPhotoToThumb(
-            thumb,
-            p
-          );
-
-
-          thumbs.appendChild(
-            wrapper
-          );
-        });
-
-
-        card.appendChild(thumbs);
-      }
-
-
-      card
-        .querySelector("button")
-        .onclick=()=>{
-
-          editingEntry=entry;
-          editingIsNew=false;
-          view="entryForm";
-
-          render();
-        };
-
-
-      c.appendChild(card);
-    });
+    return c;
   }
-
-
-  if(entries.length){
-
-    const r=
+  entries.forEach((entry,idx)=>{
+    const m=METHODS.find(x=>x.id===entry.methodId);
+    if(!m)return;
+    const missing=findMissingRequired(entry,m);
+    const nPh=(entry.photos||[]).length;
+    const meta=[
+      entrySummary(entry,m),
+      nPh?("📷 "+nPh):"",
+      entry.marker?"📍":""
+    ].filter(Boolean).join("  ·  ");
+    const card=
       el(`
-        <div
-          style="
-            margin-top:12px;
-            display:flex;
-            gap:8px;
-          "
-        >
-
-          <button
-            class="btn btn-outline btn-block"
-            id="btnExport"
-          >
-            Muodosta kenttämuistiinpano (Word)
-          </button>
-
+        <div class="entry-card tappable" role="button" tabindex="0"
+             aria-label="Muokkaa: ${escapeAttribute(m.name)}">
+          <div class="entry-top">
+            <div>
+              <div class="entry-title">${idx+1}. ${escapeHtml(m.name)}</div>
+              <div class="entry-sub">${escapeHtml(entry.values?.paikka||"Ei paikkaa merkitty")}</div>
+              ${meta?`<div class="entry-meta">${escapeHtml(meta)}</div>`:""}
+              ${missing.length?`<span class="entry-warn">⚠ ${missing.length} pakollista puuttuu</span>`:""}
+            </div>
+          </div>
+          <div class="entry-actions">
+            <button type="button" class="btn btn-outline btn-sm" data-act="edit">Muokkaa</button>
+            <button type="button" class="btn btn-outline btn-sm" data-act="copy">Kopioi</button>
+          </div>
         </div>
       `);
-
-
-    c.appendChild(r);
-
-
-    const b=
-      r.querySelector("#btnExport");
-
-
-    b.onclick=exportWord;
-  }
-
-
+    if(entry.photos?.length){
+      const thumbs=el('<div class="thumbs"></div>');
+      entry.photos.forEach(p=>{
+        const wrapper=
+          el(`
+            <div style="display:flex;flex-direction:column;align-items:center;width:56px;">
+              <div class="thumb"></div>
+              <div style="font-size:11px;color:#555;text-align:center;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:56px;">${escapeHtml(p.caption||"")}</div>
+            </div>
+          `);
+        appendPhotoToThumb(wrapper.querySelector(".thumb"),p);
+        thumbs.appendChild(wrapper);
+      });
+      card.appendChild(thumbs);
+    }
+    const edit=()=>{
+      editingEntry=entry;
+      editingIsNew=false;
+      view="entryForm";
+      render();
+    };
+    card.onclick=edit;
+    card.onkeydown=e=>{
+      if((e.key==="Enter"||e.key===" ") && e.target===card){
+        e.preventDefault();
+        edit();
+      }
+    };
+    card.querySelector('[data-act="edit"]').onclick=e=>{
+      e.stopPropagation();
+      edit();
+    };
+    card.querySelector('[data-act="copy"]').onclick=e=>{
+      e.stopPropagation();
+      duplicateEntry(entry);
+    };
+    c.appendChild(card);
+  });
   return c;
 }
 
@@ -3127,7 +3352,16 @@ function renderMethodGrid(){
     el('<div class="method-grid"></div>');
 
 
-  METHODS.forEach((m,i)=>{
+  const lastUse={};
+  entries.forEach((e,i)=>{ lastUse[e.methodId]=i; });
+  const order=METHODS
+    .map((m,i)=>({m,i}))
+    .sort((x,y)=>{
+      const lx=lastUse[x.m.id]===undefined?-1:lastUse[x.m.id];
+      const ly=lastUse[y.m.id]===undefined?-1:lastUse[y.m.id];
+      return ly!==lx?ly-lx:x.i-y.i;
+    });
+  order.forEach(({m,i})=>{
 
     const t=
       el(`
@@ -3822,7 +4056,7 @@ function evalCondition(cond,type,rawValue,strictEmpty){
   return evalHintRule(cond,type,rawValue);
 }
 
-function computeFieldVisibility(fields,values){
+function computeFieldVisibility(fields,values,info){
 
   const vis={};
   const byId={};
@@ -3885,6 +4119,7 @@ function computeFieldVisibility(fields,values){
 
       if(evalCondition(j,f.type,values[f.id],true)){
         skipUntil=Math.max(skipUntil,t);
+        if(info && info.jumps)info.jumps[f.id]={from:i,to:t};
         break;
       }
     }
@@ -4162,7 +4397,7 @@ function renderMethodFieldRow(f,idx,fields){
 
             const condRow=el(`
               <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
-                ${condIdx>0?`<span style="font-size:11px;color:#8a8574;flex:0 0 auto;">JA</span>`:""}
+                ${condIdx>0?`<span style="font-size:11px;color:#6b6656;flex:0 0 auto;">JA</span>`:""}
                 <select id="mf_ruleCond_col_${idx}_${ruleIdx}_${condIdx}" style="flex:1;width:auto;">
                   ${cols.map(c=>`
                     <option value="${escapeAttribute(c.id)}" ${c.id===cond.colId?"selected":""}>${escapeHtml(c.label||"")}</option>
@@ -4611,7 +4846,7 @@ function renderMethodFieldRow(f,idx,fields){
 
         const modeLine=el(`<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px;"></div>`);
 
-        modeLine.appendChild(el(`<span style="font-size:12px;color:#8a8574;flex:0 0 auto;">Ehtojen yhdistäminen:</span>`));
+        modeLine.appendChild(el(`<span style="font-size:12px;color:#6b6656;flex:0 0 auto;">Ehtojen yhdistäminen:</span>`));
 
         const modeSel=mkSelect(
           [
@@ -4646,7 +4881,7 @@ function renderMethodFieldRow(f,idx,fields){
         const line=el(`<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;"></div>`);
 
         if(cIdx>0){
-          line.appendChild(el(`<span style="font-size:11px;color:#8a8574;flex:0 0 auto;">${f.showMode==="any"?"TAI":"JA"}</span>`));
+          line.appendChild(el(`<span style="font-size:11px;color:#6b6656;flex:0 0 auto;">${f.showMode==="any"?"TAI":"JA"}</span>`));
         }
 
         const srcSel=mkSelect(items,invalid?"":c.fieldId,"flex:1;width:auto;min-width:120px;");
@@ -4722,7 +4957,7 @@ function renderMethodFieldRow(f,idx,fields){
       const box=el(`<div class="card" style="padding:8px;margin-bottom:8px;background:#fff;"></div>`);
       const line=el(`<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;"></div>`);
 
-      line.appendChild(el(`<span style="font-size:12px;color:#8a8574;flex:0 0 auto;">Jos arvo</span>`));
+      line.appendChild(el(`<span style="font-size:12px;color:#6b6656;flex:0 0 auto;">Jos arvo</span>`));
       line.appendChild(buildOpControl(j,f));
 
       const vc=buildValueControl(j,f);
@@ -4742,7 +4977,7 @@ function renderMethodFieldRow(f,idx,fields){
 
       const line2=el(`<div style="display:flex;gap:6px;align-items:center;margin-top:6px;"></div>`);
 
-      line2.appendChild(el(`<span style="font-size:12px;color:#8a8574;flex:0 0 auto;">siirry kenttään</span>`));
+      line2.appendChild(el(`<span style="font-size:12px;color:#6b6656;flex:0 0 auto;">siirry kenttään</span>`));
 
       const tSel=mkSelect(tItems,invalid?"":j.target,"flex:1;width:auto;min-width:120px;");
 
@@ -4763,7 +4998,7 @@ function renderMethodFieldRow(f,idx,fields){
       line2.appendChild(del);
       box.appendChild(line2);
 
-      box.appendChild(el(`<div style="font-size:12px;color:#8a8574;margin-top:4px;">Välissä olevat kentät piilotetaan.</div>`));
+      box.appendChild(el(`<div style="font-size:12px;color:#6b6656;margin-top:4px;">Välissä olevat kentät piilotetaan.</div>`));
 
       if(invalid && j.target){
         box.appendChild(warnEl("Kohdekenttä ei ole enää tämän kentän jälkeen. Valitse kohde uudelleen tai poista siirtymä."));
@@ -5192,6 +5427,15 @@ function renderEntryForm(){
 
   const container=
     el("<div></div>");
+  const clearErrOnEdit=e=>{
+    const h=e.target.closest && e.target.closest(".has-error");
+    if(h){
+      h.classList.remove("has-error");
+      h.querySelectorAll(".field-error-msg").forEach(n=>n.remove());
+    }
+  };
+  container.addEventListener("input",clearErrOnEdit);
+  container.addEventListener("change",clearErrOnEdit);
 
 
   /*
@@ -5249,22 +5493,35 @@ function renderEntryForm(){
    * jokin arvo muuttuu (ei koko lomaketta uudelleen piirtäen, ettei
    * kohdistus katoa kirjoittaessa).
    */
+  let jumpNotes=[];
   function applyFieldVisibility(){
-
+    const info={jumps:{}};
     const vis=
       computeFieldVisibility(
         m.fields,
-        editingEntry.values
+        editingEntry.values,
+        info
       );
-
     m.fields.forEach(f=>{
-
       const w=fieldWrappers[f.id];
-
       if(w){
         w.style.display=
           vis[f.id]===false?"none":"";
       }
+    });
+    jumpNotes.forEach(n=>n.remove());
+    jumpNotes=[];
+    m.fields.forEach((f,i)=>{
+      const j=info.jumps[f.id];
+      const w=fieldWrappers[f.id];
+      if(!j||!w||vis[f.id]===false)return;
+      const n=j.to-i-1;
+      if(n<=0)return;
+      const note=el(
+        `<div class="jump-note">↷ Vastauksen perusteella ohitetaan ${n} kenttä${n===1?"":"ä"}</div>`
+      );
+      w.after(note);
+      jumpNotes.push(note);
     });
   }
 
@@ -5306,6 +5563,7 @@ function renderEntryForm(){
   /*
    * Valokuvat.
    */
+  function buildPhotoCard(){
   const pc=
     el(`
       <div class="card">
@@ -5376,6 +5634,7 @@ function renderEntryForm(){
 
 
     rm.onclick=async()=>{
+      if(!confirm("Poistetaanko kuva?"))return;
 
       const removed=
         editingEntry.photos.splice(
@@ -5422,8 +5681,7 @@ function renderEntryForm(){
 
 
       autosave();
-
-      render();
+      refreshPhotoCard();
     };
 
 
@@ -5454,7 +5712,7 @@ function renderEntryForm(){
     el(`
       <label
         class="photo-add"
-        title="Ota kuva kameralla"
+        title="Ota kuva kameralla" aria-label="Ota kuva kameralla"
       >
         📷
         <input
@@ -5470,7 +5728,7 @@ function renderEntryForm(){
     el(`
       <label
         class="photo-add"
-        title="Valitse kuvia galleriasta"
+        title="Valitse kuvia galleriasta" aria-label="Valitse kuvia galleriasta"
       >
         🖼
         <input
@@ -5519,7 +5777,15 @@ function renderEntryForm(){
   );
 
 
-  container.appendChild(pc);
+  return pc;
+  }
+  let photoCardEl=buildPhotoCard();
+  container.appendChild(photoCardEl);
+  refreshPhotoCard=()=>{
+    const n=buildPhotoCard();
+    photoCardEl.replaceWith(n);
+    photoCardEl=n;
+  };
 
 
   /*
@@ -5588,8 +5854,17 @@ function renderEntryForm(){
 
 
   container.appendChild(loc);
-
-
+  if(!editingIsNew){
+    const del=el(`
+      <div class="card">
+        <button type="button" class="btn btn-danger btn-block">Poista tämä menetelmä</button>
+      </div>
+    `);
+    del.querySelector("button").onclick=()=>{
+      deleteCurrentEntry();
+    };
+    container.appendChild(del);
+  }
   return container;
 }
 
@@ -5615,6 +5890,19 @@ function renderField(f,values){
 
 
   let ih;
+  const useChips=
+    f.type==="select" &&
+    Array.isArray(f.options) &&
+    f.options.length>=1 &&
+    f.options.length<=4 &&
+    f.options.every(o=>String(o).length<=26);
+  const chipsHtml=
+    useChips
+      ?`<input type="hidden" id="fld_${escapeAttribute(f.id)}" value="${escapeAttribute(val)}">
+        <div class="chip-group" role="radiogroup" aria-labelledby="lbl_${escapeAttribute(f.id)}">
+          ${f.options.map(o=>`<button type="button" class="chip" role="radio" aria-checked="${o===val}" data-val="${escapeAttribute(o)}">${escapeHtml(o)}</button>`).join("")}
+        </div>`
+      :"";
 
 
   if(f.type==="textarea"){
@@ -5628,6 +5916,8 @@ function renderField(f,values){
         >${escapeHtml(val)}</textarea>
       `;
 
+  }else if(useChips){
+    ih=chipsHtml;
   }else if(f.type==="select"){
 
     ih=
@@ -5657,6 +5947,7 @@ function renderField(f,values){
       `
         <input
           type="${escapeAttribute(f.type)}"
+          ${f.type==="number" && f.min!==undefined && Number(f.min)>=0?'inputmode="decimal"':""}
           id="fld_${escapeAttribute(f.id)}"
           autocomplete="off"
           placeholder="${escapeAttribute(f.placeholder||"")}"
@@ -5678,7 +5969,7 @@ function renderField(f,values){
     el(`
       <div class="field-hint-host" style="position:relative;">
 
-        <label class="${f.req?"req":""}">
+        <label class="${f.req?"req":""}" ${useChips?`id="lbl_${escapeAttribute(f.id)}"`:`for="fld_${escapeAttribute(f.id)}"`}>
           ${escapeHtml(f.label)}
         </label>
 
@@ -5772,8 +6063,21 @@ function renderField(f,values){
 
     scheduleAutosave();
   };
-
-
+  if(useChips){
+    const chips=[...w.querySelectorAll(".chip")];
+    chips.forEach(chip=>{
+      chip.onclick=()=>{
+        const o=chip.getAttribute("data-val");
+        const next=(input.value===o)?"":o;
+        input.value=next;
+        chips.forEach(c2=>c2.setAttribute("aria-checked",String(c2.getAttribute("data-val")===next)));
+        values[f.id]=next;
+        refreshHint();
+        scheduleAutosave();
+        input.dispatchEvent(new Event("change",{bubbles:true}));
+      };
+    });
+  }
   return w;
 }
 
@@ -5883,6 +6187,7 @@ function renderTableField(f,values){
                 <td>
                   <input
                     type="${c.type==="number"?"number":"text"}"
+                    aria-label="${escapeAttribute(c.label||"")}"
                     id="tblcell_${escapeAttribute(f.id)}_${rIdx}_${escapeAttribute(c.id)}"
                     autocomplete="off"
                     ${c.type==="number"?'step="any"':""}
@@ -6052,74 +6357,20 @@ function saveEntryForm(){
     );
 
 
-  /* Piilotettuja (ehdolla tai siirtymällä ohitettuja) kenttiä ei vaadita. */
+  const missing=findMissingRequired(editingEntry,m);
+  if(missing.length){
+    showFieldErrors(missing.map(f=>[f,"Pakollinen tieto puuttuu"]));
+    toast("Pakollisia kenttiä puuttuu: "+missing.length);
+    return;
+  }
+  clearFieldErrors();
   const visMap=
     computeFieldVisibility(
       m.fields,
       editingEntry.values
     );
-
   const isVisible=
     f=>visMap[f.id]!==false;
-
-
-  const req=[
-    ...COMMON_FIELDS,
-    ...m.fields
-  ].filter(
-    f=>f.req && isVisible(f)
-  );
-
-
-  const missing=
-    req.filter(f=>{
-
-      if(f.type==="table"){
-
-        const tRows=
-          Array.isArray(editingEntry.values[f.id])
-            ?editingEntry.values[f.id]
-            :[];
-
-        const cols=
-          Array.isArray(f.columns)
-            ?f.columns
-            :[];
-
-        const hasData=
-          tRows.some(r=>
-            cols.some(c=>
-              r[c.id]!==undefined &&
-              r[c.id]!==null &&
-              String(r[c.id]).trim()!==""
-            )
-          );
-
-        return !hasData;
-      }
-
-      const value=
-        editingEntry.values[f.id];
-
-      return (
-        value===undefined ||
-        value===null ||
-        String(value).trim()===""
-      );
-    });
-
-
-  if(missing.length){
-
-    toast(
-      "Täytä pakolliset kentät: "+
-      missing
-        .map(f=>f.label)
-        .join(", ")
-    );
-
-    return;
-  }
 
 
   /*
@@ -6161,11 +6412,9 @@ function saveEntryForm(){
 
           if(!Number.isFinite(n)){
 
-            toast(
-              `Kentän "${f.label} – ${col.label}" arvo ei ole kelvollinen numero.`
-            );
-
-            return;
+            showFieldErrors([[f,`Kentän "${f.label} – ${col.label}" arvo ei ole kelvollinen numero.`]]);
+          toast("Tarkista korostettu kenttä");
+          return;
           }
         }
       }
@@ -6189,11 +6438,9 @@ function saveEntryForm(){
 
       if(!Number.isFinite(n)){
 
-        toast(
-          `Kentän "${f.label}" arvo ei ole kelvollinen numero.`
-        );
-
-        return;
+        showFieldErrors([[f,`Kentän "${f.label}" arvo ei ole kelvollinen numero.`]]);
+          toast("Tarkista korostettu kenttä");
+          return;
       }
 
 
@@ -6202,11 +6449,9 @@ function saveEntryForm(){
         n<Number(f.min)
       ){
 
-        toast(
-          `Kentän "${f.label}" arvo on liian pieni.`
-        );
-
-        return;
+        showFieldErrors([[f,`Kentän "${f.label}" arvo on liian pieni.`]]);
+          toast("Tarkista korostettu kenttä");
+          return;
       }
 
 
@@ -6215,11 +6460,9 @@ function saveEntryForm(){
         n>Number(f.max)
       ){
 
-        toast(
-          `Kentän "${f.label}" arvo on liian suuri.`
-        );
-
-        return;
+        showFieldErrors([[f,`Kentän "${f.label}" arvo on liian suuri.`]]);
+          toast("Tarkista korostettu kenttä");
+          return;
       }
     }
   }
@@ -6593,6 +6836,8 @@ function normalizeImageOrientation(
 
 
 async function addPhotos(files){
+  const target=editingEntry;
+  if(!target)return;
 
   setSyncStatus(
     "Käsitellään kuvia..."
@@ -6630,7 +6875,7 @@ async function addPhotos(files){
         );
 
 
-      editingEntry.photos.push({
+      target.photos.push({
 
         id,
 
@@ -6667,8 +6912,9 @@ async function addPhotos(files){
   if(added){
 
     await autosave();
-
-    render();
+    if(view==="entryForm" && editingEntry===target){
+      refreshPhotoCard();
+    }
 
     toast(
       `${added} kuva${added===1?"":"a"} lisätty`
@@ -10410,6 +10656,11 @@ function waitForSupabaseClient(
 
 (async function bootstrap(){
 
+  const footerEl=document.getElementById("footer");
+  if(footerEl && window.ResizeObserver){
+    new ResizeObserver(updateFooterHeight).observe(footerEl);
+  }
+  updateNetBanner();
   loadCustomMethods();
 
   /*
@@ -10511,6 +10762,8 @@ function waitForSupabaseClient(
   }finally{
 
     clearTimeout(safetyTimer);
+    const splash=document.getElementById("bootSplash");
+    if(splash)splash.remove();
 
     /*
      * Auth-gate voi hallita tätä myös itse.

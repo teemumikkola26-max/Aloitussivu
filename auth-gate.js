@@ -84,19 +84,19 @@
     'font-weight:700;margin-bottom:4px;color:#233043;">' + text + '</div>';
   const subHtml = (text) =>
     '<div style="font-size:.8rem;color:#4a5568;margin-bottom:16px;">' + text + '</div>';
-  const labelHtml = (text) =>
-    '<label style="display:block;font-size:.76rem;font-weight:600;color:#4a5568;margin-bottom:3px;">' + text + '</label>';
+  const labelHtml = (text, forId) =>
+    '<label' + (forId ? ' for="' + forId + '"' : '') + ' style="display:block;font-size:.85rem;font-weight:600;color:#4a5568;margin-bottom:4px;">' + text + '</label>';
   const inputStyle =
     'width:100%;border:1px solid #b9b2a0;border-radius:7px;padding:9px 10px;' +
-    'font-size:.95rem;margin-bottom:12px;box-sizing:border-box;';
+    'font-size:1rem;margin-bottom:12px;box-sizing:border-box;min-height:44px;';
   const errorHtml =
     '<div id="authError" style="display:none;color:#a13030;font-size:.8rem;margin-bottom:10px;"></div>';
   const primaryBtnStyle =
-    'width:100%;border:none;border-radius:8px;padding:11px 10px;font-size:.9rem;' +
+    'width:100%;border:none;border-radius:8px;padding:13px 10px;font-size:1rem;min-height:46px;' +
     'font-weight:600;background:#233043;color:#fff;cursor:pointer;';
   const linkBtnStyle =
     'display:block;width:100%;text-align:center;background:none;border:none;' +
-    'color:#4a5568;font-size:.78rem;margin-top:12px;cursor:pointer;text-decoration:underline;';
+    'color:#4a5568;font-size:.88rem;margin-top:8px;padding:12px 0;cursor:pointer;text-decoration:underline;';
 
   function renderLoginView(overlay){
     overlay.innerHTML =
@@ -104,9 +104,9 @@
         '<form id="authForm">' +
           titleHtml("Kirjaudu sisään") +
           subHtml("Lomake on vain rekisteröityneiden käyttäjien käytössä.") +
-          labelHtml("Sähköposti") +
+          labelHtml("Sähköposti", "authEmail") +
           '<input id="authEmail" type="email" autocomplete="username" required style="' + inputStyle + '">' +
-          labelHtml("Salasana") +
+          labelHtml("Salasana", "authPassword") +
           '<input id="authPassword" type="password" autocomplete="current-password" required style="' + inputStyle + 'margin-bottom:14px;">' +
           errorHtml +
           '<button type="submit" id="authSubmit" style="' + primaryBtnStyle + '">Kirjaudu</button>' +
@@ -127,7 +127,7 @@
       const password = overlay.querySelector("#authPassword").value;
       const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
       if (error){
-        errorBox.textContent = "Kirjautuminen epäonnistui: " + (error.message || "tuntematon virhe") + " (koodi: " + (error.status || "-") + ")";
+        errorBox.textContent = friendlyAuthError(error);
         errorBox.style.display = "block";
         submitBtn.disabled = false;
         submitBtn.textContent = "Kirjaudu";
@@ -148,7 +148,7 @@
         '<form id="forgotForm">' +
           titleHtml("Palauta salasana") +
           subHtml("Syötä sähköpostiosoitteesi. Lähetämme siihen linkin, jolla voit asettaa uuden salasanan.") +
-          labelHtml("Sähköposti") +
+          labelHtml("Sähköposti", "forgotEmail") +
           '<input id="forgotEmail" type="email" autocomplete="username" required style="' + inputStyle + 'margin-bottom:14px;">' +
           errorHtml +
           '<button type="submit" id="forgotSubmit" style="' + primaryBtnStyle + '">Lähetä palautuslinkki</button>' +
@@ -202,9 +202,9 @@
         '<form id="newPasswordForm">' +
           titleHtml("Aseta uusi salasana") +
           subHtml("Syötä uusi salasana tilillesi.") +
-          labelHtml("Uusi salasana") +
+          labelHtml("Uusi salasana", "newPassword1") +
           '<input id="newPassword1" type="password" autocomplete="new-password" required minlength="6" style="' + inputStyle + '">' +
-          labelHtml("Vahvista uusi salasana") +
+          labelHtml("Vahvista uusi salasana", "newPassword2") +
           '<input id="newPassword2" type="password" autocomplete="new-password" required minlength="6" style="' + inputStyle + 'margin-bottom:14px;">' +
           errorHtml +
           '<button type="submit" id="newPasswordSubmit" style="' + primaryBtnStyle + '">Tallenna uusi salasana</button>' +
@@ -239,6 +239,21 @@
     });
   }
 
+  function friendlyAuthError(error){
+    try{ console.warn("Kirjautumisvirhe", error); }catch(e){}
+    const msg = String((error && error.message) || "").toLowerCase();
+    if (!navigator.onLine || msg.indexOf("fetch") !== -1 || msg.indexOf("network") !== -1){
+      return "Ei verkkoyhteyttä. Tarkista yhteys ja yritä uudelleen.";
+    }
+    if (error && error.status === 429){
+      return "Liian monta yritystä. Odota hetki ja yritä uudelleen.";
+    }
+    if ((error && error.status === 400) || msg.indexOf("invalid login") !== -1){
+      return "Väärä sähköposti tai salasana.";
+    }
+    return "Kirjautuminen epäonnistui. Yritä uudelleen.";
+  }
+
   function escapeHtmlLite(s){
     return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   }
@@ -253,22 +268,40 @@
   }
 
   function addLogoutButton(){
+    // Sivut, joilla on oma uloskirjautumispainike (data-inline-logout), eivät
+    // saa kelluvaa nappia, joka peittäisi alapalkin painikkeita.
+    if (document.documentElement.hasAttribute("data-inline-logout")) return;
     if (document.getElementById("logoutBtn")) return;
     const btn = document.createElement("button");
     btn.id = "logoutBtn";
     btn.textContent = "Kirjaudu ulos";
     btn.style.cssText =
-      "position:fixed;bottom:calc(env(safe-area-inset-bottom) + 66px);right:10px;z-index:9998;" +
-      "background:rgba(35,48,67,.85);color:#fff;border:none;" +
-      "border-radius:99px;padding:8px 14px;font-size:.75rem;cursor:pointer;" +
+      "position:fixed;right:10px;z-index:9998;" +
+      "background:rgba(35,48,67,.9);color:#fff;border:none;" +
+      "border-radius:99px;padding:11px 16px;font-size:.85rem;cursor:pointer;" +
       "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;";
+    const bar = document.querySelector("#footer, .footerbar, .bottom-actions");
+    const place = () => {
+      const h = bar ? bar.offsetHeight : 0;
+      btn.style.bottom = "calc(env(safe-area-inset-bottom) + " + (h + 12) + "px)";
+    };
+    place();
+    window.addEventListener("resize", place);
+    if (bar && window.ResizeObserver) new ResizeObserver(place).observe(bar);
     btn.addEventListener("click", async () => {
+      if (!confirm("Kirjaudutaanko ulos?")) return;
       await supabaseClient.auth.signOut();
     });
     document.body.appendChild(btn);
   }
 
+  function removeSplash(){
+    const sp = document.getElementById("bootSplash");
+    if (sp) sp.remove();
+  }
+
   function revealContent(){
+    removeSplash();
     document.documentElement.style.visibility = "visible";
     document.body.style.overflow = "";
     const overlay = document.getElementById("authOverlay");
@@ -277,12 +310,19 @@
   }
 
   function lockContent(){
+    removeSplash();
     document.documentElement.style.visibility = "hidden";
     document.body.style.overflow = "hidden";
     const logoutBtn = document.getElementById("logoutBtn");
     if (logoutBtn) logoutBtn.remove();
     buildOverlay();
   }
+
+  // Hidas yhteys: kerrotaan käyttäjälle, ettei sivu ole jumissa.
+  setTimeout(() => {
+    const sp = document.getElementById("bootSplash");
+    if (sp) sp.innerHTML = "Ladataan…<br><span style='font-size:.85rem;opacity:.8'>Yhteys on hidas, odotetaan vielä hetki.</span>";
+  }, 6000);
 
   ensureReady(() => {
     try {
