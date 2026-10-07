@@ -54,8 +54,8 @@ window.AppUsers = (function(){
   }
 
   function isMissingTable(error){
-    const msg = String((error && error.message) || "").toLowerCase();
-    return (error && (error.code === "42P01" || error.code === "PGRST205")) || msg.indexOf("app_users") !== -1;
+    // Vain oikea "taulua ei löydy" -virhe; muut virheet (esim. oikeudet) näytetään sellaisenaan.
+    return !!(error && (error.code === "42P01" || error.code === "PGRST205"));
   }
 
   async function refresh(){

@@ -459,11 +459,12 @@ function showUserError(msg){
 }
 function userErrText(err){
   const st = window.AppUsers ? window.AppUsers.status() : { tableMissing:false };
-  if (st.tableMissing || (err && /app_users/.test(String(err.message || "")))){
-    return "Käyttäjätaulua ei ole vielä luotu. Aja supabase-kayttajat.sql Supabasen SQL-editorissa.";
+  if (st.tableMissing){
+    return "Supabase ei löydä taulua app_users. Aja supabase-kayttajat.sql SQL-editorissa ja suorita sen jälkeen: notify pgrst, 'reload schema';";
   }
   if (err && err.message && /jo olemassa|Anna käyttäjän/.test(err.message)) return err.message;
-  return "Toiminto epäonnistui. " + friendlyErr(err);
+  const detail = err ? [err.code, err.message].filter(Boolean).join(": ") : "";
+  return "Toiminto epäonnistui" + (detail ? " (" + detail + ")" : "") + ". " + friendlyErr(err);
 }
 function renderUserUi(){
   if (!window.AppUsers) return;
@@ -501,6 +502,7 @@ function renderUserUi(){
   });
   const st = window.AppUsers.status();
   if (st.tableMissing) showUserError(userErrText(null));
+  else if (st.error) showUserError("Käyttäjien haku epäonnistui (" + [st.error.code, st.error.message].filter(Boolean).join(": ") + ")");
 }
 (function initUserUi(){
   const panel = document.getElementById("userPanel");
