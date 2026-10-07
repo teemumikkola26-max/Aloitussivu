@@ -3005,9 +3005,19 @@ function attachDictation(host,input){
     let base=input.value;
     const sep=()=>base && !/\s$/.test(base)?" ":"";
     rec.onresult=e=>{
-      let txt="";
-      for(let i=0;i<e.results.length;i++)txt+=e.results[i][0].transcript;
-      txt=txt.trim();
+      /* Android toistaa saman lauseen kasvavina osittaistuloksina
+         ("testailen", "testailen", "testailen sanelua") -- yhdistetään ne. */
+      const pieces=[];
+      for(let i=0;i<e.results.length;i++){
+        const t=String(e.results[i][0].transcript||"").trim();
+        if(!t)continue;
+        const last=pieces.length?pieces[pieces.length-1]:null;
+        const tl=t.toLowerCase();
+        if(last!==null && tl.startsWith(last.toLowerCase()))pieces[pieces.length-1]=t;
+        else if(last!==null && last.toLowerCase().startsWith(tl))continue;
+        else pieces.push(t);
+      }
+      const txt=pieces.join(" ").trim();
       if(!txt)return;
       input.value=base+sep()+txt;
       input.dispatchEvent(new Event("input",{bubbles:true}));
