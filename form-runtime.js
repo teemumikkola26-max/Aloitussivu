@@ -299,6 +299,270 @@ document.getElementById("cameraInput").addEventListener("change", async (e) => {
   }
 });
 
+/* ---------- Kuvien katselu, poisto, piirto ja muodot ---------- */
+const PV_COLORS = ["#e11d48","#facc15","#2563eb","#16a34a","#ffffff","#111111"];
+
+function pvHtml(html){
+  const d = document.createElement("div");
+  d.innerHTML = html.trim();
+  return d.firstElementChild;
+}
+
+async function openPhotoViewer(itemId, photo){
+  let objUrl = null;
+  let srcUrl = photo.url;
+  if (photo.blob instanceof Blob){
+    objUrl = URL.createObjectURL(photo.blob);
+    srcUrl = objUrl;
+  }
+  if (!srcUrl){ showToast("Kuva ei ole saatavilla."); return; }
+  const img = new Image();
+  img.src = srcUrl;
+  try{ await img.decode(); }catch(err){
+    showToast("Kuvan avaaminen epäonnistui.");
+    if (objUrl) URL.revokeObjectURL(objUrl);
+    return;
+  }
+  const NW = img.naturalWidth, NH = img.naturalHeight;
+  const overlay = pvHtml(`
+    <div class="pv-overlay" role="dialog" aria-modal="true" aria-label="Kuva">
+      <div class="pv-top">
+        <button type="button" class="pv-btn" data-a="close">✕ Sulje</button>
+        <span class="sp"></span>
+        <button type="button" class="pv-btn danger" data-a="del" aria-label="Poista kuva">🗑 Poista</button>
+      </div>
+      <div class="pv-stage"><canvas></canvas></div>
+      <div class="pv-tools">
+        <div class="pv-row" data-row="tools"></div>
+        <div class="pv-row" data-row="colors"></div>
+        <div class="pv-row">
+          <button type="button" class="pv-btn" data-a="undo" disabled>↶ Kumoa</button>
+          <button type="button" class="pv-apply" data-a="apply" disabled>Tallenna merkinnät kuvaan</button>
+        </div>
+      </div>
+    </div>
+  `);
+  const canvas = overlay.querySelector("canvas");
+  canvas.width = NW;
+  canvas.height = NH;
+  const ctx = canvas.getContext("2d");
+  let shapes = [], draft = null, tool = "view", color = PV_COLORS[0], level = 1, activeId = null;
+  const WIDTHS = [.0035,.0065,.011];
+  const lw = () => WIDTHS[level] * Math.max(NW, NH);
+
+  function drawShape(c, sh){
+    c.strokeStyle = sh.color; c.fillStyle = sh.color; c.lineWidth = sh.w;
+    c.lineCap = "round"; c.lineJoin = "round";
+    if (sh.t === "pen"){
+      c.beginPath();
+      sh.p.forEach(([x,y], i) => { i ? c.lineTo(x,y) : c.moveTo(x,y); });
+      if (sh.p.length === 1) c.lineTo(sh.p[0][0] + .1, sh.p[0][1]);
+      c.stroke();
+    } else if (sh.t === "rect"){
+      c.strokeRect(Math.min(sh.x0,sh.x1), Math.min(sh.y0,sh.y1), Math.abs(sh.x1-sh.x0), Math.abs(sh.y1-sh.y0));
+    } else if (sh.t === "ellipse"){
+      c.beginPath();
+      c.ellipse((sh.x0+sh.x1)/2, (sh.y0+sh.y1)/2, Math.max(1,Math.abs(sh.x1-sh.x0)/2), Math.max(1,Math.abs(sh.y1-sh.y0)/2), 0, 0, Math.PI*2);
+      c.stroke();
+    } else if (sh.t === "arrow"){
+      const a = Math.atan2(sh.y1-sh.y0, sh.x1-sh.x0);
+      const head = Math.max(sh.w*4.5, .025*Math.max(NW,NH));
+      c.beginPath(); c.moveTo(sh.x0, sh.y0);
+      c.lineTo(sh.x1 - Math.cos(a)*head*.7, sh.y1 - Math.sin(a)*head*.7);
+      c.stroke();
+      c.beginPath(); c.moveTo(sh.x1, sh.y1);
+      c.lineTo(sh.x1 - head*Math.cos(a-.42), sh.y1 - head*Math.sin(a-.42));
+      c.lineTo(sh.x1 - head*Math.cos(a+.42), sh.y1 - head*Math.sin(a+.42));
+      c.closePath(); c.fill();
+    }
+  }
+  function redraw(){
+    ctx.drawImage(img, 0, 0, NW, NH);
+    shapes.forEach(sh => drawShape(ctx, sh));
+    if (draft) drawShape(ctx, draft);
+  }
+  redraw();
+
+  const undoBtn = overlay.querySelector('[data-a="undo"]');
+  const applyBtn = overlay.querySelector('[data-a="apply"]');
+  const syncButtons = () => { undoBtn.disabled = !shapes.length; applyBtn.disabled = !shapes.length; };
+
+  const toolRow = overlay.querySelector('[data-row="tools"]');
+  function setTool(t){
+    tool = t;
+    [...toolRow.children].forEach(b => b.setAttribute("aria-pressed", String(b.dataset.tool === t)));
+    canvas.style.touchAction = t === "view" ? "auto" : "none";
+  }
+  [["view","✋ Katsele"],["pen","✏ Kynä"],["ellipse","◯ Ympyrä"],["rect","▭ Nelikulmio"],["arrow","➚ Nuoli"]].forEach(([t,label]) => {
+    const b = pvHtml(`<button type="button" class="pv-btn" data-tool="${t}">${label}</button>`);
+    b.onclick = () => setTool(t);
+    toolRow.appendChild(b);
+  });
+  setTool("view");
+
+  const colorRow = overlay.querySelector('[data-row="colors"]');
+  PV_COLORS.forEach((c, i) => {
+    const b = pvHtml(`<button type="button" class="pv-sw" aria-label="Väri ${i+1}" style="background:${c}"></button>`);
+    b.setAttribute("aria-pressed", String(i === 0));
+    b.onclick = () => {
+      color = c;
+      [...colorRow.querySelectorAll(".pv-sw")].forEach(x => x.setAttribute("aria-pressed","false"));
+      b.setAttribute("aria-pressed","true");
+      if (tool === "view") setTool("pen");
+    };
+    colorRow.appendChild(b);
+  });
+  [["S",0],["M",1],["L",2]].forEach(([label, lv]) => {
+    const b = pvHtml(`<button type="button" class="pv-btn" data-w="${lv}" style="min-width:44px;padding:0 8px;">${label}</button>`);
+    b.setAttribute("aria-pressed", String(lv === level));
+    b.onclick = () => {
+      level = lv;
+      [...colorRow.querySelectorAll("[data-w]")].forEach(x => x.setAttribute("aria-pressed", String(Number(x.dataset.w) === lv)));
+    };
+    colorRow.appendChild(b);
+  });
+
+  const toImg = ev => {
+    const rc = canvas.getBoundingClientRect();
+    return [(ev.clientX-rc.left)*NW/rc.width, (ev.clientY-rc.top)*NH/rc.height];
+  };
+  canvas.addEventListener("pointerdown", ev => {
+    if (tool === "view" || !ev.isPrimary) return;
+    ev.preventDefault();
+    activeId = ev.pointerId;
+    try{ canvas.setPointerCapture(ev.pointerId); }catch(e){}
+    const [x,y] = toImg(ev);
+    draft = tool === "pen" ? { t:"pen", color, w:lw(), p:[[x,y]] } : { t:tool, color, w:lw(), x0:x, y0:y, x1:x, y1:y };
+    redraw();
+  });
+  canvas.addEventListener("pointermove", ev => {
+    if (!draft || ev.pointerId !== activeId) return;
+    const [x,y] = toImg(ev);
+    if (draft.t === "pen") draft.p.push([x,y]); else { draft.x1 = x; draft.y1 = y; }
+    redraw();
+  });
+  const endDraw = ev => {
+    if (!draft || ev.pointerId !== activeId) return;
+    const d = draft; draft = null; activeId = null;
+    if (d.t === "pen" || Math.hypot(d.x1-d.x0, d.y1-d.y0) > Math.max(NW,NH)*.01) shapes.push(d);
+    redraw(); syncButtons();
+  };
+  canvas.addEventListener("pointerup", endDraw);
+  canvas.addEventListener("pointercancel", endDraw);
+  undoBtn.onclick = () => { shapes.pop(); redraw(); syncButtons(); };
+
+  const closeViewer = () => { if (objUrl) URL.revokeObjectURL(objUrl); overlay.remove(); };
+  overlay.querySelector('[data-a="close"]').onclick = () => {
+    if (shapes.length && !confirm("Hylätäänkö tallentamattomat merkinnät?")) return;
+    closeViewer();
+  };
+  overlay.querySelector('[data-a="del"]').onclick = () => {
+    if (!confirm("Poistetaanko kuva?")) return;
+    closeViewer();
+    removePhoto(itemId, photo.id);
+  };
+  applyBtn.onclick = async () => {
+    applyBtn.disabled = true;
+    redraw();
+    const blob = await new Promise(res => canvas.toBlob(res, "image/jpeg", .9));
+    if (!blob){ showToast("Tallennus epäonnistui."); applyBtn.disabled = false; return; }
+    try{ URL.revokeObjectURL(photo.url); }catch(e){}
+    photo.blob = blob;
+    photo.url = URL.createObjectURL(blob);
+    photo.w = NW; photo.h = NH;
+    /* Sama tiedostonimi ylikirjoitetaan pilvessä seuraavassa synkronoinnissa. */
+    photo.path = null;
+    if (db){
+      try{ await idbPut("photos", { id: photo.id, itemId, blob, w: NW, h: NH, ts: Date.now() }); }catch(e){ console.warn(e); }
+    }
+    closeViewer();
+    renderSections();
+    saveDebounced();
+    showToast("Merkinnät tallennettu kuvaan.");
+  };
+  document.body.appendChild(overlay);
+}
+
+/* ---------- Sanelu (puheentunnistus) ---------- */
+const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+let activeDictation = null;
+
+function stopDictation(){
+  if (activeDictation){
+    activeDictation.stopped = true;
+    try{ activeDictation.rec.stop(); }catch(e){}
+  }
+}
+document.addEventListener("visibilitychange", () => { if (document.hidden) stopDictation(); });
+
+/* Palauttaa kentän ympäröivän kääreen, jossa on 🎤-painike (jos selain tukee). */
+function withDictation(input){
+  if (!SpeechRec) return input;
+  const wrap = document.createElement("div");
+  wrap.className = "dict-wrap " + (input.tagName === "TEXTAREA" ? "ta" : "in");
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "dictate-btn";
+  btn.textContent = "🎤";
+  btn.title = "Sanele";
+  btn.setAttribute("aria-label", "Sanele");
+  wrap.appendChild(input);
+  wrap.appendChild(btn);
+  const setRec = on => {
+    btn.classList.toggle("rec", on);
+    btn.textContent = on ? "⏹" : "🎤";
+    btn.setAttribute("aria-label", on ? "Lopeta sanelu" : "Sanele");
+  };
+  btn.addEventListener("click", () => {
+    if (activeDictation && activeDictation.btn === btn){ stopDictation(); return; }
+    stopDictation();
+    const rec = new SpeechRec();
+    rec.lang = "fi-FI";
+    rec.continuous = true;
+    rec.interimResults = true;
+    const st = { rec, btn, stopped:false };
+    let base = input.value;
+    const sep = () => base && !/\s$/.test(base) ? " " : "";
+    rec.onresult = e => {
+      /* Android toistaa saman lauseen kasvavina osittaistuloksina -- yhdistetään ne. */
+      const pieces = [];
+      for (let i = 0; i < e.results.length; i++){
+        const t = String(e.results[i][0].transcript || "").trim();
+        if (!t) continue;
+        const last = pieces.length ? pieces[pieces.length-1] : null;
+        const tl = t.toLowerCase();
+        if (last !== null && tl.startsWith(last.toLowerCase())) pieces[pieces.length-1] = t;
+        else if (last !== null && last.toLowerCase().startsWith(tl)) continue;
+        else pieces.push(t);
+      }
+      const txt = pieces.join(" ").trim();
+      if (!txt) return;
+      input.value = base + sep() + txt;
+      input.dispatchEvent(new Event("input", { bubbles:true }));
+    };
+    rec.onerror = e => {
+      const err = e.error;
+      if (err === "no-speech" || err === "aborted") return;
+      st.stopped = true;
+      if (err === "not-allowed" || err === "service-not-allowed") showToast("Mikrofonin käyttö on estetty selaimen asetuksissa.");
+      else if (err === "network") showToast("Sanelu vaatii verkkoyhteyden.");
+      else if (err === "audio-capture") showToast("Mikrofonia ei löytynyt.");
+      else showToast("Sanelu epäonnistui.");
+    };
+    rec.onend = () => {
+      if (!st.stopped && activeDictation === st){
+        base = input.value;
+        try{ rec.start(); return; }catch(e){}
+      }
+      setRec(false);
+      if (activeDictation === st) activeDictation = null;
+    };
+    activeDictation = st;
+    try{ rec.start(); setRec(true); }catch(err){ activeDictation = null; showToast("Sanelua ei voitu käynnistää."); }
+  });
+  return wrap;
+}
+
 function removePhoto(itemId, photoId){
   const arr = state.items[itemId].photos;
   const idx = arr.findIndex(p => p.id === photoId);
@@ -445,6 +709,7 @@ function colorWithAlpha(hex, alpha){
 }
 
 function renderSections(){
+  stopDictation();
   const main = document.getElementById("sections");
   main.innerHTML = "";
   hintHolders = [];
@@ -533,7 +798,7 @@ function renderSections(){
           itState.note = noteTextarea.value;
           saveDebounced();
         });
-        noteArea.appendChild(noteTextarea);
+        noteArea.appendChild(withDictation(noteTextarea));
         itemDiv.appendChild(noteArea);
 
         if (field.allowAction){
@@ -550,7 +815,7 @@ function renderSections(){
             saveDebounced();
           });
           actionArea.appendChild(actionLabel);
-          actionArea.appendChild(actionInput);
+          actionArea.appendChild(withDictation(actionInput));
           itemDiv.appendChild(actionArea);
         }
       } else if (field.type === "table"){
@@ -623,7 +888,7 @@ function renderSections(){
           refreshHints();
           saveDebounced();
         });
-        valArea.appendChild(input);
+        valArea.appendChild((field.type === "text" || (input.tagName === "INPUT" && input.type === "text")) ? withDictation(input) : input);
         if (field.unit){
           const unitSpan = document.createElement("div");
           unitSpan.style.cssText = "font-size:.76rem;color:var(--ink-soft);margin-top:4px;";
@@ -641,11 +906,13 @@ function renderSections(){
           thumb.className = "photo-thumb";
           const img = document.createElement("img");
           img.src = p.url;
-          img.addEventListener("click", () => openPhotoView(p.url));
+          img.addEventListener("click", () => openPhotoViewer(itemId, p));
+          img.alt = "Avaa kuva";
           const rm = document.createElement("button");
           rm.className = "rm";
           rm.textContent = "✕";
-          rm.addEventListener("click", (e) => { e.stopPropagation(); removePhoto(itemId, p.id); });
+          rm.setAttribute("aria-label", "Poista kuva");
+          rm.addEventListener("click", (e) => { e.stopPropagation(); if (confirm("Poistetaanko kuva?")) removePhoto(itemId, p.id); });
           thumb.appendChild(img);
           thumb.appendChild(rm);
           photoRow.appendChild(thumb);
