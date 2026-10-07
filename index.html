@@ -8,6 +8,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.4"></script>
 <script src="auth-gate.js" defer></script>
 <script src="submission-sync.js"></script>
+<script src="users.js"></script>
 <title>Kenttälomakkeet</title>
 <style>
   :root{
@@ -134,6 +135,39 @@
   .dc-btn-primary{ background:var(--brand-deep); color:#fff; border-color:var(--brand-deep); }
   .dc-btn-danger{ color:#a13030; border-color:#a13030; }
 
+  .userbar{
+    max-width:640px; margin:0 auto; padding:12px 14px 0;
+  }
+  .userbar-row{
+    display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+    background:var(--paper-raised); border:1px solid var(--line);
+    border-radius:var(--radius); box-shadow:var(--shadow); padding:10px 12px;
+  }
+  .userbar label{ font-size:.85rem; font-weight:600; color:var(--ink-soft); }
+  .userbar select{
+    flex:1 1 140px; min-width:0; min-height:44px; font-size:1rem;
+    border:1px solid var(--line-strong); border-radius:8px; padding:8px 10px; background:#fff; color:var(--ink);
+  }
+  .userpanel{
+    margin-top:8px; background:var(--paper-raised); border:1px solid var(--line);
+    border-radius:var(--radius); box-shadow:var(--shadow); padding:12px 14px;
+  }
+  .userpanel h2{ font-size:.95rem; margin:0 0 8px; color:var(--brand-deep); }
+  .userpanel .u-hint{ font-size:.8rem; color:var(--ink-soft); margin:0 0 10px; }
+  .u-row{ display:flex; align-items:center; gap:8px; padding:6px 0; border-top:1px solid var(--line); }
+  .u-row:first-of-type{ border-top:none; }
+  .u-name{ flex:1; min-width:0; font-size:.95rem; overflow-wrap:anywhere; }
+  .u-add{ display:flex; gap:8px; margin-top:10px; }
+  .u-add input{
+    flex:1; min-width:0; min-height:44px; font-size:1rem;
+    border:1px solid var(--line-strong); border-radius:8px; padding:8px 10px;
+  }
+  .u-error{ color:#a13030; font-size:.82rem; margin-top:8px; }
+  .group-label{
+    padding:8px 18px 4px; font-size:.88rem; font-weight:700; color:var(--brand-deep);
+  }
+  .group-label .gl-count{ font-weight:400; color:var(--ink-soft); }
+
   footer.note{
     max-width:640px;
     margin:0 auto;
@@ -150,6 +184,24 @@
   <h1>Kenttälomakkeet</h1>
   <div class="sub">Valitse täytettävä lomake. Kaikki lomakkeet toimivat mobiilissa, tallentavat edistymisen laitteelle automaattisesti ja vievät raportin Word-tiedostona (.docx).</div>
 </header>
+
+<div class="userbar">
+  <div class="userbar-row">
+    <label for="activeUserSelect">Käyttäjä tällä laitteella</label>
+    <select id="activeUserSelect"></select>
+    <button type="button" class="dc-btn" id="manageUsersBtn" aria-expanded="false" aria-controls="userPanel">Käyttäjät…</button>
+  </div>
+  <div class="userpanel" id="userPanel" style="display:none;">
+    <h2>Käyttäjät</h2>
+    <p class="u-hint">Samoilla tunnuksilla voi olla useita käyttäjiä. Lomakkeille valitaan suorittaja näistä, ja keskeneräiset lomakkeet ryhmitellään käyttäjittäin.</p>
+    <div id="userList"></div>
+    <div class="u-add">
+      <input type="text" id="newUserName" placeholder="Uuden käyttäjän nimi" autocomplete="off" maxlength="80" aria-label="Uuden käyttäjän nimi">
+      <button type="button" class="dc-btn dc-btn-primary" id="addUserBtn">Lisää</button>
+    </div>
+    <div class="u-error" id="userError" role="alert" style="display:none;"></div>
+  </div>
+</div>
 
 <main id="formList"></main>
 
@@ -338,7 +390,31 @@ async function renderDrafts(){
     return;
   }
   label.style.display = "";
+  // Ryhmittely suorittajan mukaan: laitteen aktiivinen käyttäjä ensin, sitten aakkosjärjestys,
+  // lomakkeet ilman suorittajaa viimeisenä.
+  const NONE = "";
+  const groups = {};
   rows.forEach(sub => {
+    const key = (sub.inspector_name || "").trim() || NONE;
+    (groups[key] = groups[key] || []).push(sub);
+  });
+  const active = window.AppUsers ? window.AppUsers.getActive() : "";
+  const keys = Object.keys(groups).sort((a, b) => {
+    if (a === b) return 0;
+    if (a === NONE) return 1;
+    if (b === NONE) return -1;
+    if (a === active) return -1;
+    if (b === active) return 1;
+    return a.localeCompare(b, "fi");
+  });
+  keys.forEach(key => {
+  const gl = document.createElement("div");
+  gl.className = "group-label";
+  gl.setAttribute("role", "heading");
+  gl.setAttribute("aria-level", "3");
+  gl.innerHTML = escapeHtmlLite(key || "Ei suorittajaa") + ' <span class="gl-count">(' + groups[key].length + ')</span>';
+  wrap.appendChild(gl);
+  groups[key].forEach(sub => {
     const card = document.createElement("div");
     card.className = "draft-card";
     card.innerHTML =
@@ -364,6 +440,7 @@ async function renderDrafts(){
     });
     wrap.appendChild(card);
   });
+  });
 }
 function friendlyErr(e){
   try{ console.warn("Virhe", e); }catch(_){}
@@ -373,6 +450,89 @@ function friendlyErr(e){
 function escapeHtmlLite(s){
   return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 }
+
+/* ---------- Käyttäjät ---------- */
+function showUserError(msg){
+  const box = document.getElementById("userError");
+  box.textContent = msg || "";
+  box.style.display = msg ? "" : "none";
+}
+function userErrText(err){
+  const st = window.AppUsers ? window.AppUsers.status() : { tableMissing:false };
+  if (st.tableMissing || (err && /app_users/.test(String(err.message || "")))){
+    return "Käyttäjätaulua ei ole vielä luotu. Aja supabase-kayttajat.sql Supabasen SQL-editorissa.";
+  }
+  if (err && err.message && /jo olemassa|Anna käyttäjän/.test(err.message)) return err.message;
+  return "Toiminto epäonnistui. " + friendlyErr(err);
+}
+function renderUserUi(){
+  if (!window.AppUsers) return;
+  const names = window.AppUsers.names();
+  const sel = document.getElementById("activeUserSelect");
+  const active = window.AppUsers.getActive();
+  sel.innerHTML = "";
+  const none = document.createElement("option");
+  none.value = ""; none.textContent = names.length ? "— ei valittu —" : "— lisää käyttäjä —";
+  sel.appendChild(none);
+  names.forEach(n => {
+    const o = document.createElement("option");
+    o.value = n; o.textContent = n;
+    sel.appendChild(o);
+  });
+  sel.value = active;
+
+  const list = document.getElementById("userList");
+  list.innerHTML = "";
+  if (!names.length){
+    list.innerHTML = '<div class="empty-state" style="padding:12px 0;">Ei vielä käyttäjiä.</div>';
+  }
+  window.AppUsers.list().forEach(u => {
+    const row = document.createElement("div");
+    row.className = "u-row";
+    row.innerHTML = '<div class="u-name">' + escapeHtmlLite(u.name) + '</div>' +
+      '<button type="button" class="dc-btn dc-btn-danger" data-id="' + escapeHtmlLite(u.id) + '">Poista</button>';
+    row.querySelector("button").addEventListener("click", async () => {
+      if (!confirm('Poistetaanko käyttäjä "' + u.name + '"? Jo tehdyt lomakkeet säilyttävät suorittajan nimen.')) return;
+      showUserError("");
+      try{ await window.AppUsers.remove(u.id); }
+      catch(err){ showUserError(userErrText(err)); }
+    });
+    list.appendChild(row);
+  });
+  const st = window.AppUsers.status();
+  if (st.tableMissing) showUserError(userErrText(null));
+}
+(function initUserUi(){
+  const panel = document.getElementById("userPanel");
+  const toggle = document.getElementById("manageUsersBtn");
+  toggle.addEventListener("click", () => {
+    const open = panel.style.display === "none";
+    panel.style.display = open ? "" : "none";
+    toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    if (open) document.getElementById("newUserName").focus();
+  });
+  document.getElementById("activeUserSelect").addEventListener("change", e => {
+    window.AppUsers.setActive(e.target.value);
+  });
+  async function addUser(){
+    const input = document.getElementById("newUserName");
+    showUserError("");
+    try{
+      const u = await window.AppUsers.add(input.value);
+      input.value = "";
+      if (!window.AppUsers.getActive()) window.AppUsers.setActive(u.name);
+    }catch(err){ showUserError(userErrText(err)); }
+  }
+  document.getElementById("addUserBtn").addEventListener("click", addUser);
+  document.getElementById("newUserName").addEventListener("keydown", e => {
+    if (e.key === "Enter"){ e.preventDefault(); addUser(); }
+  });
+  window.addEventListener("appusers:changed", () => {
+    renderUserUi();
+    if (window.__supabaseClient && window.SubmissionSync) renderDrafts();  // aktiivinen käyttäjä vaikuttaa ryhmien järjestykseen
+  });
+  renderUserUi();
+})();
 
 waitForSupabaseClient(async (supabaseClient) => {
   const { data, error } = await supabaseClient

@@ -27,7 +27,8 @@ function blankDef(){
     ],
     headerFields: [
       { id:genId(), label:"Kohteen osoite", type:"text", full:true },
-      { id:genId(), label:"Päivämäärä", type:"date" }
+      { id:genId(), label:"Päivämäärä", type:"date" },
+      { id:genId(), label:"Tarkastuksen suorittaja", type:"user" }
     ],
     sections: []
   };
@@ -346,7 +347,8 @@ const HEADER_TYPE_LABELS = {
   date:"Päivämäärä",
   textarea:"Pitkä teksti",
   number:"Numero (esim. rakennusvuosi)",
-  select:"Pudotusvalikko (esim. rakennustyyppi)"
+  select:"Pudotusvalikko (esim. rakennustyyppi)",
+  user:"Käyttäjä (valitaan käyttäjistä, esim. tarkastuksen suorittaja)"
 };
 
 function optionsTextarea(field){
