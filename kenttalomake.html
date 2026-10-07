@@ -9226,11 +9226,13 @@ async function openMarkerEditor(entry){
           width:22px;
           height:22px;
           border-radius:50%;
-          border:3px solid #fff;
+          background:#fff;
+          border:4px solid #e11d48;
+          box-sizing:border-box;
           transform:translate(-50%,-50%);
           display:none;
           box-shadow:
-            0 0 0 2px rgba(0,0,0,.4);
+            0 0 0 1px rgba(0,0,0,.25);
           pointer-events:none;
         "
       ></div>
@@ -9582,8 +9584,8 @@ async function openMarkerEditor(entry){
           "2px solid #000";
 
 
-        dot.style.background=
-          pendingColor;
+        dot.style.background="#fff";
+        dot.style.borderColor=pendingColor;
         placeDot();
       };
 
@@ -9595,8 +9597,8 @@ async function openMarkerEditor(entry){
   );
 
 
-  dot.style.background=
-    pendingColor;
+  dot.style.background="#fff";
+        dot.style.borderColor=pendingColor;
 
 
   let pagePtsW=842;
@@ -10475,7 +10477,7 @@ function pdfAddCallout(pdfDoc,page,font,opts){
   const fs=9*k;
   const pad=4*k;
   const r=10*k;
-  const ringW=1.6*k;
+  const ringW=2.4*k;
   const boxBorder=1.2*k;
   const lineW=1.6*k;
   /* Vakiofontti tukee vain WinAnsi-merkkejä. */
@@ -10535,10 +10537,10 @@ function pdfAddCallout(pdfDoc,page,font,opts){
     `${font.encodeText(text).toString()} Tj`,
     "ET"
   );
-  /* Pallo nuolen kärkenä (piirretään viimeisenä, jolloin se peittää viivan pään). */
+  /* Pallo nuolen kärkenä: valkoinen täyttö, valittu väri ääriviivana; piirretään viimeisenä. */
   ops.push(
-    `${rgb} rg`,
-    "1 1 1 RG",
+    "1 1 1 rg",
+    `${rgb} RG`,
     `${f(ringW)} w`,
     `${f(px+r)} ${f(py)} m`,
     `${f(px+r)} ${f(py+r*kk)} ${f(px+r*kk)} ${f(py+r)} ${f(px)} ${f(py+r)} c`,
