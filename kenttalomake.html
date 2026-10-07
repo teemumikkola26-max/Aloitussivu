@@ -750,6 +750,52 @@ input:focus,select:focus,textarea:focus{
 .net-banner.show{
   display:block
 }
+
+/* ---- Kuvien katselu/piirto, sanelu, ilmoitukset ---- */
+.photo-card-item{position:relative}
+.photo-card-item>.rm{
+  position:absolute;top:2px;right:2px;width:30px;height:30px;
+  border-radius:50%;border:none;background:rgba(0,0,0,.75);color:#fff;
+  font-size:19px;line-height:1;cursor:pointer;z-index:2;padding:0
+}
+.photo-card-item .thumb,.photo-card-item .thumb img{cursor:zoom-in}
+.pv-overlay{position:fixed;inset:0;z-index:300;background:#000;display:flex;flex-direction:column}
+.pv-top{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--ink);color:#fff}
+.pv-top .sp{flex:1}
+.pv-btn{
+  background:rgba(255,255,255,.1);border:1px solid #777;color:#fff;border-radius:8px;
+  min-height:44px;padding:0 12px;font-size:14px;font-weight:600;cursor:pointer
+}
+.pv-btn.danger{border-color:#f87171;color:#fecaca}
+.pv-btn[aria-pressed=true]{background:#fff;color:#111;border-color:#fff}
+.pv-btn:disabled{opacity:.4}
+.pv-stage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;background:#1c1c19;overflow:hidden}
+.pv-stage canvas{max-width:100%;max-height:100%;display:block}
+.pv-tools{background:var(--card);padding:8px 10px calc(8px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:8px}
+.pv-tools .pv-btn{background:#fff;color:var(--ink);border-color:var(--line)}
+.pv-tools .pv-btn[aria-pressed=true]{background:var(--ink);color:#fff}
+.pv-row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:center}
+.pv-sw{width:34px;height:34px;border-radius:50%;border:3px solid #fff;box-shadow:0 0 0 1px var(--line);padding:0;cursor:pointer}
+.pv-sw[aria-pressed=true]{border-color:#000;box-shadow:0 0 0 2px #fff,0 0 0 4px #000}
+.has-dictate{position:relative}
+.has-dictate>label{padding-right:80px}
+.dictate-btn{
+  position:absolute;top:-6px;right:36px;width:36px;height:36px;border-radius:50%;
+  border:1.5px solid var(--line);background:#fff;font-size:17px;cursor:pointer;line-height:1;padding:0
+}
+.dictate-btn.rec{background:var(--error);color:#fff;border-color:var(--error);animation:dpulse 1.2s infinite}
+@keyframes dpulse{50%{box-shadow:0 0 0 7px rgba(194,65,12,.25)}}
+.snack{
+  position:fixed;left:12px;right:12px;bottom:calc(var(--footer-h) + 12px);z-index:160;
+  background:#233043;color:#fff;padding:10px 12px;border-radius:12px;
+  display:flex;gap:10px;align-items:center;justify-content:space-between;font-size:14px
+}
+.snack button{
+  background:#fff;color:#233043;border:none;border-radius:8px;min-height:40px;
+  padding:0 14px;font-weight:700;font-size:14px;cursor:pointer
+}
+.setting-row{display:flex;gap:10px;align-items:center;font-size:14px;padding:6px 0}
+.setting-row input{width:22px;height:22px;margin:0}
 </style>
 </head>
 
@@ -2607,6 +2653,394 @@ function escapeAttribute(s){
 /* ============================================================
    NAVIGOINTI (selaimen Takaisin-painike) JA POISTUMISVAROITUKSET
    ============================================================ */
+/* ============================================================
+   KUVIEN KATSELU, POISTO, PIIRTO JA MUODOT
+   ============================================================ */
+const PHOTO_COLORS=["#e11d48","#facc15","#2563eb","#16a34a","#ffffff","#111111"];
+
+function afterPhotoChange(){
+  if(view==="entryForm")refreshPhotoCard();
+  else render();
+}
+
+async function openPhotoViewer(entry,photo,onChange){
+  let objUrl=null;
+  let srcUrl=photo.url;
+  if(photo.blob instanceof Blob){
+    objUrl=URL.createObjectURL(photo.blob);
+    srcUrl=objUrl;
+  }
+  if(!srcUrl){
+    toast("Kuva ei ole saatavilla");
+    return;
+  }
+  const img=new Image();
+  img.src=srcUrl;
+  try{await img.decode();}catch(err){
+    toast("Kuvan avaaminen epäonnistui");
+    if(objUrl)URL.revokeObjectURL(objUrl);
+    return;
+  }
+  const NW=img.naturalWidth,NH=img.naturalHeight;
+  const overlay=el(`
+    <div class="pv-overlay" role="dialog" aria-modal="true" aria-label="Kuva">
+      <div class="pv-top">
+        <button type="button" class="pv-btn" data-a="close">✕ Sulje</button>
+        <span class="sp"></span>
+        <button type="button" class="pv-btn" data-a="save" aria-label="Tallenna kuva laitteelle">⬇ Laitteelle</button>
+        <button type="button" class="pv-btn danger" data-a="del" aria-label="Poista kuva">🗑 Poista</button>
+      </div>
+      <div class="pv-stage"><canvas></canvas></div>
+      <div class="pv-tools">
+        <div class="pv-row" data-row="tools"></div>
+        <div class="pv-row" data-row="colors"></div>
+        <div class="pv-row">
+          <button type="button" class="pv-btn" data-a="undo" disabled>↶ Kumoa</button>
+          <button type="button" class="btn btn-primary" data-a="apply" disabled style="min-height:44px;">Tallenna merkinnät kuvaan</button>
+        </div>
+      </div>
+    </div>
+  `);
+  const canvas=overlay.querySelector("canvas");
+  canvas.width=NW;
+  canvas.height=NH;
+  const ctx=canvas.getContext("2d");
+  let shapes=[];
+  let draft=null;
+  let tool="view";
+  let color=PHOTO_COLORS[0];
+  let level=1;
+  const WIDTHS=[.0035,.0065,.011];
+  const lw=()=>WIDTHS[level]*Math.max(NW,NH);
+
+  function drawShape(c,sh){
+    c.strokeStyle=sh.color;
+    c.fillStyle=sh.color;
+    c.lineWidth=sh.w;
+    c.lineCap="round";
+    c.lineJoin="round";
+    if(sh.t==="pen"){
+      c.beginPath();
+      sh.p.forEach(([x,y],i)=>{i?c.lineTo(x,y):c.moveTo(x,y);});
+      if(sh.p.length===1)c.lineTo(sh.p[0][0]+.1,sh.p[0][1]);
+      c.stroke();
+    }else if(sh.t==="rect"){
+      c.strokeRect(Math.min(sh.x0,sh.x1),Math.min(sh.y0,sh.y1),Math.abs(sh.x1-sh.x0),Math.abs(sh.y1-sh.y0));
+    }else if(sh.t==="ellipse"){
+      c.beginPath();
+      c.ellipse((sh.x0+sh.x1)/2,(sh.y0+sh.y1)/2,Math.max(1,Math.abs(sh.x1-sh.x0)/2),Math.max(1,Math.abs(sh.y1-sh.y0)/2),0,0,Math.PI*2);
+      c.stroke();
+    }else if(sh.t==="arrow"){
+      const a=Math.atan2(sh.y1-sh.y0,sh.x1-sh.x0);
+      const head=Math.max(sh.w*4.5,.025*Math.max(NW,NH));
+      c.beginPath();
+      c.moveTo(sh.x0,sh.y0);
+      c.lineTo(sh.x1-Math.cos(a)*head*.7,sh.y1-Math.sin(a)*head*.7);
+      c.stroke();
+      c.beginPath();
+      c.moveTo(sh.x1,sh.y1);
+      c.lineTo(sh.x1-head*Math.cos(a-.42),sh.y1-head*Math.sin(a-.42));
+      c.lineTo(sh.x1-head*Math.cos(a+.42),sh.y1-head*Math.sin(a+.42));
+      c.closePath();
+      c.fill();
+    }
+  }
+  function redraw(){
+    ctx.drawImage(img,0,0,NW,NH);
+    shapes.forEach(sh=>drawShape(ctx,sh));
+    if(draft)drawShape(ctx,draft);
+  }
+  redraw();
+
+  const undoBtn=overlay.querySelector('[data-a="undo"]');
+  const applyBtn=overlay.querySelector('[data-a="apply"]');
+  function syncButtons(){
+    undoBtn.disabled=!shapes.length;
+    applyBtn.disabled=!shapes.length;
+  }
+
+  const TOOLS=[
+    ["view","✋ Katsele"],
+    ["pen","✏ Kynä"],
+    ["ellipse","◯ Ympyrä"],
+    ["rect","▭ Nelikulmio"],
+    ["arrow","➚ Nuoli"]
+  ];
+  const toolRow=overlay.querySelector('[data-row="tools"]');
+  function setTool(t){
+    tool=t;
+    [...toolRow.children].forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.tool===t)));
+    canvas.style.touchAction=t==="view"?"auto":"none";
+  }
+  TOOLS.forEach(([t,label])=>{
+    const b=el(`<button type="button" class="pv-btn" data-tool="${t}">${label}</button>`);
+    b.onclick=()=>setTool(t);
+    toolRow.appendChild(b);
+  });
+  setTool("view");
+
+  const colorRow=overlay.querySelector('[data-row="colors"]');
+  PHOTO_COLORS.forEach((c,i)=>{
+    const b=el(`<button type="button" class="pv-sw" aria-label="Väri ${i+1}" style="background:${c}"></button>`);
+    b.setAttribute("aria-pressed",String(i===0));
+    b.onclick=()=>{
+      color=c;
+      [...colorRow.querySelectorAll(".pv-sw")].forEach(x=>x.setAttribute("aria-pressed","false"));
+      b.setAttribute("aria-pressed","true");
+      if(tool==="view")setTool("pen");
+    };
+    colorRow.appendChild(b);
+  });
+  [["S",0],["M",1],["L",2]].forEach(([label,lv])=>{
+    const b=el(`<button type="button" class="pv-btn" data-w="${lv}" style="min-width:44px;padding:0 8px;">${label}</button>`);
+    b.setAttribute("aria-pressed",String(lv===level));
+    b.onclick=()=>{
+      level=lv;
+      [...colorRow.querySelectorAll("[data-w]")].forEach(x=>x.setAttribute("aria-pressed",String(Number(x.dataset.w)===lv)));
+    };
+    colorRow.appendChild(b);
+  });
+
+  function toImg(ev){
+    const r=canvas.getBoundingClientRect();
+    return [(ev.clientX-r.left)*NW/r.width,(ev.clientY-r.top)*NH/r.height];
+  }
+  let activeId=null;
+  canvas.addEventListener("pointerdown",ev=>{
+    if(tool==="view"||!ev.isPrimary)return;
+    ev.preventDefault();
+    activeId=ev.pointerId;
+    try{canvas.setPointerCapture(ev.pointerId);}catch(e){}
+    const [x,y]=toImg(ev);
+    draft=tool==="pen"
+      ?{t:"pen",color,w:lw(),p:[[x,y]]}
+      :{t:tool,color,w:lw(),x0:x,y0:y,x1:x,y1:y};
+    redraw();
+  });
+  canvas.addEventListener("pointermove",ev=>{
+    if(!draft||ev.pointerId!==activeId)return;
+    const [x,y]=toImg(ev);
+    if(draft.t==="pen")draft.p.push([x,y]);
+    else{draft.x1=x;draft.y1=y;}
+    redraw();
+  });
+  const endDraw=ev=>{
+    if(!draft||ev.pointerId!==activeId)return;
+    const d=draft;
+    draft=null;
+    activeId=null;
+    const big=d.t==="pen"
+      ?true
+      :Math.hypot(d.x1-d.x0,d.y1-d.y0)>Math.max(NW,NH)*.01;
+    if(big)shapes.push(d);
+    redraw();
+    syncButtons();
+  };
+  canvas.addEventListener("pointerup",endDraw);
+  canvas.addEventListener("pointercancel",endDraw);
+
+  undoBtn.onclick=()=>{shapes.pop();redraw();syncButtons();};
+
+  function closeViewer(){
+    if(objUrl)URL.revokeObjectURL(objUrl);
+    overlay.remove();
+  }
+  overlay.querySelector('[data-a="close"]').onclick=()=>{
+    if(shapes.length && !confirm("Hylätäänkö tallentamattomat merkinnät?"))return;
+    closeViewer();
+  };
+  overlay.querySelector('[data-a="save"]').onclick=async()=>{
+    const blob=photo.blob instanceof Blob?photo.blob:null;
+    if(!blob){toast("Kuvaa ei voi tallentaa");return;}
+    const res=await saveBlobToDevice(blob,photoFileName(blob.type),true);
+    if(res==="download")toast("Kuva ladattu laitteelle");
+  };
+  overlay.querySelector('[data-a="del"]').onclick=async()=>{
+    if(!confirm("Poistetaanko kuva?"))return;
+    const i=entry.photos.indexOf(photo);
+    if(i>=0)entry.photos.splice(i,1);
+    if(photo.path && window.SubmissionSync){
+      try{await window.SubmissionSync.deletePhotoFile(photo.path);}catch(err){console.warn(err);}
+    }
+    if(photo.url){try{URL.revokeObjectURL(photo.url);}catch(err){}}
+    closeViewer();
+    autosave();
+    if(onChange)onChange();
+    toast("Kuva poistettu");
+  };
+  applyBtn.onclick=async()=>{
+    applyBtn.disabled=true;
+    redraw();
+    const blob=await new Promise(res=>canvas.toBlob(res,"image/jpeg",.9));
+    if(!blob){toast("Tallennus epäonnistui");applyBtn.disabled=false;return;}
+    if(photo.url){try{URL.revokeObjectURL(photo.url);}catch(err){}}
+    photo.blob=blob;
+    photo.url=URL.createObjectURL(blob);
+    /* Sama tiedostonimi ylikirjoitetaan pilvessä seuraavassa synkronoinnissa. */
+    photo.path=null;
+    photo.width=NW;
+    photo.height=NH;
+    closeViewer();
+    await autosave();
+    if(onChange)onChange();
+    toast("Merkinnät tallennettu kuvaan");
+  };
+  document.body.appendChild(overlay);
+}
+
+/* ============================================================
+   KUVIEN TALLENNUS LAITTEELLE
+   ============================================================ */
+const DEVICE_SAVE_KEY="kenttalomake_save_camera_to_device";
+const IS_IOS=
+  /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+  (navigator.platform==="MacIntel" && navigator.maxTouchPoints>1);
+
+function deviceSaveEnabled(){
+  try{return localStorage.getItem(DEVICE_SAVE_KEY)!=="0";}catch(e){return true;}
+}
+function setDeviceSave(v){
+  try{localStorage.setItem(DEVICE_SAVE_KEY,v?"1":"0");}catch(e){}
+}
+function photoFileName(type){
+  const d=new Date();
+  const p=n=>String(n).padStart(2,"0");
+  const safe=(project.nimi||"kohde").replace(/[^a-z0-9äöå]+/gi,"_").slice(0,30);
+  const ext=/png/.test(type||"")?"png":"jpg";
+  return `Kenttakuva_${safe}_${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}.${ext}`;
+}
+function downloadBlob(blob,name){
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=url;
+  a.download=name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),4000);
+}
+/* Jakovalikko (iOS: "Tallenna kuva" -> Kuvat) ; muuten tavallinen lataus. */
+async function saveBlobToDevice(blob,name,preferShare){
+  try{
+    const file=new File([blob],name,{type:blob.type||"image/jpeg"});
+    if(preferShare && navigator.canShare && navigator.canShare({files:[file]})){
+      try{
+        await navigator.share({files:[file]});
+        return "share";
+      }catch(e){
+        if(e && e.name==="AbortError")return "cancel";
+      }
+    }
+  }catch(e){}
+  downloadBlob(blob,name);
+  return "download";
+}
+let snackEl=null,snackTimer=null;
+function showSnack(text,actionLabel,onAction){
+  if(snackEl)snackEl.remove();
+  clearTimeout(snackTimer);
+  snackEl=el(`
+    <div class="snack" role="status">
+      <span>${escapeHtml(text)}</span>
+      <button type="button">${escapeHtml(actionLabel)}</button>
+    </div>
+  `);
+  snackEl.querySelector("button").onclick=async()=>{
+    await onAction();
+    if(snackEl){snackEl.remove();snackEl=null;}
+  };
+  document.body.appendChild(snackEl);
+  snackTimer=setTimeout(()=>{if(snackEl){snackEl.remove();snackEl=null;}},15000);
+}
+/* Kameralla otettu alkuperäinen tallennetaan laitteelle ennen pienennystä. */
+function handleCameraOriginal(file){
+  if(!deviceSaveEnabled())return;
+  const name=photoFileName(file.type);
+  if(IS_IOS){
+    /* iOS vaatii napautuksen, jotta Kuvat-sovellukseen tallennus onnistuu. */
+    showSnack("Kuva otettu","Tallenna galleriaan",()=>saveBlobToDevice(file,name,true));
+  }else{
+    downloadBlob(file,name);
+    toast("Kuva tallennettu myös laitteelle (Lataukset)");
+  }
+}
+
+/* ============================================================
+   SANELU (puheentunnistus)
+   ============================================================ */
+const SpeechRec=window.SpeechRecognition||window.webkitSpeechRecognition;
+let activeDictation=null;
+
+function stopDictation(){
+  if(activeDictation){
+    activeDictation.stopped=true;
+    try{activeDictation.rec.stop();}catch(e){}
+  }
+}
+document.addEventListener("visibilitychange",()=>{
+  if(document.hidden)stopDictation();
+});
+
+function attachDictation(host,input){
+  if(!SpeechRec)return;
+  const btn=el(`<button type="button" class="dictate-btn" aria-label="Sanele" title="Sanele">🎤</button>`);
+  host.classList.add("has-dictate");
+  host.appendChild(btn);
+  const setRec=on=>{
+    btn.classList.toggle("rec",on);
+    btn.textContent=on?"⏹":"🎤";
+    btn.setAttribute("aria-label",on?"Lopeta sanelu":"Sanele");
+  };
+  btn.onclick=()=>{
+    if(activeDictation && activeDictation.btn===btn){
+      stopDictation();
+      return;
+    }
+    stopDictation();
+    const rec=new SpeechRec();
+    rec.lang="fi-FI";
+    rec.continuous=true;
+    rec.interimResults=true;
+    const st={rec,btn,stopped:false};
+    let base=input.value;
+    const sep=()=>base && !/\s$/.test(base)?" ":"";
+    rec.onresult=e=>{
+      let txt="";
+      for(let i=0;i<e.results.length;i++)txt+=e.results[i][0].transcript;
+      txt=txt.trim();
+      if(!txt)return;
+      input.value=base+sep()+txt;
+      input.dispatchEvent(new Event("input",{bubbles:true}));
+    };
+    rec.onerror=e=>{
+      const err=e.error;
+      if(err==="no-speech"||err==="aborted")return;
+      st.stopped=true;
+      if(err==="not-allowed"||err==="service-not-allowed")toast("Mikrofonin käyttö on estetty selaimen asetuksissa");
+      else if(err==="network")toast("Sanelu vaatii verkkoyhteyden");
+      else if(err==="audio-capture")toast("Mikrofonia ei löytynyt");
+      else toast("Sanelu epäonnistui");
+    };
+    rec.onend=()=>{
+      if(!st.stopped && activeDictation===st){
+        /* Selain päättää tunnistuksen hiljaisuuden jälkeen -- jatketaan. */
+        base=input.value;
+        try{rec.start();return;}catch(e){}
+      }
+      setRec(false);
+      if(activeDictation===st)activeDictation=null;
+    };
+    activeDictation=st;
+    try{
+      rec.start();
+      setRec(true);
+    }catch(err){
+      activeDictation=null;
+      toast("Sanelua ei voitu käynnistää");
+    }
+  };
+}
+
 let guardPushed=false;
 let refreshPhotoCard=()=>{};
 let programmaticBack=false;
@@ -2814,6 +3248,7 @@ window.addEventListener("online",()=>{
 });
 
 function _renderView(){
+  stopDictation();
 
   const app=
     document.getElementById("app");
@@ -3068,6 +3503,7 @@ function renderMoreMenu(){
     <details class="card more-menu">
       <summary>⋯ Lisää toimintoja</summary>
       <div class="more-body">
+        <label class="setting-row"><input type="checkbox" id="chkDeviceSave"> Tallenna kamerakuvat myös laitteelle</label>
         <button type="button" class="btn btn-outline btn-block" id="btnStyle">🎨 Muokkaa Word-ulkoasua</button>
         <button type="button" class="btn btn-outline btn-block" id="btnLogout">Kirjaudu ulos</button>
         <button type="button" class="btn btn-danger btn-block" id="btnClearForm" style="margin-top:10px;">Tyhjennä koko lomake</button>
@@ -3086,6 +3522,12 @@ function renderMoreMenu(){
   d.querySelector("#btnLogout").onclick=async()=>{
     if(!confirm("Kirjaudutaanko ulos?"))return;
     try{await window.__supabaseClient.auth.signOut();}catch(err){toast("Uloskirjautuminen epäonnistui");}
+  };
+  const chk=d.querySelector("#chkDeviceSave");
+  chk.checked=deviceSaveEnabled();
+  chk.onchange=()=>{
+    setDeviceSave(chk.checked);
+    toast(chk.checked?"Kamerakuvat tallennetaan myös laitteelle":"Kamerakuvia ei tallenneta laitteelle");
   };
   d.querySelector("#btnClearForm").onclick=confirmClearForm;
   return d;
@@ -3243,6 +3685,13 @@ function renderEntriesCard(){
             </div>
           `);
         appendPhotoToThumb(wrapper.querySelector(".thumb"),p);
+        wrapper.style.cursor="zoom-in";
+        wrapper.setAttribute("role","button");
+        wrapper.setAttribute("aria-label","Avaa kuva");
+        wrapper.onclick=ev=>{
+          ev.stopPropagation();
+          openPhotoViewer(entry,p,()=>render());
+        };
         thumbs.appendChild(wrapper);
       });
       card.appendChild(thumbs);
@@ -5589,18 +6038,13 @@ function renderEntryForm(){
       el(`
         <div class="photo-card-item">
 
-          <div class="thumb">
-
-            <button
-              type="button"
-              class="rm"
-              aria-label="Poista kuva"
-              title="Poista kuva"
-            >
-              ×
-            </button>
-
-          </div>
+          <div class="thumb" role="button" tabindex="0" aria-label="Avaa kuva"></div>
+          <button
+            type="button"
+            class="rm"
+            aria-label="Poista kuva"
+            title="Poista kuva"
+          >×</button>
 
           <input
             type="text"
@@ -5627,6 +6071,13 @@ function renderEntryForm(){
       thumb,
       p
     );
+    thumb.onclick=()=>openPhotoViewer(editingEntry,p,afterPhotoChange);
+    thumb.onkeydown=ev=>{
+      if(ev.key==="Enter"||ev.key===" "){
+        ev.preventDefault();
+        openPhotoViewer(editingEntry,p,afterPhotoChange);
+      }
+    };
 
 
     caption.value=
@@ -5756,7 +6207,7 @@ function renderEntryForm(){
 
         if(!fs.length)return;
 
-        addPhotos(fs);
+        addPhotos(fs,inp.hasAttribute("capture"));
       };
   });
 
@@ -6077,6 +6528,9 @@ function renderField(f,values){
         input.dispatchEvent(new Event("change",{bubbles:true}));
       };
     });
+  }
+  if(!useChips && (f.type==="textarea"||f.type==="text")){
+    attachDictation(w,input);
   }
   return w;
 }
@@ -6835,7 +7289,7 @@ function normalizeImageOrientation(
 }
 
 
-async function addPhotos(files){
+async function addPhotos(files,fromCamera){
   const target=editingEntry;
   if(!target)return;
 
@@ -6848,6 +7302,7 @@ async function addPhotos(files){
 
 
   for(const file of files){
+    if(fromCamera)handleCameraOriginal(file);
 
     try{
 
@@ -8616,7 +9071,7 @@ async function openMarkerEditor(entry){
       >
 
         <span>
-          Napauta pohjakuvasta sijainti
+          Napauta kohde pohjakuvasta – vedä tekstilaatikko paikalleen
         </span>
 
         <button
@@ -8772,9 +9227,17 @@ async function openMarkerEditor(entry){
     `);
 
 
-  canvasWrap.appendChild(
-    dot
-  );
+  const SVGNS="http://www.w3.org/2000/svg";
+  const lineSvg=document.createElementNS(SVGNS,"svg");
+  lineSvg.style.cssText="position:absolute;left:0;top:0;pointer-events:none;overflow:visible;display:none;";
+  const lineEl=document.createElementNS(SVGNS,"line");
+  lineEl.setAttribute("stroke-linecap","round");
+  lineSvg.appendChild(lineEl);
+  canvasWrap.appendChild(lineSvg);
+  const boxEl=el(`<div style="position:absolute;transform:translate(-50%,-50%);background:#fff;border:2px solid #000;border-radius:3px;font-weight:700;color:#1f1f1f;white-space:nowrap;padding:2px 6px;touch-action:none;cursor:grab;display:none;user-select:none;-webkit-user-select:none;z-index:3;font-family:Arial,Helvetica,sans-serif;"></div>`);
+  canvasWrap.appendChild(boxEl);
+  dot.style.zIndex="4";
+  canvasWrap.appendChild(dot);
 
 
   stage.appendChild(
@@ -9111,6 +9574,7 @@ async function openMarkerEditor(entry){
 
         dot.style.background=
           pendingColor;
+        placeDot();
       };
 
 
@@ -9125,6 +9589,25 @@ async function openMarkerEditor(entry){
     pendingColor;
 
 
+  let pagePtsW=842;
+  let pagePtsH=595;
+  let boxOff=
+    entry.marker &&
+    typeof entry.marker.bdx==="number" &&
+    typeof entry.marker.bdy==="number"
+      ?{dx:entry.marker.bdx,dy:entry.marker.bdy}
+      :null;
+  const entryNo=
+    (entries.indexOf(entry)>=0?entries.indexOf(entry):entries.length)+1;
+  async function refreshPagePts(){
+    try{
+      const doc=await getPdfDocument(floorPlanBlob);
+      const pg=await doc.getPage(currentPage);
+      const vp=pg.getViewport({scale:1});
+      pagePtsW=vp.width;
+      pagePtsH=vp.height;
+    }catch(err){}
+  }
   let baseCssWidth=0;
   let numPages=1;
   let zoomLevel=1;
@@ -9133,40 +9616,97 @@ async function openMarkerEditor(entry){
 
 
   function placeDot(){
-
     if(
       !pending ||
       pending.page!==currentPage
     ){
-
       dot.style.display="none";
-
+      boxEl.style.display="none";
+      lineSvg.style.display="none";
       return;
     }
-
-
-    dot.style.display="block";
-
-
     const w=
       canvas.clientWidth||
       canvas.width;
-
-
     const h=
       canvas.clientHeight||
       canvas.height;
-
-
-    dot.style.left=
-      (pending.x*w)+"px";
-
-
-    dot.style.top=
-      (pending.y*h)+"px";
+    const sc=w/pagePtsW;
+    const k=Math.max(1,Math.min(3,Math.max(pagePtsW,pagePtsH)/842));
+    const dia=Math.max(14,Math.min(44,2*10*k*sc));
+    const tx=pending.x*w;
+    const ty=pending.y*h;
+    dot.style.display="block";
+    dot.style.width=dia+"px";
+    dot.style.height=dia+"px";
+    dot.style.left=tx+"px";
+    dot.style.top=ty+"px";
+    boxEl.style.display="block";
+    boxEl.style.fontSize=Math.max(10,9*k*sc)+"px";
+    boxEl.style.borderColor=pendingColor;
+    boxEl.textContent=labelInput.value.trim()||String(entryNo);
+    const bw=boxEl.offsetWidth;
+    const bh=boxEl.offsetHeight;
+    let cx,cy;
+    if(boxOff){
+      cx=tx+boxOff.dx*w;
+      cy=ty+boxOff.dy*h;
+    }else{
+      cx=tx+dia/2+8+bw/2;
+      cy=ty;
+    }
+    boxEl.style.left=cx+"px";
+    boxEl.style.top=cy+"px";
+    const dx=tx-cx;
+    const dy=ty-cy;
+    let ax=cx,ay=cy,show=false;
+    if(dx!==0||dy!==0){
+      const tX=dx!==0?(bw/2)/Math.abs(dx):Infinity;
+      const tY=dy!==0?(bh/2)/Math.abs(dy):Infinity;
+      const t=Math.min(tX,tY);
+      if(t<1){
+        ax=cx+dx*t;
+        ay=cy+dy*t;
+        show=true;
+      }
+    }
+    lineSvg.setAttribute("width",w);
+    lineSvg.setAttribute("height",h);
+    lineSvg.style.display=show?"block":"none";
+    lineEl.setAttribute("x1",ax);
+    lineEl.setAttribute("y1",ay);
+    lineEl.setAttribute("x2",tx);
+    lineEl.setAttribute("y2",ty);
+    lineEl.setAttribute("stroke",pendingColor);
+    lineEl.setAttribute("stroke-width",Math.max(2,1.6*k*sc));
   }
-
-
+  let boxDrag=null;
+  boxEl.addEventListener("pointerdown",ev=>{
+    if(!ev.isPrimary)return;
+    ev.stopPropagation();
+    ev.preventDefault();
+    boxDrag={id:ev.pointerId};
+    try{boxEl.setPointerCapture(ev.pointerId);}catch(err){}
+    boxEl.style.cursor="grabbing";
+  });
+  boxEl.addEventListener("pointermove",ev=>{
+    if(!boxDrag||ev.pointerId!==boxDrag.id||!pending)return;
+    const rc=canvas.getBoundingClientRect();
+    const fx=Math.min(1,Math.max(0,(ev.clientX-rc.left)/rc.width));
+    const fy=Math.min(1,Math.max(0,(ev.clientY-rc.top)/rc.height));
+    boxOff={dx:fx-pending.x,dy:fy-pending.y};
+    placeDot();
+  });
+  const endBoxDrag=ev=>{
+    if(boxDrag && ev.pointerId===boxDrag.id){
+      boxDrag=null;
+      boxEl.style.cursor="grab";
+      lastDragEnd=performance.now();
+    }
+  };
+  boxEl.addEventListener("pointerup",endBoxDrag);
+  boxEl.addEventListener("pointercancel",endBoxDrag);
+  labelInput.addEventListener("input",placeDot);
   function layoutStage(){
 
     const overflowsX=
@@ -9256,6 +9796,8 @@ async function openMarkerEditor(entry){
 
       layoutStage();
 
+      placeDot();
+      await refreshPagePts();
       placeDot();
 
     }catch(err){
@@ -9829,18 +10371,16 @@ async function openMarkerEditor(entry){
 
 
       entry.marker={
-
         x:pending.x,
-
         y:pending.y,
-
         page:pending.page,
-
         color:pendingColor,
-
-        label:
-          labelInput.value.trim()
+        label:labelInput.value.trim()
       };
+      if(boxOff){
+        entry.marker.bdx=boxOff.dx;
+        entry.marker.bdy=boxOff.dy;
+      }
 
 
       autosave();
@@ -9911,341 +10451,126 @@ function pdfAddAnnotToPage(context,page,ref){
 
 
 /*
- * Piirtää täytetyn + ääriviivallisen ympyrän polkuna (Bezier-approksimaatio)
- * annotaation appearance streamiin (AP/N). Koordinaatit ovat lomakkeen
- * omassa, paikallisessa (0,0)-(size,size) -koordinaatistossa.
+ * Nuolitekstilaatikko: yksi FreeText-annotaatio (callout), jossa tekstilaatikko,
+ * nuoli ja nuolen kärkenä oleva pallo ovat samaa objektia. Pohjakuvan
+ * mittakaava (k) suurentaa merkintää isoilla piirustusarkeilla.
+ * opts: x,y (kärki), text, color, k, boxCx/boxCy (laatikon keskipiste, valinnainen),
+ *       subj, nameId
  */
-function pdfCircleAppearanceOps(size,radius,fillCol,borderW){
-
-  const cx=size/2;
-  const cy=size/2;
-  const k=0.5523;
-
-  return [
-    "q",
-    `${fillCol.r.toFixed(3)} ${fillCol.g.toFixed(3)} ${fillCol.b.toFixed(3)} rg`,
-    "1 1 1 RG",
-    `${borderW} w`,
-    `${(cx+radius).toFixed(2)} ${cy.toFixed(2)} m`,
-    `${(cx+radius).toFixed(2)} ${(cy+radius*k).toFixed(2)} ${(cx+radius*k).toFixed(2)} ${(cy+radius).toFixed(2)} ${cx.toFixed(2)} ${(cy+radius).toFixed(2)} c`,
-    `${(cx-radius*k).toFixed(2)} ${(cy+radius).toFixed(2)} ${(cx-radius).toFixed(2)} ${(cy+radius*k).toFixed(2)} ${(cx-radius).toFixed(2)} ${cy.toFixed(2)} c`,
-    `${(cx-radius).toFixed(2)} ${(cy-radius*k).toFixed(2)} ${(cx-radius*k).toFixed(2)} ${(cy-radius).toFixed(2)} ${cx.toFixed(2)} ${(cy-radius).toFixed(2)} c`,
-    `${(cx+radius*k).toFixed(2)} ${(cy-radius).toFixed(2)} ${(cx+radius).toFixed(2)} ${(cy-radius*k).toFixed(2)} ${(cx+radius).toFixed(2)} ${cy.toFixed(2)} c`,
-    "b",
-    "Q"
-  ].join("\n");
-}
-
-
-/*
- * Lisää sijaintimerkinnän ympyrän Circle-annotaationa (aidosti muokattava
- * Acrobatissa) + siihen liitetyn Popup-annotaation, jonka Contents-kenttä
- * kertoo mihin menetelmään merkintä liittyy.
- */
-function pdfAddCircleMarker(pdfDoc,page,opts){
-
-  const context=pdfDoc.context;
-  const PDFName=PDFLib.PDFName;
-  const PDFString=PDFLib.PDFString;
-
-  const borderW=1.6;
-  const pad=borderW+2;
-  const size=2*(opts.radius+pad);
-
-  const ops=
-    pdfCircleAppearanceOps(
-      size,
-      opts.radius,
-      opts.color,
-      borderW
-    );
-
-  const apRef=
-    context.register(
-      context.stream(ops,{
-        Type:"XObject",
-        Subtype:"Form",
-        FormType:1,
-        BBox:[0,0,size,size],
-        Matrix:[1,0,0,1,0,0],
-        Resources:{}
-      })
-    );
-
-  const rect=[
-    opts.x-size/2,
-    opts.y-size/2,
-    opts.x+size/2,
-    opts.y+size/2
-  ];
-
-  const annotDict=
-    context.obj({
-      Type:"Annot",
-      Subtype:"Circle",
-      Rect:rect,
-      C:[1,1,1],
-      IC:[opts.color.r,opts.color.g,opts.color.b],
-      CA:1,
-      BS:{W:borderW},
-      F:4,
-      Contents:PDFString.of(opts.contents||""),
-      T:PDFString.of("Kenttälomake"),
-      M:PDFString.of(pdfDateString()),
-      NM:PDFString.of(opts.nameId),
-      AP:{N:apRef}
-    });
-
-  const ref=
-    context.register(annotDict);
-
-  pdfAddAnnotToPage(context,page,ref);
-
-
-  /*
-   * Popup-annotaatio helpottaa merkinnän tietojen lukemista
-   * Acrobatin kommenttipaneelista.
-   */
-  const popupDict=
-    context.obj({
-      Type:"Annot",
-      Subtype:"Popup",
-      Rect:[
-        rect[2]+10,
-        rect[1],
-        rect[2]+220,
-        rect[1]+90
-      ],
-      Parent:ref,
-      Open:false
-    });
-
-  const popupRef=
-    context.register(popupDict);
-
-  pdfAddAnnotToPage(context,page,popupRef);
-
-  annotDict.set(
-    PDFName.of("Popup"),
-    popupRef
-  );
-
-  return {rect,size};
-}
-
-
-/*
- * Lisää vapaasti muokattavan tekstilaatikon (FreeText-annotaatio),
- * jossa on valkoinen tausta, värillinen reunus ja tunnisteteksti.
- * Käytetään kun käyttäjä on antanut merkinnälle oman tunnisteen.
- */
-function pdfAddLabelBox(pdfDoc,page,font,opts){
-
+function pdfAddCallout(pdfDoc,page,font,opts){
   const context=pdfDoc.context;
   const PDFString=PDFLib.PDFString;
-
-  const fs=9;
-  const boxPad=4;
-
-  const encoded=
-    font.encodeText(opts.text);
-
-  const tw=
-    font.widthOfTextAtSize(
-      opts.text,
-      fs
-    );
-
-  const boxW=tw+boxPad*2;
-  const boxH=fs+boxPad*2;
-
-  const ops=[
-    "q",
+  const PDFHexString=PDFLib.PDFHexString;
+  const k=opts.k||1;
+  const fs=9*k;
+  const pad=4*k;
+  const r=10*k;
+  const ringW=1.6*k;
+  const boxBorder=1.2*k;
+  const lineW=1.6*k;
+  /* Vakiofontti tukee vain WinAnsi-merkkejä. */
+  const text=String(opts.text||"").replace(/[^\x20-\x7E\u00A0-\u00FF]/g,"?");
+  const tw=font.widthOfTextAtSize(text,fs);
+  const boxW=tw+pad*2;
+  const boxH=fs+pad*2;
+  let cx=opts.boxCx;
+  let cy=opts.boxCy;
+  if(cx===undefined||cy===undefined){
+    cx=opts.x+r+14*k+boxW/2;
+    cy=opts.y;
+  }
+  const bl=cx-boxW/2;
+  const bb=cy-boxH/2;
+  /* Nuolen alkupiste: laatikon reunan ja kärkeen osoittavan suoran leikkaus. */
+  const dx=opts.x-cx;
+  const dy=opts.y-cy;
+  let ax=cx,ay=cy,hasLine=false;
+  if(dx!==0||dy!==0){
+    const tX=dx!==0?(boxW/2)/Math.abs(dx):Infinity;
+    const tY=dy!==0?(boxH/2)/Math.abs(dy):Infinity;
+    const t=Math.min(tX,tY);
+    if(t<1){
+      ax=cx+dx*t;
+      ay=cy+dy*t;
+      hasLine=true;
+    }
+  }
+  const m=r+ringW+1;
+  const minX=Math.min(bl,opts.x-m);
+  const minY=Math.min(bb,opts.y-m);
+  const maxX=Math.max(bl+boxW,opts.x+m);
+  const maxY=Math.max(bb+boxH,opts.y+m);
+  const rect=[minX,minY,maxX,maxY];
+  const col=opts.color;
+  const rgb=`${col.r.toFixed(3)} ${col.g.toFixed(3)} ${col.b.toFixed(3)}`;
+  const f=n=>n.toFixed(2);
+  const kk=0.5523;
+  const px=opts.x,py=opts.y;
+  const ops=["q"];
+  if(hasLine){
+    ops.push(`${rgb} RG`,`${f(lineW)} w`,"1 J",`${f(ax)} ${f(ay)} m`,`${f(px)} ${f(py)} l`,"S");
+  }
+  ops.push(
     "1 1 1 rg",
-    `0 0 ${boxW.toFixed(2)} ${boxH.toFixed(2)} re`,
+    `${f(bl)} ${f(bb)} ${f(boxW)} ${f(boxH)} re`,
     "f",
-    `${opts.color.r.toFixed(3)} ${opts.color.g.toFixed(3)} ${opts.color.b.toFixed(3)} RG`,
-    "1.2 w",
-    `0.6 0.6 ${(boxW-1.2).toFixed(2)} ${(boxH-1.2).toFixed(2)} re`,
+    `${rgb} RG`,
+    `${f(boxBorder)} w`,
+    `${f(bl+boxBorder/2)} ${f(bb+boxBorder/2)} ${f(boxW-boxBorder)} ${f(boxH-boxBorder)} re`,
     "S",
     "BT",
-    `/F1 ${fs} Tf`,
+    `/F1 ${f(fs)} Tf`,
     "0.12 0.12 0.12 rg",
-    `${boxPad.toFixed(2)} ${(boxPad-1).toFixed(2)} Td`,
-    `${encoded.toString()} Tj`,
-    "ET",
+    `${f(bl+pad)} ${f(bb+pad-k)} Td`,
+    `${font.encodeText(text).toString()} Tj`,
+    "ET"
+  );
+  /* Pallo nuolen kärkenä (piirretään viimeisenä, jolloin se peittää viivan pään). */
+  ops.push(
+    `${rgb} rg`,
+    "1 1 1 RG",
+    `${f(ringW)} w`,
+    `${f(px+r)} ${f(py)} m`,
+    `${f(px+r)} ${f(py+r*kk)} ${f(px+r*kk)} ${f(py+r)} ${f(px)} ${f(py+r)} c`,
+    `${f(px-r*kk)} ${f(py+r)} ${f(px-r)} ${f(py+r*kk)} ${f(px-r)} ${f(py)} c`,
+    `${f(px-r)} ${f(py-r*kk)} ${f(px-r*kk)} ${f(py-r)} ${f(px)} ${f(py-r)} c`,
+    `${f(px+r*kk)} ${f(py-r)} ${f(px+r)} ${f(py-r*kk)} ${f(px+r)} ${f(py)} c`,
+    "b",
     "Q"
-  ].join("\n");
-
-  const apRef=
-    context.register(
-      context.stream(ops,{
-        Type:"XObject",
-        Subtype:"Form",
-        FormType:1,
-        BBox:[0,0,boxW,boxH],
-        Matrix:[1,0,0,1,0,0],
-        Resources:{Font:{F1:font.ref}}
-      })
-    );
-
-  const rect=[
-    opts.x,
-    opts.y,
-    opts.x+boxW,
-    opts.y+boxH
-  ];
-
-  const annotDict=
-    context.obj({
-      Type:"Annot",
-      Subtype:"FreeText",
-      Rect:rect,
-      Contents:PDFString.of(opts.text),
-      DA:PDFString.of(
-        "0.12 0.12 0.12 rg /Helv "+fs+" Tf"
-      ),
-      C:[opts.color.r,opts.color.g,opts.color.b],
-      CA:1,
-      F:4,
-      NM:PDFString.of(opts.nameId),
-      AP:{N:apRef}
-    });
-
-  pdfAddAnnotToPage(
-    context,
-    page,
-    context.register(annotDict)
   );
-
-  return {boxW,boxH};
-}
-
-
-/*
- * Numeroitu merkintä (kun tunnistetta ei ole annettu): valkoinen
- * lihavoitu numero ympyrän päällä, ilman taustaa/reunusta. Myös tämä
- * on FreeText-annotaatio, joten se pysyy erikseen muokattavana.
- */
-function pdfAddNumberOverlay(pdfDoc,page,font,opts){
-
-  const context=pdfDoc.context;
-  const PDFString=PDFLib.PDFString;
-
-  const fs=11;
-
-  const encoded=
-    font.encodeText(opts.text);
-
-  const tw=
-    font.widthOfTextAtSize(
-      opts.text,
-      fs
-    );
-
-  const boxW=tw+2;
-  const boxH=fs+2;
-
-  const ops=
-    `BT\n/F1 ${fs} Tf\n1 1 1 rg\n1 1 Td\n${encoded.toString()} Tj\nET`;
-
-  const apRef=
-    context.register(
-      context.stream(ops,{
-        Type:"XObject",
-        Subtype:"Form",
-        FormType:1,
-        BBox:[0,0,boxW,boxH],
-        Matrix:[1,0,0,1,0,0],
-        Resources:{Font:{F1:font.ref}}
-      })
-    );
-
-  const rect=[
-    opts.x-boxW/2,
-    opts.y-boxH/2,
-    opts.x+boxW/2,
-    opts.y+boxH/2
-  ];
-
-  const annotDict=
-    context.obj({
-      Type:"Annot",
-      Subtype:"FreeText",
-      Rect:rect,
-      Contents:PDFString.of(opts.text),
-      DA:PDFString.of(
-        "1 1 1 rg /Helv "+fs+" Tf"
-      ),
-      CA:1,
-      F:4,
-      NM:PDFString.of(opts.nameId),
-      AP:{N:apRef}
-    });
-
-  pdfAddAnnotToPage(
-    context,
-    page,
-    context.register(annotDict)
+  const apRef=context.register(
+    context.stream(ops.join("\n"),{
+      Type:"XObject",
+      Subtype:"Form",
+      FormType:1,
+      BBox:rect,
+      Matrix:[1,0,0,1,0,0],
+      Resources:{Font:{F1:font.ref}}
+    })
   );
-}
-
-
-/*
- * Yhdysviiva ympyrän reunasta tunnistelaatikkoon, myös omana
- * Line-annotaationaan (muokattava/siirrettävä erikseen).
- */
-function pdfAddConnectorLine(pdfDoc,page,opts){
-
-  const context=pdfDoc.context;
-  const PDFString=PDFLib.PDFString;
-
-  const lpad=2;
-
-  const minX=Math.min(opts.x1,opts.x2)-lpad;
-  const maxX=Math.max(opts.x1,opts.x2)+lpad;
-  const minY=Math.min(opts.y1,opts.y2)-lpad;
-  const maxY=Math.max(opts.y1,opts.y2)+lpad;
-
-  const ops=[
-    "q",
-    `${opts.color.r.toFixed(3)} ${opts.color.g.toFixed(3)} ${opts.color.b.toFixed(3)} RG`,
-    "1.2 w",
-    `${(opts.x1-minX).toFixed(2)} ${(opts.y1-minY).toFixed(2)} m`,
-    `${(opts.x2-minX).toFixed(2)} ${(opts.y2-minY).toFixed(2)} l`,
-    "S",
-    "Q"
-  ].join("\n");
-
-  const apRef=
-    context.register(
-      context.stream(ops,{
-        Type:"XObject",
-        Subtype:"Form",
-        FormType:1,
-        BBox:[0,0,maxX-minX,maxY-minY],
-        Matrix:[1,0,0,1,0,0],
-        Resources:{}
-      })
-    );
-
-  const annotDict=
-    context.obj({
-      Type:"Annot",
-      Subtype:"Line",
-      Rect:[minX,minY,maxX,maxY],
-      L:[opts.x1,opts.y1,opts.x2,opts.y2],
-      C:[opts.color.r,opts.color.g,opts.color.b],
-      F:4,
-      NM:PDFString.of(opts.nameId),
-      AP:{N:apRef}
-    });
-
-  pdfAddAnnotToPage(
-    context,
-    page,
-    context.register(annotDict)
-  );
+  const annot=context.obj({
+    Type:"Annot",
+    Subtype:"FreeText",
+    Rect:rect,
+    RD:[bl-minX,bb-minY,maxX-(bl+boxW),maxY-(bb+boxH)],
+    IT:"FreeTextCallout",
+    CL:[px,py,ax,ay],
+    LE:"Circle",
+    Contents:PDFHexString.fromText(text),
+    Subj:PDFHexString.fromText(opts.subj||""),
+    DA:PDFString.of("0.12 0.12 0.12 rg /Helv "+f(fs)+" Tf"),
+    C:[col.r,col.g,col.b],
+    IC:[1,1,1],
+    CA:1,
+    BS:{W:boxBorder},
+    F:4,
+    T:PDFString.of("Kenttälomake"),
+    M:PDFString.of(pdfDateString()),
+    NM:PDFString.of(opts.nameId),
+    AP:{N:apRef}
+  });
+  pdfAddAnnotToPage(context,page,context.register(annot));
+  return {rect};
 }
 
 
@@ -10394,132 +10719,70 @@ async function exportFloorPlanPdf(){
               );
 
 
-            const r=10;
-
-
+            const k=
+              Math.max(
+                1,
+                Math.min(
+                  3,
+                  Math.max(width,height)/842
+                )
+              );
             const col=
               hexToRgb01(
                 e.marker.color
               );
-
-
             const m=
               METHODS.find(
                 mm=>mm.id===e.methodId
               );
-
-
             const methodName=
               m ? m.name : "Menetelmä";
-
-
             const placeTxt=
               (
                 e.values &&
                 e.values.paikka
               ) || "";
-
-
             const customLabel=
               (
                 e.marker.label||
                 ""
               ).trim();
-
-
             const contentsInfo=
               `Menetelmä ${idx+1}: ${methodName}`+
               (placeTxt?` - ${placeTxt}`:"")+
               (customLabel?` (tunniste ${customLabel})`:"");
-
-
             const idBase=
               (e.id||("entry"+idx))+
               "-p"+pIdx;
-
-
-            const circleInfo=
-              pdfAddCircleMarker(
-                pdfDoc,
-                page,
-                {
-                  x,
-                  y,
-                  radius:r,
-                  color:col,
-                  contents:contentsInfo,
-                  nameId:idBase+"-circle"
-                }
-              );
-
-
-            if(customLabel){
-
-              const bx=
-                x+
-                r+
-                7;
-
-              /*
-               * Tekstilaatikon korkeus (fonttikoko 9 + pehmuste 4x2=8)
-               * lasketaan etukäteen, jotta laatikko voidaan keskittää
-               * pystysuunnassa ympyrän kanssa ennen sen luomista.
-               */
-              const labelBoxH=
-                9+4*2;
-
-              const by=
-                y-
-                labelBoxH/2;
-
-
-              pdfAddLabelBox(
-                pdfDoc,
-                page,
-                font,
-                {
-                  x:bx,
-                  y:by,
-                  text:customLabel,
-                  color:col,
-                  nameId:idBase+"-label"
-                }
-              );
-
-
-              pdfAddConnectorLine(
-                pdfDoc,
-                page,
-                {
-                  x1:x+r*.6,
-                  y1:y,
-                  x2:bx,
-                  y2:y,
-                  color:col,
-                  nameId:idBase+"-line"
-                }
-              );
-
-            }else{
-
-              pdfAddNumberOverlay(
-                pdfDoc,
-                page,
-                font,
-                {
-                  x,
-                  y,
-                  text:String(idx+1),
-                  nameId:idBase+"-num"
-                }
-              );
+            let boxCx,boxCy;
+            if(
+              typeof e.marker.bdx==="number" &&
+              typeof e.marker.bdy==="number"
+            ){
+              boxCx=x+e.marker.bdx*width;
+              boxCy=y-e.marker.bdy*height;
             }
+            /* Yksi objekti: tekstilaatikko + nuoli + nuolen kärkenä pallo. */
+            pdfAddCallout(
+              pdfDoc,
+              page,
+              font,
+              {
+                x,
+                y,
+                text:customLabel||String(idx+1),
+                color:col,
+                k,
+                boxCx,
+                boxCy,
+                subj:contentsInfo,
+                nameId:idBase+"-callout"
+              }
+            );
           }
         );
       }
     );
-
-
     const outBytes=
       await pdfDoc.save();
 
