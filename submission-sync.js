@@ -34,7 +34,12 @@ window.SubmissionSync = (function(){
     return data || null;
   }
 
-  async function saveSubmission({ id, formKey, formLabel, title, data }){
+  // Puuttuuko inspector_name-sarake (supabase-kayttajat.sql ajamatta)?
+  function isMissingInspectorColumn(error){
+    return !!(error && String(error.message || "").indexOf("inspector_name") !== -1);
+  }
+
+  async function saveSubmission({ id, formKey, formLabel, title, data, inspectorName }){
     const row = {
       id,
       form_key: formKey,
@@ -42,9 +47,15 @@ window.SubmissionSync = (function(){
       title: title || "",
       data: data
     };
-    const { data: result, error } = await client().from("submissions").upsert(row).select().single();
-    if (error) throw error;
-    return result;
+    if (inspectorName !== undefined) row.inspector_name = inspectorName ? String(inspectorName) : null;
+    let res = await client().from("submissions").upsert(row).select().single();
+    if (res.error && "inspector_name" in row && isMissingInspectorColumn(res.error)){
+      // Sarake puuttuu vielä -> tallenna ilman sitä, jotta lomake ei jää tallentamatta.
+      delete row.inspector_name;
+      res = await client().from("submissions").upsert(row).select().single();
+    }
+    if (res.error) throw res.error;
+    return res.data;
   }
 
   async function deleteSubmission(id){
@@ -58,16 +69,23 @@ window.SubmissionSync = (function(){
         await client().storage.from("submission-photos").remove(paths);
       }
     }catch(e){ console.warn("Valokuvatiedostojen siivous epäonnistui -- rivi poistetaan silti", e); }
+    try{ await client().from("submission_locks").delete().eq("submission_id", id); }catch(e){}
     const { error } = await client().from("submissions").delete().eq("id", id);
     if (error) throw error;
   }
 
   async function listMySubmissions(formKey){
-    let q = client().from("submissions").select("id,form_key,form_label,title,updated_at").order("updated_at", { ascending:false });
-    if (formKey) q = q.eq("form_key", formKey);
-    const { data, error } = await q;
-    if (error) throw error;
-    return data || [];
+    function build(cols){
+      let q = client().from("submissions").select(cols).order("updated_at", { ascending:false });
+      if (formKey) q = q.eq("form_key", formKey);
+      return q;
+    }
+    let res = await build("id,form_key,form_label,title,updated_at,inspector_name");
+    if (res.error && isMissingInspectorColumn(res.error)){
+      res = await build("id,form_key,form_label,title,updated_at");
+    }
+    if (res.error) throw res.error;
+    return res.data || [];
   }
 
   /* ---------- Valokuvat (Storage) ---------- */
@@ -90,9 +108,51 @@ window.SubmissionSync = (function(){
     try{ await client().storage.from("submission-photos").remove([path]); }catch(e){ console.warn("Yksittäisen valokuvan poisto epäonnistui", e); }
   }
 
+  /* ---------- "Käytössä"-merkintä (submission_locks-taulu) ----------
+     Neuvoa-antava lukitus: kertoo muille, että joku täyttää lomaketta juuri nyt.
+     Jos taulua ei ole (supabase-kayttajat.sql ajamatta), toiminnot ohitetaan hiljaa. */
+
+  const DEVICE_KEY = "aloitussivu.deviceId.v1";
+  function deviceId(){
+    try{
+      let d = localStorage.getItem(DEVICE_KEY);
+      if (!d){ d = newId(); localStorage.setItem(DEVICE_KEY, d); }
+      return d;
+    }catch(e){ return "tmp-" + Math.random().toString(36).slice(2,10); }
+  }
+
+  async function getLock(submissionId){
+    try{
+      const { data, error } = await client().from("submission_locks")
+        .select("submission_id,user_name,device_id,locked_at").eq("submission_id", submissionId).maybeSingle();
+      if (error) return null;
+      return data || null;
+    }catch(e){ return null; }
+  }
+
+  async function touchLock(submissionId, userName){
+    try{
+      const { error } = await client().from("submission_locks").upsert({
+        submission_id: submissionId,
+        user_name: userName || "",
+        device_id: deviceId(),
+        locked_at: new Date().toISOString()
+      });
+      return !error;
+    }catch(e){ return false; }
+  }
+
+  async function releaseLock(submissionId){
+    try{
+      await client().from("submission_locks").delete()
+        .eq("submission_id", submissionId).eq("device_id", deviceId());
+    }catch(e){}
+  }
+
   return {
-    newId, getUserId,
+    newId, getUserId, deviceId,
     loadSubmission, saveSubmission, deleteSubmission, listMySubmissions,
-    uploadPhoto, downloadPhoto, deletePhotoFile
+    uploadPhoto, downloadPhoto, deletePhotoFile,
+    getLock, touchLock, releaseLock
   };
 })();

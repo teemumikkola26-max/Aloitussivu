@@ -9,6 +9,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.4"></script>
 <script src="auth-gate.js" defer></script>
 <script src="submission-sync.js" defer></script>
+<script src="users.js" defer></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="docx-style-engine.js" defer></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -1267,6 +1268,18 @@ let project={
 };
 
 let entries=[];
+
+/*
+ * Usean käyttäjän yhteiskäyttö: poistetut merkinnät (poistomerkinnät),
+ * viimeksi nähty pilviversio ja paikalliset projektikenttien muutokset.
+ * Pilvitallennus yhdistää eri käyttäjien merkinnät tunnisteen perusteella.
+ */
+let deletedEntryIds=[];
+let lastRemoteUpdatedAt=null;
+let projectDirty={};
+let entrySyncSig={};
+let pullInFlight=false;
+
 let view="project";
 let editingEntry=null;
 let editingIsNew=false;
@@ -1587,8 +1600,10 @@ function createPortableState(){
 
   return {
     project,
+    deletedEntryIds,
     entries:entries.map(e=>({
       id:e.id,
+      author:e.author||"",
       methodId:e.methodId,
       values:e.values||{},
       marker:e.marker||null,
@@ -1621,6 +1636,7 @@ function createIndexedDbState(){
   return {
     project,
     entries,
+    deletedEntryIds,
     view,
     editingEntry,
     editingIsNew
@@ -1639,7 +1655,7 @@ function hasUnsyncedLocalOnlyPhotos(){
   );
 }
 
-async function autosave(){
+async function autosave(skipCloud){
 
   if(autosaveInProgress)return;
 
@@ -1754,7 +1770,7 @@ async function autosave(){
   /*
    * Pilvisynkronointi käynnistetään erillisenä jonona.
    */
-  syncToCloud();
+  if(!skipCloud)syncToCloud();
 }
 
 
@@ -1771,6 +1787,348 @@ function deriveTitle(){
 }
 
 
+/* ============================================================
+   USEAN KÄYTTÄJÄN YHTEISKÄYTTÖ
+   ============================================================ */
+
+function currentUserName(){
+
+  return window.AppUsers
+    ? (window.AppUsers.getActive()||"")
+    : "";
+}
+
+/*
+ * Merkinnän saa muokata ja poistaa sen tekijä. Merkinnät, joilla ei
+ * ole tekijää (vanhat), ja tilanne jossa laitteella ei ole valittu
+ * käyttäjää, ovat muokattavissa.
+ */
+function canEditEntry(e){
+
+  if(!e)return false;
+
+  const me=currentUserName();
+
+  return !e.author || !me || e.author===me;
+}
+
+function entrySig(e){
+
+  return JSON.stringify([
+    e.methodId,
+    e.values||{},
+    e.marker||null,
+    (e.photos||[]).map(p=>[p.id,p.path||"",p.caption||""]),
+    e.author||""
+  ]);
+}
+
+function markEntriesSynced(){
+
+  entrySyncSig={};
+
+  entries.forEach(e=>{
+    entrySyncSig[e.id]=entrySig(e);
+  });
+}
+
+function hasMultipleAuthors(){
+
+  const set=new Set(entries.map(e=>e.author).filter(Boolean));
+
+  return set.size>1 ||
+    (window.AppUsers && window.AppUsers.names().length>1);
+}
+
+async function hydrateRemoteEntry(ce,existing){
+
+  const known={};
+
+  ((existing&&existing.photos)||[]).forEach(p=>{
+    if(p.path)known[p.id+"|"+p.path]=p;
+  });
+
+  const photos=[];
+
+  const results=await Promise.all(
+    (ce.photos||[]).map(async p=>{
+
+      const old=known[p.id+"|"+p.path];
+
+      if(old){
+        old.caption=p.caption||"";
+        return old;
+      }
+
+      try{
+
+        const blob=
+          await window.SubmissionSync.downloadPhoto(p.path);
+
+        return {
+          id:p.id,
+          path:p.path,
+          url:URL.createObjectURL(blob),
+          blob,
+          caption:p.caption||""
+        };
+
+      }catch(err){
+
+        console.warn("Kuvan lataus epäonnistui",p.path,err);
+
+        return null;
+      }
+    })
+  );
+
+  results.forEach(r=>{if(r)photos.push(r);});
+
+  return {
+    id:ce.id,
+    methodId:ce.methodId,
+    values:ce.values||{},
+    marker:ce.marker||null,
+    author:ce.author||"",
+    photos
+  };
+}
+
+/*
+ * Yhdistää pilvessä olevan version paikalliseen tilaan.
+ * - Toisten käyttäjien merkinnät otetaan aina pilvestä.
+ * - Omat merkinnät pidetään paikallisina, jos niitä on muokattu
+ *   viimeisimmän synkronoinnin jälkeen; muuten otetaan pilviversio.
+ * - Poistetut merkinnät (poistomerkinnät) yhdistetään.
+ * - Projektikentistä paikallinen arvo voittaa vain, jos sitä on muokattu.
+ * Palauttaa {changed, needsPush}.
+ */
+async function mergeRemote(remote){
+
+  const out={changed:false,needsPush:false};
+
+  const d=remote&&remote.data;
+
+  if(!d){
+    out.needsPush=true;
+    return out;
+  }
+
+  /* Poistomerkinnät */
+  const remoteDeleted=Array.isArray(d.deletedEntryIds)?d.deletedEntryIds:[];
+
+  remoteDeleted.forEach(id=>{
+    if(deletedEntryIds.indexOf(id)===-1){
+      deletedEntryIds.push(id);
+      out.changed=true;
+    }
+  });
+
+  if(deletedEntryIds.some(id=>remoteDeleted.indexOf(id)===-1)){
+    out.needsPush=true;
+  }
+
+  const gone=entries.filter(e=>deletedEntryIds.indexOf(e.id)!==-1);
+
+  if(gone.length){
+
+    gone.forEach(e=>{
+      (e.photos||[]).forEach(p=>{
+        if(p.url){try{URL.revokeObjectURL(p.url);}catch(err){}}
+      });
+    });
+
+    entries=entries.filter(e=>deletedEntryIds.indexOf(e.id)===-1);
+
+    if(editingEntry && deletedEntryIds.indexOf(editingEntry.id)!==-1){
+      editingEntry=null;
+      editingIsNew=false;
+      view="project";
+    }
+
+    out.changed=true;
+  }
+
+  /* Merkinnät */
+  const remoteEntries=(Array.isArray(d.entries)?d.entries:[])
+    .filter(ce=>deletedEntryIds.indexOf(ce.id)===-1);
+
+  const remoteIds=remoteEntries.map(ce=>ce.id);
+
+  for(const ce of remoteEntries){
+
+    const idx=entries.findIndex(e=>e.id===ce.id);
+
+    if(idx===-1){
+
+      /* Editoitava uusi merkintä, jonka id sattuu olemaan pilvessä: pidä paikallinen */
+      if(editingEntry && editingEntry.id===ce.id)continue;
+
+      const added=await hydrateRemoteEntry(ce,null);
+
+      entries.push(added);
+      entrySyncSig[added.id]=entrySig(added);
+      out.changed=true;
+      continue;
+    }
+
+    const local=entries[idx];
+
+    const unmodified=
+      entrySyncSig[local.id]!==undefined &&
+      entrySig(local)===entrySyncSig[local.id];
+
+    if(canEditEntry(local) && !unmodified)continue;
+
+    const remoteSig=JSON.stringify([
+      ce.methodId,
+      ce.values||{},
+      ce.marker||null,
+      (ce.photos||[]).map(p=>[p.id,p.path||"",p.caption||""]),
+      ce.author||""
+    ]);
+
+    if(remoteSig===entrySig(local))continue;
+
+    const fresh=await hydrateRemoteEntry(ce,local);
+
+    entries[idx]=fresh;
+    entrySyncSig[fresh.id]=entrySig(fresh);
+
+    if(editingEntry===local)editingEntry=fresh;
+
+    out.changed=true;
+  }
+
+  /* Järjestys: pilven järjestys ensin, paikalliset vain-paikalliset perään */
+  const ordered=[];
+
+  remoteIds.forEach(id=>{
+    const e=entries.find(x=>x.id===id);
+    if(e)ordered.push(e);
+  });
+
+  const localOnly=entries.filter(e=>remoteIds.indexOf(e.id)===-1);
+
+  if(localOnly.length)out.needsPush=true;
+
+  const newOrder=ordered.concat(localOnly);
+
+  if(newOrder.length===entries.length &&
+     newOrder.some((e,i)=>e!==entries[i])){
+    out.changed=true;
+  }
+
+  entries=newOrder;
+
+  /* Projektikentät */
+  const rp=d.project||{};
+
+  Object.keys(rp).forEach(k=>{
+
+    if(projectDirty[k])return;
+
+    const v=rp[k];
+
+    if(typeof v==="string" && v!=="" && project[k]!==v){
+      project[k]=v;
+      out.changed=true;
+    }
+  });
+
+  /* Pohjakuva: otetaan pilven versio, ellei paikallinen ole vielä lähettämättä */
+  const localPending=!!(floorPlanBlob && !floorPlanPath);
+
+  if(d.floorPlanPath && !localPending && d.floorPlanPath!==floorPlanPath){
+
+    try{
+
+      const blob=await window.SubmissionSync.downloadPhoto(d.floorPlanPath);
+
+      floorPlanBlob=blob;
+      floorPlanPath=d.floorPlanPath;
+      floorPlanPreviewPage=1;
+      _pdfDocCache=null;
+      _pdfDocCacheBlob=null;
+
+      try{await idbSet(floorPlanKey(),blob);}catch(err){}
+
+      out.changed=true;
+
+    }catch(err){
+
+      console.warn("Pohjakuvan haku epäonnistui",err);
+    }
+  }
+
+  return out;
+}
+
+/*
+ * Hakee toisten käyttäjien muutokset säännöllisesti ja kun sivu
+ * palaa näkyviin. Tallentaa pilveen vain, jos paikallisia merkintöjä
+ * puuttuu pilvestä.
+ */
+async function pullFromCloud(){
+
+  if(pullInFlight||cloudSyncInFlight||autosaveInProgress)return;
+
+  if(
+    !window.SubmissionSync ||
+    !SUBMISSION_ID ||
+    !navigator.onLine ||
+    document.visibilityState!=="visible"
+  )return;
+
+  pullInFlight=true;
+
+  let needsPush=false;
+
+  try{
+
+    const remote=await window.SubmissionSync.loadSubmission(SUBMISSION_ID);
+
+    if(!remote)return;
+
+    if(remote.updated_at && remote.updated_at===lastRemoteUpdatedAt)return;
+
+    const r=await mergeRemote(remote);
+
+    lastRemoteUpdatedAt=remote.updated_at||lastRemoteUpdatedAt;
+
+    needsPush=r.needsPush;
+
+    if(r.changed){
+
+      await autosave(true);
+
+      if(view==="project")render();
+    }
+
+  }catch(err){
+
+    console.warn("Pilvipäivitys epäonnistui",err);
+
+  }finally{
+
+    pullInFlight=false;
+
+    if(cloudSyncQueued||needsPush){
+      cloudSyncQueued=false;
+      syncToCloud();
+    }
+  }
+}
+
+setInterval(pullFromCloud,45000);
+
+document.addEventListener("visibilitychange",()=>{
+  if(document.visibilityState==="visible")pullFromCloud();
+});
+
+window.addEventListener("online",()=>{pullFromCloud();});
+
+
 async function syncToCloud(){
 
   if(!window.SubmissionSync || !SUBMISSION_ID){
@@ -1778,10 +2136,10 @@ async function syncToCloud(){
   }
 
   /*
-   * Jos synkronointi on jo käynnissä,
+   * Jos synkronointi tai pilvipäivitys on jo käynnissä,
    * merkitään uusi synkronointi jonoon.
    */
-  if(cloudSyncInFlight){
+  if(cloudSyncInFlight || pullInFlight){
 
     cloudSyncQueued=true;
 
@@ -1887,9 +2245,20 @@ async function syncToCloud(){
      * Pilveen tallennetaan vain ne kuvat,
      * joilla on olemassa oleva storage-polku.
      */
+    /*
+     * Haetaan pilven tuorein versio ja yhdistetään se paikalliseen,
+     * jotta toisen käyttäjän lisäykset eivät ylikirjoitu.
+     */
+    const remoteNow=
+      await window.SubmissionSync.loadSubmission(SUBMISSION_ID);
+
+    const mergeResult=await mergeRemote(remoteNow);
+
     const cloudEntries=entries.map(e=>({
 
       id:e.id,
+
+      author:e.author||"",
 
       methodId:e.methodId,
 
@@ -1907,7 +2276,7 @@ async function syncToCloud(){
     }));
 
 
-    await window.SubmissionSync.saveSubmission({
+    const savedRow=await window.SubmissionSync.saveSubmission({
 
       id:SUBMISSION_ID,
 
@@ -1917,12 +2286,26 @@ async function syncToCloud(){
 
       title:deriveTitle(),
 
+      inspectorName:(project.tutkija||"").trim(),
+
       data:{
         project,
         entries:cloudEntries,
+        deletedEntryIds,
         floorPlanPath:floorPlanPath||null
       }
     });
+
+    lastRemoteUpdatedAt=
+      (savedRow && savedRow.updated_at) || lastRemoteUpdatedAt;
+
+    projectDirty={};
+
+    markEntriesSynced();
+
+    if(mergeResult.changed && view==="project"){
+      render();
+    }
 
 
     setSyncStatus(
@@ -2074,6 +2457,8 @@ async function loadState(){
 
           id:ce.id,
 
+          author:ce.author||"",
+
           methodId:ce.methodId,
 
           values:ce.values||{},
@@ -2083,6 +2468,15 @@ async function loadState(){
           photos
         });
       }
+
+      deletedEntryIds=
+        Array.isArray(sub.data.deletedEntryIds)
+          ?sub.data.deletedEntryIds.slice()
+          :[];
+
+      lastRemoteUpdatedAt=sub.updated_at||null;
+
+      markEntriesSynced();
 
 
       /*
@@ -2228,6 +2622,11 @@ async function loadState(){
       entries=Array.isArray(value.entries)
         ? value.entries
         : [];
+
+      deletedEntryIds=
+        Array.isArray(value.deletedEntryIds)
+          ?value.deletedEntryIds.slice()
+          :[];
 
 
       for(const e of entries){
@@ -2382,12 +2781,19 @@ function confirmClearForm(){
   if(
     !project.nimi &&
     !project.tilaaja &&
-    !project.tutkija &&
     entries.length===0 &&
     !floorPlanBlob
   ){
 
     toast("Lomake on jo tyhjä");
+
+    return;
+  }
+
+
+  if(entries.some(e=>!canEditEntry(e))){
+
+    toast("Lomakkeessa on toisten käyttäjien merkintöjä, joten sitä ei voi tyhjentää");
 
     return;
   }
@@ -2554,6 +2960,11 @@ async function clearForm(){
 
   entries=[];
 
+  deletedEntryIds=[];
+  lastRemoteUpdatedAt=null;
+  projectDirty={};
+  entrySyncSig={};
+
   editingEntry=null;
   editingIsNew=false;
 
@@ -2701,6 +3112,11 @@ async function openPhotoViewer(entry,photo,onChange){
       </div>
     </div>
   `);
+  if(!canEditEntry(entry)){
+    /* Toisen käyttäjän kuva: vain katselu ja tallennus laitteelle */
+    overlay.querySelector('[data-a="del"]').style.display="none";
+    overlay.querySelector(".pv-tools").style.display="none";
+  }
   const canvas=overlay.querySelector("canvas");
   canvas.width=NW;
   canvas.height=NH;
@@ -3217,6 +3633,7 @@ function duplicateEntry(entry){
   delete values.huomiot;
   editingEntry={
     id:newEntryId(),
+    author:currentUserName(),
     methodId:entry.methodId,
     values,
     photos:[],
@@ -3479,11 +3896,13 @@ function _renderView(){
 
     footer.innerHTML=
       '<button class="btn btn-primary btn-block" id="btnSaveEntry">'+
-      (editingIsNew?'Tallenna menetelmä':'Valmis')+
+      (editingIsNew?'Tallenna menetelmä':(canEditEntry(editingEntry)?'Valmis':'Sulje'))+
       '</button>'+
       (editingIsNew
         ?''
-        :'<div class="hint" style="text-align:center;margin-top:6px;">Muutokset tallentuvat automaattisesti</div>');
+        :(canEditEntry(editingEntry)
+          ?'<div class="hint" style="text-align:center;margin-top:6px;">Muutokset tallentuvat automaattisesti</div>'
+          :''));
     document
       .getElementById("btnSaveEntry")
       .onclick=saveEntryForm;
@@ -3548,6 +3967,43 @@ function renderMoreMenu(){
    PROJEKTIKORTTI
    ============================================================ */
 
+function fillTutkijaSelect(sel){
+
+  if(window.AppUsers){
+
+    window.AppUsers.populateSelect(
+      sel,
+      project.tutkija||""
+    );
+
+  }else{
+
+    /* users.js ei ole vielä latautunut: näytä ainakin tallennettu arvo */
+    sel.innerHTML="";
+
+    const o0=document.createElement("option");
+    o0.value="";
+    o0.textContent="— valitse —";
+    sel.appendChild(o0);
+
+    if(project.tutkija){
+      const o=document.createElement("option");
+      o.value=project.tutkija;
+      o.textContent=project.tutkija;
+      sel.appendChild(o);
+    }
+
+    sel.value=project.tutkija||"";
+  }
+}
+
+window.addEventListener("appusers:changed",()=>{
+
+  const sel=document.getElementById("p_tutkija");
+
+  if(sel)fillTutkijaSelect(sel);
+});
+
 function renderProjectCard(){
 
   const c=
@@ -3580,12 +4036,7 @@ function renderProjectCard(){
           Tutkijan nimi
         </label>
 
-        <input
-          type="text"
-          id="p_tutkija"
-          autocomplete="off"
-          placeholder="Tutkimuksen tekijä"
-        >
+        <select id="p_tutkija"></select>
 
         <label for="p_pvm">Päivämäärä</label>
 
@@ -3609,11 +4060,28 @@ function renderProjectCard(){
     const input=
       c.querySelector("#"+id);
 
+    if(id==="p_tutkija"){
+
+      /* Tutkija valitaan käyttäjälistasta; uuteen lomakkeeseen
+         esivalitaan laitteella aktiivinen käyttäjä. */
+      if(
+        !project.tutkija &&
+        window.AppUsers &&
+        window.AppUsers.getActive()
+      ){
+        project.tutkija=window.AppUsers.getActive();
+      }
+
+      fillTutkijaSelect(input);
+    }
+
     input.value=project[k]||"";
 
     input.oninput=e=>{
 
       project[k]=e.target.value;
+
+      projectDirty[k]=true;
 
       scheduleAutosave();
     };
@@ -3621,6 +4089,8 @@ function renderProjectCard(){
     input.onchange=e=>{
 
       project[k]=e.target.value;
+
+      projectDirty[k]=true;
 
       scheduleAutosave();
     };
@@ -3664,12 +4134,13 @@ function renderEntriesCard(){
     const meta=[
       entrySummary(entry,m),
       nPh?("📷 "+nPh):"",
-      entry.marker?"📍":""
+      entry.marker?"📍":"",
+      (entry.author && hasMultipleAuthors())?("👤 "+entry.author):""
     ].filter(Boolean).join("  ·  ");
     const card=
       el(`
         <div class="entry-card tappable" role="button" tabindex="0"
-             aria-label="Muokkaa: ${escapeAttribute(m.name)}">
+             aria-label="${canEditEntry(entry)?"Muokkaa":"Avaa"}: ${escapeAttribute(m.name)}">
           <div class="entry-top">
             <div>
               <div class="entry-title">${idx+1}. ${escapeHtml(m.name)}</div>
@@ -3679,7 +4150,7 @@ function renderEntriesCard(){
             </div>
           </div>
           <div class="entry-actions">
-            <button type="button" class="btn btn-outline btn-sm" data-act="edit">Muokkaa</button>
+            <button type="button" class="btn btn-outline btn-sm" data-act="edit">${canEditEntry(entry)?"Muokkaa":"Avaa"}</button>
             <button type="button" class="btn btn-outline btn-sm" data-act="copy">Kopioi</button>
           </div>
         </div>
@@ -3848,6 +4319,8 @@ function renderMethodGrid(){
             .slice(2,7),
 
         methodId:m.id,
+
+        author:currentUserName(),
 
         values:{},
 
@@ -6315,6 +6788,19 @@ function renderEntryForm(){
 
 
   container.appendChild(loc);
+  if(!editingIsNew && !canEditEntry(editingEntry)){
+    /* Toisen käyttäjän merkintä: vain katselu */
+    const note=el(`
+      <div class="card" role="note" style="background:#fff7e0;border-color:#e5c76b;">
+        Tämän merkinnän on tehnyt <strong>${escapeHtml(editingEntry.author||"")}</strong>.
+        Vain tekijä voi muokata tai poistaa sen.
+      </div>
+    `);
+    container.insertBefore(note,container.firstChild);
+    container.inert=true;
+    note.inert=false;
+    return container;
+  }
   if(!editingIsNew){
     const del=el(`
       <div class="card">
@@ -6815,6 +7301,18 @@ function renderTableField(f,values){
 
 function saveEntryForm(){
 
+  /* Toisen käyttäjän merkintä avataan vain katseltavaksi: "Sulje" */
+  if(editingEntry && !editingIsNew && !canEditEntry(editingEntry)){
+
+    view="project";
+    editingEntry=null;
+    editingIsNew=false;
+
+    render();
+
+    return;
+  }
+
   const m=
     METHODS.find(
       x=>x.id===editingEntry.methodId
@@ -6960,6 +7458,13 @@ function deleteCurrentEntry(){
 
   if(!editingEntry)return;
 
+  if(!canEditEntry(editingEntry)){
+
+    toast("Vain merkinnän tekijä ("+editingEntry.author+") voi poistaa sen");
+
+    return;
+  }
+
 
   if(
     !confirm(
@@ -7006,6 +7511,10 @@ function deleteCurrentEntry(){
     });
   }
 
+
+  if(target && deletedEntryIds.indexOf(target.id)===-1){
+    deletedEntryIds.push(target.id);
+  }
 
   entries=
     entries.filter(
@@ -8217,6 +8726,13 @@ async function saveFloorPlan(blob){
     entries.some(
       e=>!!e.marker
     );
+
+  if(entries.some(e=>e.marker && !canEditEntry(e))){
+
+    toast("Pohjakuvaa ei voi vaihtaa, koska toisten käyttäjien merkinnöillä on sijaintimerkintöjä siinä");
+
+    return;
+  }
 
 
   if(

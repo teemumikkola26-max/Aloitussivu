@@ -29,6 +29,7 @@
 let DEF = null;
 let FORM_ID = null;
 let SUBMISSION_ID = null;
+let READ_ONLY = false;   // true, kun toinen käyttäjä täyttää samaa lomaketta
 let DEFAULT_STATUS = "unchecked";
 let state = { header:{}, items:{} };
 let saveTimer = null;
@@ -136,17 +137,27 @@ function setSaveIndicator(text){
   if (el) el.textContent = text;
 }
 function deriveTitle(){
-  const firstVal = Object.values(state.header).find(v => v && String(v).trim());
-  return firstVal || (DEF && DEF.meta && DEF.meta.title) || "(nimetön kohde)";
+  // Käyttäjävalinta (tarkastuksen suorittaja) ei kelpaa lomakkeen otsikoksi.
+  const userIds = {};
+  ((DEF && DEF.headerFields) || []).forEach(h => { if (h.type === "user") userIds[h.id] = true; });
+  const entry = Object.entries(state.header).find(([k, v]) => !userIds[k] && v && String(v).trim());
+  return (entry && entry[1]) || (DEF && DEF.meta && DEF.meta.title) || "(nimetön kohde)";
+}
+// Lomakkeen "käyttäjä"-tyyppisistä kentistä ensimmäinen, johon on valittu henkilö.
+function deriveInspector(){
+  const f = ((DEF && DEF.headerFields) || []).find(h => h.type === "user" && state.header[h.id] && String(state.header[h.id]).trim());
+  return f ? String(state.header[f.id]).trim() : "";
 }
 
 let cloudSyncInFlight = false;
 function saveDebounced(){
+  if (READ_ONLY) return;
   setSaveIndicator("Tallennetaan…");
   clearTimeout(saveTimer);
   saveTimer = setTimeout(doSave, 500);
 }
 async function doSave(){
+  if (READ_ONLY) return;
   await idbPut("meta", { key:"header", value: state.header });
   for (const id of Object.keys(state.items)){
     const it = state.items[id];
@@ -157,6 +168,7 @@ async function doSave(){
 }
 
 async function syncToCloud(){
+  if (READ_ONLY) return;
   if (cloudSyncInFlight) return;
   cloudSyncInFlight = true;
   try{
@@ -178,7 +190,7 @@ async function syncToCloud(){
     });
     await window.SubmissionSync.saveSubmission({
       id: SUBMISSION_ID, formKey: FORM_ID, formLabel: (DEF && DEF.meta && DEF.meta.title) || "Lomake",
-      title: deriveTitle(), data: { header: state.header, items: cloudItems }
+      title: deriveTitle(), inspectorName: deriveInspector(), data: { header: state.header, items: cloudItems }
     });
     setSaveIndicator("Tallennettu pilveen");
   }catch(e){
@@ -580,6 +592,8 @@ function removePhoto(itemId, photoId){
 function renderHeaderFields(){
   const wrap = document.getElementById("headerFields");
   wrap.innerHTML = "";
+  // Uuteen lomakkeeseen esivalitaan laitteella aktiivinen käyttäjä.
+  const freshForm = !Object.keys(state.header).length;
   (DEF.headerFields || []).forEach(f => {
     const div = document.createElement("div");
     div.className = "field";
@@ -590,6 +604,16 @@ function renderHeaderFields(){
     let input;
     if (f.type === "textarea"){
       input = document.createElement("textarea");
+    } else if (f.type === "user"){
+      input = document.createElement("select");
+      input.style.cssText = "width:100%;border:1px solid var(--line-strong);border-radius:7px;padding:9px 10px;font-size:.95rem;font-family:inherit;background:#fff;";
+      if (freshForm && !state.header[f.id] && window.AppUsers && window.AppUsers.getActive()){
+        state.header[f.id] = window.AppUsers.getActive();
+      }
+      if (window.AppUsers) window.AppUsers.populateSelect(input, state.header[f.id] || "");
+      window.addEventListener("appusers:changed", () => {
+        if (window.AppUsers && document.body.contains(input)) window.AppUsers.populateSelect(input, state.header[f.id] || "");
+      });
     } else if (f.type === "select"){
       input = document.createElement("select");
       input.style.cssText = "width:100%;border:1px solid var(--line-strong);border-radius:7px;padding:9px 10px;font-size:.95rem;font-family:inherit;background:#fff;";
@@ -1208,6 +1232,152 @@ document.getElementById("btnStyle").addEventListener("click", () => {
     "&back=" + encodeURIComponent(backUrl);
 });
 
+
+/* ---------- "Käytössä"-merkintä ja varoitus samanaikaisesta täytöstä ---------- */
+const LOCK_STALE_MS = 120000;   // merkintä vanhenee, jos sykettä ei ole 2 minuuttiin
+const LOCK_BEAT_MS = 30000;
+let lockTimer = null;
+let lockBanner = null;
+
+function lockUserLabel(){
+  return (window.AppUsers && window.AppUsers.getActive()) || "";
+}
+function lockIsFresh(lock){
+  if (!lock || !lock.locked_at) return false;
+  const t = new Date(lock.locked_at).getTime();
+  return isFinite(t) && (Date.now() - t) < LOCK_STALE_MS;
+}
+function lockIsForeign(lock){
+  return lockIsFresh(lock) && lock.device_id !== window.SubmissionSync.deviceId();
+}
+function lockWho(lock){
+  return (lock && lock.user_name) ? lock.user_name : "Toinen käyttäjä";
+}
+
+function setFormInert(on){
+  ["headerCard", "sections"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.inert = !!on;
+  });
+  ["btnNew", "btnStyle"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = !!on;
+  });
+}
+
+function showLockBanner(html, buttons, tone){
+  if (!lockBanner){
+    lockBanner = document.createElement("div");
+    lockBanner.setAttribute("role", "status");
+    const top = document.querySelector("header.topbar");
+    if (top) top.insertAdjacentElement("afterend", lockBanner);
+    else document.body.insertBefore(lockBanner, document.body.firstChild);
+  }
+  const bg = tone === "ok" ? "#e6f4ea" : "#fff7e0";
+  const bd = tone === "ok" ? "#8fb79c" : "#e5c76b";
+  lockBanner.style.cssText = "margin:12px 14px;padding:12px 14px;border:1px solid " + bd + ";background:" + bg +
+    ";border-radius:10px;font-size:.9rem;color:#1c2430;";
+  lockBanner.innerHTML = '<div style="margin-bottom:8px;">' + html + '</div><div class="lock-actions" style="display:flex;gap:8px;flex-wrap:wrap;"></div>';
+  const row = lockBanner.querySelector(".lock-actions");
+  (buttons || []).forEach(b => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn " + (b.primary ? "btn-primary" : "btn-secondary");
+    btn.style.cssText = "min-height:44px;padding:8px 14px;";
+    btn.textContent = b.label;
+    btn.addEventListener("click", b.onClick);
+    row.appendChild(btn);
+  });
+}
+function hideLockBanner(){
+  if (lockBanner){ lockBanner.remove(); lockBanner = null; }
+}
+
+async function enterReadOnly(lock){
+  if (!READ_ONLY){
+    // Tallenna omat viimeiset muutokset ennen lukitusta
+    try{ clearTimeout(saveTimer); await doSave(); }catch(e){}
+  }
+  READ_ONLY = true;
+  setFormInert(true);
+  setSaveIndicator("Vain luku -tila");
+  const who = escapeHtml(lockWho(lock));
+  showLockBanner(
+    "🔒 <strong>" + who + "</strong> täyttää tätä lomaketta parhaillaan. Lomake on vain luku -tilassa, jotta muutokset eivät ylikirjoitu.",
+    [
+      { label:"Päivitä tila", onClick: checkLockStatus },
+      { label:"Ota silti käyttöön", onClick: takeOverLock }
+    ],
+    "warn"
+  );
+}
+
+async function checkLockStatus(){
+  const lock = await window.SubmissionSync.getLock(SUBMISSION_ID);
+  if (!lockIsForeign(lock)){
+    showLockBanner(
+      "✅ Lomake on nyt vapaana. Lataa uusin versio ja jatka täyttöä.",
+      [{ label:"Lataa ja jatka", primary:true, onClick: async () => {
+          await window.SubmissionSync.touchLock(SUBMISSION_ID, lockUserLabel());
+          window.location.reload();
+      } }],
+      "ok"
+    );
+  } else {
+    enterReadOnly(lock);
+  }
+}
+
+async function takeOverLock(){
+  if (!confirm("Toinen käyttäjä on merkitty täyttämään tätä lomaketta. Jos otat lomakkeen käyttöösi, hänen tallentamattomat muutoksensa voivat hävitä.\n\nOtetaanko lomake silti käyttöön?")) return;
+  await window.SubmissionSync.touchLock(SUBMISSION_ID, lockUserLabel());
+  window.location.reload();
+}
+
+async function lockBeat(){
+  if (!SUBMISSION_ID || READ_ONLY) return;
+  if (document.visibilityState === "hidden") return;
+  const lock = await window.SubmissionSync.getLock(SUBMISSION_ID);
+  if (lockIsForeign(lock)){ enterReadOnly(lock); return; }
+  window.SubmissionSync.touchLock(SUBMISSION_ID, lockUserLabel());
+}
+
+async function startUsageLock(){
+  if (!window.SubmissionSync || !SUBMISSION_ID) return;
+  const lock = await window.SubmissionSync.getLock(SUBMISSION_ID);
+  if (lockIsForeign(lock)){
+    await enterReadOnly(lock);
+    // Seurataan tilannetta: kun lomake vapautuu, ilmoitetaan siitä.
+    lockTimer = setInterval(async () => {
+      const l = await window.SubmissionSync.getLock(SUBMISSION_ID);
+      if (!lockIsForeign(l)){ clearInterval(lockTimer); checkLockStatus(); }
+    }, 20000);
+    return;
+  }
+  window.SubmissionSync.touchLock(SUBMISSION_ID, lockUserLabel());
+  lockTimer = setInterval(lockBeat, LOCK_BEAT_MS);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") lockBeat();
+  });
+  const release = () => { if (!READ_ONLY) window.SubmissionSync.releaseLock(SUBMISSION_ID); };
+  window.addEventListener("pagehide", release);
+  // "← Omat lomakkeet" -linkki vapauttaa merkinnän ennen siirtymistä
+  const back = document.querySelector('header.topbar a[href="index.html"]');
+  if (back){
+    back.addEventListener("click", async (e) => {
+      if (READ_ONLY) return;
+      e.preventDefault();
+      try{
+        await Promise.race([
+          window.SubmissionSync.releaseLock(SUBMISSION_ID),
+          new Promise(r => setTimeout(r, 1500))
+        ]);
+      }catch(err){}
+      window.location.href = "index.html";
+    });
+  }
+}
+
 /* ---------- Käynnistys ---------- */
 function waitForSupabaseClient(cb, triesLeft){
   if (typeof triesLeft !== "number") triesLeft = 100;
@@ -1261,6 +1431,7 @@ function initSubmissionId(){
 
       renderHeaderFields();
       renderSections();
+      await startUsageLock();
     }catch(err){
       fatalError("Odottamaton virhe lomaketta ladatessa: " + (err && err.message ? err.message : err));
     }
