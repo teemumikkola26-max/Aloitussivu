@@ -42,7 +42,8 @@
       vastaukset oikein myös uuden moottorin kautta.
       <br><br>
       Työkalun voi ajaa turvallisesti useamman kerran — jo tuotu lomake
-      ei tuoda uudelleen.
+      ei tuoda uudelleen. Jo tuodun lomakkeen määrittelyn voi päivittää
+      "Päivitä määrittely tiedostosta" -painikkeella (id ja täytetyt lomakkeet säilyvät).
     </div>
   </section>
 
@@ -65,7 +66,7 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="kuntoarvio-talo2000.def.js"></script>
+<script src="kuntoarvio-talo2000_def.js"></script>
 <script>
 "use strict";
 
@@ -106,7 +107,8 @@ function renderStatus(items){
     if (it.existingId){
       right.innerHTML =
         '<span class="status-pill done">Tuotu</span>' +
-        '<a class="result-link" href="form.html?id=' + encodeURIComponent(it.existingId) + '">Avaa lomake →</a>';
+        '<a class="result-link" href="form.html?id=' + encodeURIComponent(it.existingId) + '">Avaa lomake →</a>' +
+        (it.def ? '<button type="button" class="btn btn-outline" data-update="' + it.slug + '" style="margin-top:6px;padding:4px 10px;font-size:.8rem;">Päivitä määrittely tiedostosta</button>' : '');
     } else {
       right.innerHTML = '<span class="status-pill missing">Ei vielä tuotu</span>';
     }
@@ -176,6 +178,33 @@ async function importForm(item){
   return result.data.id;
 }
 
+async function updateForm(item){
+  if (!item.def || !item.existingId){ log("Päivitys ei onnistu: määrittelyä tai lomaketta ei löytynyt (" + item.title + ")."); return; }
+  if (!confirm("Korvataanko lomakkeen \"" + item.title + "\" määrittely tiedoston sisällöllä?\n\n" +
+               "Lomakkeen id ja täytetyt lomakkeet säilyvät, mutta editorissa tehdyt muutokset lomakepohjaan korvautuvat.")) return;
+  log("Päivitetään: " + item.title + " …");
+  const row = {
+    title: item.def.meta.title,
+    tag: item.def.meta.tag || null,
+    description: item.def.meta.desc || null,
+    icon: item.def.meta.icon || "📋",
+    definition: item.def
+  };
+  const res = await supabaseClient.from("forms").update(row).eq("id", item.existingId).select("id").single();
+  if (res.error){ log("VIRHE (" + item.title + "): " + res.error.message); toast("Päivitys epäonnistui."); return; }
+  log("OK: " + item.title + " päivitetty (id " + res.data.id + ").");
+  toast("Lomake päivitetty.");
+}
+
+document.getElementById("statusList").addEventListener("click", async (ev) => {
+  const btn = ev.target.closest("[data-update]");
+  if (!btn) return;
+  const item = FORMS_TO_IMPORT.find(f => f.slug === btn.getAttribute("data-update"));
+  btn.disabled = true;
+  await updateForm(item);
+  btn.disabled = false;
+});
+
 async function refreshStatus(){
   for (const it of FORMS_TO_IMPORT){
     it.existingId = await findExisting(it.slug);
@@ -215,7 +244,8 @@ waitForSupabaseClient(async (client) => {
   supabaseClient = client;
   FORMS_TO_IMPORT[0].def = KA_DEF;
   FORMS_TO_IMPORT[1].def = KT_DEF;
-  FORMS_TO_IMPORT[2].def = window.KA_T2000_DEF;
+  FORMS_TO_IMPORT[2].def = window.KA_T2000_DEF || null;
+  if (!FORMS_TO_IMPORT[2].def) log("Varoitus: kuntoarvio-talo2000_def.js ei latautunut.");
   await refreshStatus();
 });
 </script>
