@@ -134,7 +134,7 @@ function buildTocCard(){
   const body = document.createElement("div");
   body.className = "card-body";
 
-  if (!style.toc) style.toc = { enabled:false, variant:"classic" };
+  if (!style.toc) style.toc = { enabled:false, variant:"classic", levels:1 };
 
   const t = toggleRow("Lisää sisällysluettelo (heti kansilehden jälkeen)", style.toc.enabled, (v) => {
     style.toc.enabled = v;
@@ -160,6 +160,18 @@ function buildTocCard(){
     variantSelect.addEventListener("change", () => style.toc.variant = variantSelect.value);
     variantWrap.appendChild(variantSelect);
     body.appendChild(variantWrap);
+
+    const levelsSel = document.createElement("select");
+    levelsSel.className = "type-select";
+    levelsSel.style.width = "100%";
+    [[1,"Vain taso 1 (ryhmät tai osiot)"],[2,"Tasot 1–2 (esim. 1, 1.1)"],[3,"Tasot 1–3 (esim. 1, 1.1, 1.1.1)"]].forEach(([v,l]) => {
+      const o = document.createElement("option");
+      o.value = v; o.textContent = l;
+      if ((Number(style.toc.levels) || 1) === v) o.selected = true;
+      levelsSel.appendChild(o);
+    });
+    levelsSel.addEventListener("change", () => style.toc.levels = Number(levelsSel.value));
+    body.appendChild(fieldRow("Näytettävät otsikkotasot", levelsSel));
 
     const hint = document.createElement("div");
     hint.style.cssText = "font-size:.76rem;color:var(--ink-soft);margin-top:-4px;";
@@ -885,6 +897,7 @@ function buildNumberingCard(){
   });
   sel.addEventListener("change", () => style.headingNumbering.enabled = sel.value === "1");
   body.appendChild(fieldRow("Otsikkotyyli Word-raportissa", sel));
+  body.appendChild(toggleRow("Lomakkeen kentät omina otsikkoinaan (kolmas taso, esim. 1.1.1)", style.headingNumbering.fieldHeadings !== false, v => { style.headingNumbering.fieldHeadings = v; }).wrap);
   const hint = document.createElement("div");
   hint.style.cssText = "font-size:.76rem;color:var(--ink-soft);";
   hint.textContent = "Numerointi tulee Wordin otsikkotyylistä: pääotsikko 1, alaotsikko 1.1, sen alaotsikko 1.1.1. Osioiden nimiin ei lisätä numeroa erikseen, joten numerot eivät tuplaudu.";

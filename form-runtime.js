@@ -1166,6 +1166,7 @@ async function buildDocx(){
   bodyParts.push(engine.paraXml(headerLines, { font:s.fonts.body, sz:engine.pt2hp(s.fonts.bodySize), color:s.colors.body, after:240 }));
 
   const secNums = computeSectionNumbering();
+  const fieldsAsHeadings = !(s.headingNumbering && s.headingNumbering.fieldHeadings === false);
   DEF.sections.forEach((sec, secIdx) => {
     const nm = secNums[secIdx];
     if (nm.groupStart){
@@ -1181,7 +1182,12 @@ async function buildDocx(){
     sec.fields.forEach((field) => {
       const itemId = sec.id + "_" + field.id;
       const it = state.items[itemId];
-      bodyParts.push(engine.paraXml(field.label, { bold:true, font:s.fonts.body, sz:engine.pt2hp(s.fonts.bodySize), color:s.colors.body, after:20 }));
+      if (fieldsAsHeadings){
+        // Taso 3: kenttä = otsikko (ryhmällisessä lomakkeessa Heading3 = 1.1.1, ryhmättömässä Heading2 = 1.1)
+        bodyParts.push(engine.paraXml(field.label, { bold:true, sz:engine.pt2hp(s.fonts.subheadingSize || 11), font:s.fonts.heading, color:s.colors.heading, pStyle: nm.group ? "Heading3" : "Heading2", before:120, after:40 }));
+      } else {
+        bodyParts.push(engine.paraXml(field.label, { bold:true, font:s.fonts.body, sz:engine.pt2hp(s.fonts.bodySize), color:s.colors.body, after:20 }));
+      }
 
       if (field.type === "checklist"){
         const scheme = (DEF.statusScheme||[]).find(sc => sc.value === it.status) || { label:it.status, color:"8C8676" };

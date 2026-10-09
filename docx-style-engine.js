@@ -9,7 +9,7 @@
    {
      coverPage: { enabled, title, subtitle, logoDataUrl, accentColor, companyInfo,
                   sourceMode: "generated"|"docx", docxPath, docxFileName },
-     headingNumbering: { enabled },   // true = otsikot numeroidaan 1 / 1.1 / 1.1.1
+     headingNumbering: { enabled, fieldHeadings },   // enabled: otsikot numeroidaan 1 / 1.1 / 1.1.1; fieldHeadings: lomakkeen kentät ovat otsikkotasona
      coverHeader / coverFooter: sama muoto kuin header/footer, vain generoidun kansilehden oma tunniste
      header: { enabled, fontSize, color, left:{type,text}, center:{type,text}, right:{type,text} },
      footer: { enabled, fontSize, color, left:{type,text}, center:{type,text}, right:{type,text} },
@@ -42,14 +42,14 @@ window.DocxStyleEngine = (function(){
   function defaultStyle(){
     return {
       coverPage: { enabled:false, title:"", subtitle:"", logoDataUrl:"", accentColor:"#8fb79c", companyInfo:"", sourceMode:"generated", docxPath:"", docxFileName:"" },
-      headingNumbering: { enabled:true },
+      headingNumbering: { enabled:true, fieldHeadings:true },
       header: { enabled:false, fontSize:9, color:"#7a7566", left:emptySlot(), center:emptySlot(), right:emptySlot() },
       footer: { enabled:false, fontSize:9, color:"#7a7566", left:emptySlot(), center:{ type:"pageOf", text:"" }, right:emptySlot() },
       fonts: { heading:"Calibri", body:"Calibri", headingSize:16, subheadingSize:11, bodySize:10.5 },
       colors: { heading:"#000000", body:"#1c2430" },
       coverHeader: { enabled:false, fontSize:9, color:"#7a7566", left:emptySlot(), center:emptySlot(), right:emptySlot() },
       coverFooter: { enabled:false, fontSize:9, color:"#7a7566", left:emptySlot(), center:emptySlot(), right:emptySlot() },
-      toc: { enabled:false, variant:"classic" },
+      toc: { enabled:false, variant:"classic", levels:1 },
       pagesBefore: [],
       pagesAfter: []
     };
@@ -810,8 +810,9 @@ window.DocxStyleEngine = (function(){
     return '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
   }
 
-  function tocFieldXml(variant, headingText){
-    const switches = variant === "simple" ? '\\o "1-1" \\h \\n \\z' : '\\o "1-1" \\h \\z \\u';
+  function tocFieldXml(variant, headingText, levels){
+    const n = Math.min(3, Math.max(1, parseInt(levels, 10) || 1));
+    const switches = variant === "simple" ? '\\o "1-' + n + '" \\h \\n \\z' : '\\o "1-' + n + '" \\h \\z \\u';
     return paraXml(headingText || "Sisällysluettelo", { bold:true, sz:32 }) +
       '<w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r>' +
       '<w:r><w:instrText xml:space="preserve"> TOC ' + switches + ' </w:instrText></w:r>' +
@@ -1130,7 +1131,7 @@ window.DocxStyleEngine = (function(){
 
     // ---- Pääsisältö (kansilehden jälkeen: TOC, ennen-sivut, itse lomake, jälkeen-sivut) ----
     if (style.toc && style.toc.enabled){
-      finalBodyParts.push(tocFieldXml(style.toc.variant));
+      finalBodyParts.push(tocFieldXml(style.toc.variant, undefined, style.toc.levels));
       finalBodyParts.push(pageBreakXml());
     }
     for (const page of (style.pagesBefore || [])){
