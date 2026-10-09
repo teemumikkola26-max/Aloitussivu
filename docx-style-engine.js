@@ -9,8 +9,10 @@
    {
      coverPage: { enabled, title, subtitle, logoDataUrl, accentColor, companyInfo,
                   sourceMode: "generated"|"docx", docxPath, docxFileName },
-     header: { enabled, text, showDate, align, showLogo, fontSize, color },
-     footer: { enabled, text, showPageNumber, align, fontSize, color },
+     headingNumbering: { enabled },   // true = otsikot numeroidaan 1 / 1.1 / 1.1.1
+     header: { enabled, fontSize, color, left:{type,text}, center:{type,text}, right:{type,text} },
+     footer: { enabled, fontSize, color, left:{type,text}, center:{type,text}, right:{type,text} },
+     // tunnisteen kentän type: none | text | date | page | pageOf | title | logo
      fonts: { heading, body, headingSize, bodySize },
      colors: { heading, body },
      toc: { enabled, variant: "classic"|"simple" },
@@ -39,14 +41,95 @@ window.DocxStyleEngine = (function(){
   function defaultStyle(){
     return {
       coverPage: { enabled:false, title:"", subtitle:"", logoDataUrl:"", accentColor:"#8fb79c", companyInfo:"", sourceMode:"generated", docxPath:"", docxFileName:"" },
-      header: { enabled:false, text:"", showDate:false, align:"left", showLogo:false, fontSize:9, color:"#7a7566" },
-      footer: { enabled:false, text:"", showPageNumber:true, align:"center", fontSize:9, color:"#7a7566" },
+      headingNumbering: { enabled:true },
+      header: { enabled:false, fontSize:9, color:"#7a7566", left:emptySlot(), center:emptySlot(), right:emptySlot() },
+      footer: { enabled:false, fontSize:9, color:"#7a7566", left:emptySlot(), center:{ type:"pageOf", text:"" }, right:emptySlot() },
       fonts: { heading:"Calibri", body:"Calibri", headingSize:16, subheadingSize:11, bodySize:10.5 },
       colors: { heading:"#000000", body:"#1c2430" },
       toc: { enabled:false, variant:"classic" },
       pagesBefore: [],
       pagesAfter: []
     };
+  }
+
+
+  /* ---- Ylä-/alatunnisteen kolme kenttää (vasen, keski, oikea) ---- */
+  const HF_SLOT_TYPES = [
+    ["none","Tyhjä"],
+    ["text","Vapaa teksti"],
+    ["date","Päivämäärä"],
+    ["page","Sivunumero (Sivu 1)"],
+    ["pageOf","Sivunumero (Sivu 1 / 5)"],
+    ["title","Raportin nimi"],
+    ["logo","Logo"]
+  ];
+  const HF_KEYS = ["left","center","right"];
+
+  function emptySlot(){ return { type:"none", text:"" }; }
+
+  // Vanha muoto (text/showDate/align/showLogo/showPageNumber) -> uusi kolmikenttäinen muoto.
+  function migrateLegacyHF(old, kind){
+    const out = { enabled: !!old.enabled, fontSize: old.fontSize || 9, color: old.color || "#7a7566",
+      left: emptySlot(), center: emptySlot(), right: emptySlot() };
+    const align = (old.align === "center" || old.align === "right" || old.align === "left")
+      ? old.align : (kind === "footer" ? "center" : "left");
+    const free = prefs => prefs.find(k => out[k].type === "none");
+    if (old.text) out[align] = { type:"text", text: old.text };
+    if (kind === "header"){
+      if (old.showDate){
+        const k = free(align === "right" ? ["left","center","right"] : ["right","center","left"]);
+        if (k) out[k] = { type:"date", text:"" };
+      }
+      if (old.showLogo){
+        const k = free(["left","right","center"]);
+        if (k) out[k] = { type:"logo", text:"" };
+      }
+    } else {
+      const showPN = old.showPageNumber === undefined ? true : !!old.showPageNumber;
+      if (showPN){
+        const k = free(old.text ? (align === "right" ? ["left","center"] : ["right","center","left"]) : [align,"center","right","left"]);
+        if (k) out[k] = { type:"pageOf", text:"" };
+      }
+    }
+    return out;
+  }
+
+  function mergeHF(saved, def, kind){
+    if (!saved) return JSON.parse(JSON.stringify(def));
+    const isNew = HF_KEYS.some(k => saved[k] && typeof saved[k] === "object");
+    if (!isNew) return migrateLegacyHF(saved, kind);
+    const out = Object.assign({}, def, saved);
+    HF_KEYS.forEach(k => { out[k] = Object.assign(emptySlot(), saved[k] || {}); });
+    return out;
+  }
+
+  /*
+   * Täydentää tallennetun tyylin oletusarvoilla ja muuntaa vanhan
+   * ylä-/alatunnistemuodon uuteen. Idempotentti. Kaikki lataajat käyttävät tätä.
+   */
+  function mergeStyle(saved){
+    const d = defaultStyle();
+    const s = saved || {};
+    const out = Object.assign({}, s);
+    out.coverPage = Object.assign({}, d.coverPage, s.coverPage || {});
+    out.fonts = Object.assign({}, d.fonts, s.fonts || {});
+    out.colors = Object.assign({}, d.colors, s.colors || {});
+    out.toc = Object.assign({}, d.toc, s.toc || {});
+    out.headingNumbering = Object.assign({}, d.headingNumbering, s.headingNumbering || {});
+    out.header = mergeHF(s.header, d.header, "header");
+    out.footer = mergeHF(s.footer, d.footer, "footer");
+    out.pagesBefore = s.pagesBefore || [];
+    out.pagesAfter = s.pagesAfter || [];
+    return out;
+  }
+
+  /* ---- Rikas teksti: runs = [{ text, bold, color }] ---- */
+  function runsPlain(runs){ return (runs || []).map(r => r.text || "").join(""); }
+  function listItemsOf(b){
+    if (Array.isArray(b.itemRuns) && b.itemRuns.length){
+      return b.itemRuns.map(r => ({ runs:r, plain: runsPlain(r) })).filter(x => x.plain.trim() !== "");
+    }
+    return (b.items || []).filter(t => t != null && String(t).trim() !== "").map(t => ({ runs:null, plain:String(t) }));
   }
 
   /*
@@ -80,16 +163,19 @@ window.DocxStyleEngine = (function(){
           color: b.color || style.colors.heading, before:120, after:80
         }));
       } else if (type === "bullets" || type === "numbered"){
-        const items = (b.items || []).filter(s => s != null && String(s).trim() !== "");
-        items.forEach(item => {
-          parts.push(paraXml(item, {
+        listItemsOf(b).forEach(item => {
+          parts.push(paraXml(item.runs ? "" : item.plain, {
             font: style.fonts.body, sz: pt2hp(style.fonts.bodySize), color: b.color || style.colors.body,
-            numId: type === "bullets" ? 1 : 2, after:40
+            numId: type === "bullets" ? 1 : 2, after:40, runs: item.runs || undefined
           }));
         });
       } else {
         // paragraph (myös vanhojen tallenteiden migroitu content-teksti)
-        if (b.text) {
+        if (Array.isArray(b.runs) && b.runs.length && runsPlain(b.runs).trim() !== "") {
+          parts.push(paraXml("", {
+            font: style.fonts.body, sz: pt2hp(style.fonts.bodySize), color: b.color || style.colors.body, after:100, runs: b.runs
+          }));
+        } else if (b.text) {
           parts.push(paraXml(b.text, {
             font: style.fonts.body, sz: pt2hp(style.fonts.bodySize), color: b.color || style.colors.body, after:100
           }));
@@ -126,12 +212,17 @@ window.DocxStyleEngine = (function(){
   //       numId: 1 (luettelomerkki) tai 2 (numeroitu) -- ks. numberingXml(); ilvl: sisennystaso (0 = ensimmäinen)
   function paraXml(text, opts){
     opts = opts || {};
-    const rPr = [];
-    if (opts.font) rPr.push(fontRpr(opts.font));
-    if (opts.bold) rPr.push("<w:b/>");
-    if (opts.italic) rPr.push("<w:i/>");
-    if (opts.color) rPr.push('<w:color w:val="' + opts.color.replace("#","") + '"/>');
-    if (opts.sz) rPr.push('<w:sz w:val="' + opts.sz + '"/><w:szCs w:val="' + opts.sz + '"/>');
+    const rPrFor = o => {
+      const rPr = [];
+      if (o.font) rPr.push(fontRpr(o.font));
+      if (o.bold) rPr.push("<w:b/>");
+      if (o.italic) rPr.push("<w:i/>");
+      if (o.color && /^#?[0-9a-fA-F]{6}$/.test(o.color)) rPr.push('<w:color w:val="' + o.color.replace("#","") + '"/>');
+      if (o.sz) rPr.push('<w:sz w:val="' + o.sz + '"/><w:szCs w:val="' + o.sz + '"/>');
+      return rPr.length ? '<w:rPr>' + rPr.join('') + '</w:rPr>' : "";
+    };
+    const textRuns = t => String(t == null ? "" : t).split(/\r?\n/)
+      .map((line,i) => (i>0?"<w:br/>":"") + '<w:t xml:space="preserve">' + xmlEsc(line) + '</w:t>').join("");
     // OOXML-skeeman mukainen pPr-lasten järjestys: pStyle, numPr, pBdr, spacing, jc
     const pPr = [];
     if (opts.pStyle) pPr.push('<w:pStyle w:val="' + xmlEsc(opts.pStyle) + '"/>');
@@ -149,9 +240,16 @@ window.DocxStyleEngine = (function(){
     }
     if (opts.ind0) pPr.push('<w:ind w:left="0" w:right="0" w:firstLine="0"/>');
     if (opts.align) pPr.push('<w:jc w:val="' + opts.align + '"/>');
-    const lines = String(text == null ? "" : text).split(/\r?\n/);
-    const runs = lines.map((line,i) => (i>0?"<w:br/>":"") + '<w:t xml:space="preserve">' + xmlEsc(line) + '</w:t>').join("");
-    return '<w:p>' + (pPr.length?'<w:pPr>'+pPr.join('')+'</w:pPr>':'') + '<w:r>' + (rPr.length?'<w:rPr>'+rPr.join('')+'</w:rPr>':'') + runs + '</w:r></w:p>';
+    let runsOut;
+    if (Array.isArray(opts.runs) && opts.runs.length){
+      runsOut = opts.runs.filter(r => r && r.text).map(r => '<w:r>' + rPrFor({
+        font: opts.font, sz: opts.sz, italic: opts.italic,
+        bold: opts.bold || r.bold, color: r.color || opts.color
+      }) + textRuns(r.text) + '</w:r>').join("");
+    } else {
+      runsOut = '<w:r>' + rPrFor(opts) + textRuns(text) + '</w:r>';
+    }
+    return '<w:p>' + (pPr.length?'<w:pPr>'+pPr.join('')+'</w:pPr>':'') + runsOut + '</w:p>';
   }
 
   /*
@@ -821,6 +919,45 @@ window.DocxStyleEngine = (function(){
     return { cx, cy };
   }
 
+
+  /* ---- Ylä-/alatunnisteen sisältö: 3 solun taulukko (vasen / keski / oikea) ---- */
+  function hfCellXml(slot, align, o, ctx){
+    const rPrXml = (function(){
+      const r = [];
+      if (o.font) r.push(fontRpr(o.font));
+      if (o.color) r.push('<w:color w:val="' + o.color.replace("#","") + '"/>');
+      if (o.sz) r.push('<w:sz w:val="' + o.sz + '"/><w:szCs w:val="' + o.sz + '"/>');
+      return r.length ? '<w:rPr>' + r.join('') + '</w:rPr>' : "";
+    })();
+    const jc = '<w:pPr><w:jc w:val="' + align + '"/></w:pPr>';
+    const run = t => '<w:r>' + rPrXml + '<w:t xml:space="preserve">' + xmlEsc(t) + '</w:t></w:r>';
+    const fld = instr => '<w:fldSimple w:instr="' + instr + '"><w:r>' + rPrXml + '<w:t>1</w:t></w:r></w:fldSimple>';
+    switch (slot.type){
+      case "text":
+        return '<w:p>' + jc + String(slot.text || "").split(/\r?\n/)
+          .map((line,i) => (i>0 ? '<w:r>' + rPrXml + '<w:br/></w:r>' : "") + run(line)).join("") + '</w:p>';
+      case "date": return '<w:p>' + jc + run(ctx.dateStr) + '</w:p>';
+      case "page": return '<w:p>' + jc + run("Sivu ") + fld("PAGE") + '</w:p>';
+      case "pageOf": return '<w:p>' + jc + run("Sivu ") + fld("PAGE") + run(" / ") + fld("NUMPAGES") + '</w:p>';
+      case "title": return '<w:p>' + jc + run(ctx.title || "") + '</w:p>';
+      case "logo":
+        if (ctx.logo) return imageXml(ctx.logo.rId, ctx.logo.cx, ctx.logo.cy, ctx.logo.docPrId, align);
+        return '<w:p>' + jc + '</w:p>';
+      default: return '<w:p>' + jc + '</w:p>';
+    }
+  }
+
+  function hfTableXml(cells){
+    const w = 3024; // 3 x 3024 = 9072 twipin tekstialue (A4, 2,5 cm marginaalit)
+    const none = '<w:tblBorders><w:top w:val="none" w:sz="0"/><w:left w:val="none" w:sz="0"/><w:bottom w:val="none" w:sz="0"/><w:right w:val="none" w:sz="0"/><w:insideH w:val="none" w:sz="0"/><w:insideV w:val="none" w:sz="0"/></w:tblBorders>';
+    return '<w:tbl><w:tblPr><w:tblW w:w="' + (w*3) + '" w:type="dxa"/>' + none + '<w:tblLayout w:type="fixed"/>' +
+      '<w:tblCellMar><w:top w:w="0" w:type="dxa"/><w:left w:w="0" w:type="dxa"/><w:bottom w:w="0" w:type="dxa"/><w:right w:w="0" w:type="dxa"/></w:tblCellMar></w:tblPr>' +
+      '<w:tblGrid><w:gridCol w:w="' + w + '"/><w:gridCol w:w="' + w + '"/><w:gridCol w:w="' + w + '"/></w:tblGrid><w:tr>' +
+      cells.map(c => '<w:tc><w:tcPr><w:tcW w:w="' + w + '" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>' + c + '</w:tc>').join("") +
+      '</w:tr></w:tbl>' +
+      '<w:p><w:pPr><w:spacing w:before="0" w:after="0"/><w:rPr><w:sz w:val="2"/></w:rPr></w:pPr></w:p>';
+  }
+
   /* -----------------------------------------------------------------------
      assembleDocx({ meta:{title}, bodyParts: [xmlString,...], style })
      bodyParts pitää rakentaa kutsujan puolella tämän moduulin paraXml/
@@ -828,7 +965,8 @@ window.DocxStyleEngine = (function(){
      kutsuissa saadaksesi valitun ulkoasun).
      ----------------------------------------------------------------------- */
   async function assembleDocx({ meta, bodyParts, style, extraMedia }){
-    style = style || defaultStyle();
+    style = mergeStyle(style);
+    meta = meta || {};
     extraMedia = extraMedia || []; // [{ rId, name, blob }] -- kutsujan itse hallinnoimat sisältökuvat
     const relParts = [];
     const contentTypeOverrides = [];
@@ -861,7 +999,8 @@ window.DocxStyleEngine = (function(){
     });
 
     let logoInfo = null;
-    if (style.coverPage && style.coverPage.logoDataUrl && (style.coverPage.enabled || (style.header && style.header.showLogo))){
+    const hfUses = (hf, type) => !!(hf && hf.enabled && HF_KEYS.some(k => hf[k] && hf[k].type === type));
+    if (style.coverPage && style.coverPage.logoDataUrl && (style.coverPage.enabled || hfUses(style.header, "logo") || hfUses(style.footer, "logo"))){
       try{
         logoInfo = await dataUrlToBlobAndDims(style.coverPage.logoDataUrl);
       }catch(e){ logoInfo = null; }
@@ -879,56 +1018,32 @@ window.DocxStyleEngine = (function(){
     // samalta kuin sovelluksen muut sivut.
     let headerRefXml = "", footerRefXml = "";
 
-    if (style.header && style.header.enabled){
+    const hfDate = (function(){ const d = new Date(); return d.getDate() + "." + (d.getMonth()+1) + "." + d.getFullYear(); })();
+    let hfLogoMediaAdded = false;
+    function buildHeaderFooterRef(kind, hf){
       const rId = importCtx.relCounter.value++;
-      let headerText = style.header.text || "";
-      if (style.header.showDate){
-        const d = new Date();
-        const dateStr = d.getDate() + "." + (d.getMonth()+1) + "." + d.getFullYear();
-        headerText = headerText ? headerText + " — " + dateStr : dateStr;
+      const fileName = kind + "1.xml";
+      const o = { font: style.fonts.body, sz: pt2hp(hf.fontSize || 9), color: hf.color || "#7a7566" };
+      const ctx = { title: meta.title || "", dateStr: hfDate, logo: null };
+      let relsContent = "";
+      if (logoInfo && HF_KEYS.some(k => hf[k].type === "logo")){
+        const { cx, cy } = scaledDims(logoInfo.w, logoInfo.h, 900000, 600000);
+        ctx.logo = { rId:1, cx, cy, docPrId: kind === "header" ? 900 : 901 };
+        if (!hfLogoMediaAdded){ mediaFiles.push({ name:"header-logo.jpeg", blob: logoInfo.blob }); hfLogoMediaAdded = true; }
+        relsContent = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/header-logo.jpeg"/></Relationships>';
       }
-      const headerAlign = style.header.align || "left";
-      let headerBodyXml = "";
-      let headerRelsContent = "";
-
-      if (style.header.showLogo && logoInfo){
-        const maxCx = 900000; // pieni logo ylätunnisteessa
-        const { cx, cy } = scaledDims(logoInfo.w, logoInfo.h, maxCx);
-        mediaFiles.push({ name:"header-logo.jpeg", blob: logoInfo.blob });
-        // Ylätunnisteen kuvaviittaukset käyttävät OMAA rels-tiedostoaan (header1.xml.rels),
-        // joten rId1 tässä ei törmää dokumentin muihin rId:eihin.
-        headerRelsContent = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/header-logo.jpeg"/></Relationships>';
-        headerBodyXml += imageXml(1, cx, cy, 900, headerAlign);
-      }
-      headerBodyXml += paraXml(headerText, {
-        font: style.fonts.body, sz: pt2hp(style.header.fontSize || 9), color: (style.header.color || "#7a7566"), align: headerAlign
-      });
-
-      const headerXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">' +
-        headerBodyXml + '</w:hdr>';
-      headerFolderFiles.push({ name:"header1.xml", content: headerXml });
-      if (headerRelsContent) headerRelsFiles.push({ name:"header1.xml.rels", content: headerRelsContent });
-      relParts.push('<Relationship Id="rId'+rId+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/>');
-      contentTypeOverrides.push('<Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>');
-      headerRefXml = '<w:headerReference w:type="default" r:id="rId'+rId+'"/>';
+      const root = kind === "header" ? "w:hdr" : "w:ftr";
+      const xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<' + root +
+        ' xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing">' +
+        hfTableXml(HF_KEYS.map(k => hfCellXml(hf[k], k, o, ctx))) + '</' + root + '>';
+      headerFolderFiles.push({ name: fileName, content: xml });
+      if (relsContent) headerRelsFiles.push({ name: fileName + ".rels", content: relsContent });
+      relParts.push('<Relationship Id="rId' + rId + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/' + kind + '" Target="' + fileName + '"/>');
+      contentTypeOverrides.push('<Override PartName="/word/' + fileName + '" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.' + kind + '+xml"/>');
+      return '<w:' + kind + 'Reference w:type="default" r:id="rId' + rId + '"/>';
     }
-    if (style.footer && style.footer.enabled){
-      const rId = importCtx.relCounter.value++;
-      const footerAlign = style.footer.align || "center";
-      const footerFontOpts = { font: style.fonts.body, sz: pt2hp(style.footer.fontSize || 9), color: (style.footer.color || "#7a7566") };
-      let footerXml;
-      if (style.footer.showPageNumber){
-        footerXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
-          pageNumberFieldXml(style.footer.text || "", footerAlign, footerFontOpts) + '</w:ftr>';
-      } else {
-        footerXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
-          paraXml(style.footer.text || "", Object.assign({ align:footerAlign }, footerFontOpts)) + '</w:ftr>';
-      }
-      headerFolderFiles.push({ name:"footer1.xml", content: footerXml });
-      relParts.push('<Relationship Id="rId'+rId+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/>');
-      contentTypeOverrides.push('<Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/>');
-      footerRefXml = '<w:footerReference w:type="default" r:id="rId'+rId+'"/>';
-    }
+    if (style.header && style.header.enabled) headerRefXml = buildHeaderFooterRef("header", style.header);
+    if (style.footer && style.footer.enabled) footerRefXml = buildHeaderFooterRef("footer", style.footer);
 
     // Sivukohtaisesti tuoduille vakiotekstisivuille (importDocxAsSection,
     // label "page") jaettavat samat viittaukset, ks. kommentti kohdassa
@@ -1076,20 +1191,22 @@ window.DocxStyleEngine = (function(){
       'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"' + extraNsAttrs + '>' +
       '<w:body>' + finalBodyParts.join('') + finalSectPr + '</w:body></w:document>';
 
+    const numOn = !(style.headingNumbering && style.headingNumbering.enabled === false);
+    const hnum = lvl => numOn ? '<w:numPr>' + (lvl ? '<w:ilvl w:val="' + lvl + '"/>' : '') + '<w:numId w:val="3"/></w:numPr>' : '';
     const stylesXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' +
       '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"' + nsAttrsExcluding(["w"]) + '>' +
       '<w:docDefaults><w:rPrDefault><w:rPr>' + fontRpr(style.fonts.body) + '<w:color w:val="' + (style.colors.body||"#1c2430").replace("#","") + '"/><w:sz w:val="' + pt2hp(style.fonts.bodySize||10.5) + '"/></w:rPr></w:rPrDefault></w:docDefaults>' +
       '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>' +
       '<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:qFormat/>' +
-      '<w:pPr><w:numPr><w:numId w:val="3"/></w:numPr><w:outlineLvl w:val="0"/></w:pPr>' +
+      '<w:pPr>' + hnum(0) + '<w:outlineLvl w:val="0"/></w:pPr>' +
       '<w:rPr>' + fontRpr(style.fonts.heading) + '<w:b/><w:color w:val="' + (style.colors.heading||"#233043").replace("#","") + '"/><w:sz w:val="' + pt2hp(style.fonts.headingSize||14) + '"/></w:rPr>' +
       '</w:style>' +
       '<w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:basedOn w:val="Normal"/><w:qFormat/>' +
-      '<w:pPr><w:numPr><w:ilvl w:val="1"/><w:numId w:val="3"/></w:numPr><w:outlineLvl w:val="1"/></w:pPr>' +
+      '<w:pPr>' + hnum(1) + '<w:outlineLvl w:val="1"/></w:pPr>' +
       '<w:rPr>' + fontRpr(style.fonts.heading) + '<w:b/><w:color w:val="' + (style.colors.heading||"#233043").replace("#","") + '"/><w:sz w:val="' + pt2hp(style.fonts.subheadingSize||11) + '"/></w:rPr>' +
       '</w:style>' +
       '<w:style w:type="paragraph" w:styleId="Heading3"><w:name w:val="heading 3"/><w:basedOn w:val="Normal"/><w:qFormat/>' +
-      '<w:pPr><w:numPr><w:ilvl w:val="2"/><w:numId w:val="3"/></w:numPr><w:outlineLvl w:val="2"/></w:pPr>' +
+      '<w:pPr>' + hnum(2) + '<w:outlineLvl w:val="2"/></w:pPr>' +
       '<w:rPr>' + fontRpr(style.fonts.heading) + '<w:b/><w:color w:val="' + (style.colors.heading||"#233043").replace("#","") + '"/><w:sz w:val="' + pt2hp(style.fonts.subheadingSize||11) + '"/></w:rPr>' +
       '</w:style>' +
       importCtx.importedStyleDefs.join('') +
@@ -1156,5 +1273,5 @@ window.DocxStyleEngine = (function(){
     return zip.generateAsync({ type:"blob", mimeType:"application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
   }
 
-  return { defaultStyle, FONT_CHOICES, xmlEsc, paraXml, imageXml, pageBreakXml, tocFieldXml, tableXml, pxToEmu, scaledDims, pt2hp, assembleDocx, normalizePage };
+  return { defaultStyle, FONT_CHOICES, xmlEsc, paraXml, imageXml, pageBreakXml, tocFieldXml, tableXml, pxToEmu, scaledDims, pt2hp, assembleDocx, normalizePage, mergeStyle, HF_SLOT_TYPES, runsPlain };
 })();
