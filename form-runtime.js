@@ -732,14 +732,41 @@ function colorWithAlpha(hex, alpha){
   return "#" + h + alpha;
 }
 
+/*
+ * Lomakkeen kolme tasoa: ryhmä (valinnainen, sec.group) > osio > kenttä.
+ * Peräkkäiset osiot, joilla on sama ryhmän nimi, kuuluvat samaan ryhmään.
+ * Ryhmätön osio on ylimmällä tasolla. Sama logiikka numeroi Word-otsikot (1, 1.1).
+ */
+function computeSectionNumbering(){
+  let top = 0, sub = 0, lastGroup = null;
+  return DEF.sections.map(sec => {
+    const g = String(sec.group || "").trim();
+    if (g){
+      const newGroup = g !== lastGroup;
+      if (newGroup){ top++; sub = 0; lastGroup = g; }
+      sub++;
+      return { group:g, groupStart:newGroup, groupNum:top, label: top + "." + sub };
+    }
+    top++; sub = 0; lastGroup = null;
+    return { group:"", groupStart:false, groupNum:top, label:String(top) };
+  });
+}
+
 function renderSections(){
   stopDictation();
   const main = document.getElementById("sections");
   main.innerHTML = "";
   hintHolders = [];
   sectionBadges = [];
+  const secNums = computeSectionNumbering();
   DEF.sections.forEach((sec, secIdx) => {
     const { done, total, notes } = fieldCounts(sec);
+    if (secNums[secIdx].groupStart){
+      const gh = document.createElement("div");
+      gh.className = "group-head";
+      gh.innerHTML = '<span class="section-num">' + secNums[secIdx].groupNum + '</span><span>' + escapeHtml(secNums[secIdx].group) + '</span>';
+      main.appendChild(gh);
+    }
     const secDiv = document.createElement("div");
     secDiv.className = "section" + (openSections.has(sec.id) ? " open" : "");
     secDiv.id = "sec_" + sec.id;
@@ -747,7 +774,7 @@ function renderSections(){
     const head = document.createElement("div");
     head.className = "section-head";
     head.innerHTML =
-      '<div class="section-title-wrap"><span class="section-num">' + (secIdx+1) + '</span>' +
+      '<div class="section-title-wrap"><span class="section-num">' + secNums[secIdx].label + '</span>' +
       '<h2>' + escapeHtml(sec.title) + '</h2></div>' +
       '<span class="hint-badge" data-badge style="display:none"></span>' +
       '<span class="section-count ' + (done===total?'complete':(notes>0?'has-notes':'')) + '">' + done + '/' + total + '</span>' +
@@ -969,6 +996,7 @@ function renderQuickNav(){
   const wrap = document.getElementById("quickNav");
   if (!wrap) return;
   wrap.innerHTML = "";
+  const secNums = computeSectionNumbering();
   DEF.sections.forEach((sec, i) => {
     const { done, total, notes } = fieldCounts(sec);
     const chip = document.createElement("button");
@@ -979,7 +1007,7 @@ function renderQuickNav(){
     if (notes > 0) cls += " qn-attention";
     if (openSections.has(sec.id)) cls += " qn-active";
     chip.className = cls;
-    chip.textContent = String(i + 1);
+    chip.textContent = secNums[i].label;
     chip.title = sec.title + " (" + done + "/" + total + ")";
     chip.addEventListener("click", () => jumpToSection(sec.id));
     wrap.appendChild(chip);
@@ -1137,8 +1165,18 @@ async function buildDocx(){
   const headerLines = (DEF.headerFields||[]).map(f => f.label + ": " + (state.header[f.id] || "—")).join("\n");
   bodyParts.push(engine.paraXml(headerLines, { font:s.fonts.body, sz:engine.pt2hp(s.fonts.bodySize), color:s.colors.body, after:240 }));
 
+  const secNums = computeSectionNumbering();
   DEF.sections.forEach((sec, secIdx) => {
-    bodyParts.push(engine.paraXml(sec.title, { bold:true, sz:engine.pt2hp(s.fonts.headingSize), font:s.fonts.heading, color:s.colors.heading, pStyle:"Heading1", before:260, after:120 }));
+    const nm = secNums[secIdx];
+    if (nm.groupStart){
+      // Taso 1: ryhmä = Heading1; sen alla osiot Heading2 (numerointi 1 / 1.1)
+      bodyParts.push(engine.paraXml(nm.group, { bold:true, sz:engine.pt2hp(s.fonts.headingSize), font:s.fonts.heading, color:s.colors.heading, pStyle:"Heading1", before:260, after:120 }));
+    }
+    if (nm.group){
+      bodyParts.push(engine.paraXml(sec.title, { bold:true, sz:engine.pt2hp(s.fonts.subheadingSize || 11), font:s.fonts.heading, color:s.colors.heading, pStyle:"Heading2", before:200, after:100 }));
+    } else {
+      bodyParts.push(engine.paraXml(sec.title, { bold:true, sz:engine.pt2hp(s.fonts.headingSize), font:s.fonts.heading, color:s.colors.heading, pStyle:"Heading1", before:260, after:120 }));
+    }
 
     sec.fields.forEach((field) => {
       const itemId = sec.id + "_" + field.id;

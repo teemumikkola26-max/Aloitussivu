@@ -643,7 +643,21 @@ function buildSectionsCard(){
   const body = document.createElement("div");
   body.className = "card-body";
 
+  const groupHint = document.createElement("div");
+  groupHint.style.cssText = "font-size:.78rem;color:var(--ink-soft);margin-bottom:10px;";
+  groupHint.textContent = "Lomakkeella on kolme tasoa: ryhmä (valinnainen) > osio > kenttä. Anna osiolle Ryhmä-kenttään nimi, niin peräkkäiset samannimiset osiot kootaan yhden ryhmäotsikon alle (Wordissa 1 / 1.1). Ilman ryhmää osio on ylimmällä tasolla kuten ennen.";
+  body.appendChild(groupHint);
+
+  let prevGroup = null;
   ed.sections.forEach((sec, secIdx) => {
+    const g = String(sec.group || "").trim();
+    if (g && g !== prevGroup){
+      const gl = document.createElement("div");
+      gl.className = "group-label";
+      gl.textContent = "Ryhmä: " + g;
+      body.appendChild(gl);
+    }
+    prevGroup = g || null;
     body.appendChild(buildSectionBlock(sec, secIdx));
   });
 
@@ -652,7 +666,10 @@ function buildSectionsCard(){
   addSectionBtn.className = "add-row-btn";
   addSectionBtn.textContent = "+ Lisää osio";
   addSectionBtn.addEventListener("click", () => {
-    ed.sections.push({ id:genId(), title:"Uusi osio", fields:[] });
+    const lastSec = ed.sections[ed.sections.length - 1];
+    const newSec = { id:genId(), title:"Uusi osio", fields:[] };
+    if (lastSec && lastSec.group) newSec.group = lastSec.group; // jatkaa edellisen ryhmää
+    ed.sections.push(newSec);
     renderEditor();
   });
   body.appendChild(addSectionBtn);
@@ -698,6 +715,20 @@ function buildSectionBlock(sec, secIdx){
   head.appendChild(downBtn);
   head.appendChild(delBtn);
   block.appendChild(head);
+
+  // Taso 1 (valinnainen): ryhmä osion yläpuolella
+  const groupInput = textInput(sec.group || "", v => { sec.group = v; }, "Ryhmä (valinnainen), esim. Rakennetekniikka");
+  groupInput.style.cssText = "width:100%;margin:6px 0;";
+  groupInput.setAttribute("list", "groupNames");
+  groupInput.addEventListener("change", () => renderEditor());
+  block.appendChild(groupInput);
+  let dl = document.getElementById("groupNames");
+  if (!dl){ dl = document.createElement("datalist"); dl.id = "groupNames"; document.body.appendChild(dl); }
+  dl.innerHTML = "";
+  Array.from(new Set(ed.sections.map(x => String(x.group || "").trim()).filter(Boolean))).forEach(g => {
+    const o = document.createElement("option"); o.value = g; dl.appendChild(o);
+  });
+
   block.appendChild(buildHintsEditor(sec, "s:" + sec.id, "💡 Osion ohjeet (näkyvät osion alussa)"));
   const hintGap = document.createElement("div");
   hintGap.style.height = "10px";

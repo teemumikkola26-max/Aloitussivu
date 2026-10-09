@@ -10,6 +10,7 @@
      coverPage: { enabled, title, subtitle, logoDataUrl, accentColor, companyInfo,
                   sourceMode: "generated"|"docx", docxPath, docxFileName },
      headingNumbering: { enabled },   // true = otsikot numeroidaan 1 / 1.1 / 1.1.1
+     coverHeader / coverFooter: sama muoto kuin header/footer, vain generoidun kansilehden oma tunniste
      header: { enabled, fontSize, color, left:{type,text}, center:{type,text}, right:{type,text} },
      footer: { enabled, fontSize, color, left:{type,text}, center:{type,text}, right:{type,text} },
      // tunnisteen kentän type: none | text | date | page | pageOf | title | logo
@@ -46,6 +47,8 @@ window.DocxStyleEngine = (function(){
       footer: { enabled:false, fontSize:9, color:"#7a7566", left:emptySlot(), center:{ type:"pageOf", text:"" }, right:emptySlot() },
       fonts: { heading:"Calibri", body:"Calibri", headingSize:16, subheadingSize:11, bodySize:10.5 },
       colors: { heading:"#000000", body:"#1c2430" },
+      coverHeader: { enabled:false, fontSize:9, color:"#7a7566", left:emptySlot(), center:emptySlot(), right:emptySlot() },
+      coverFooter: { enabled:false, fontSize:9, color:"#7a7566", left:emptySlot(), center:emptySlot(), right:emptySlot() },
       toc: { enabled:false, variant:"classic" },
       pagesBefore: [],
       pagesAfter: []
@@ -118,6 +121,8 @@ window.DocxStyleEngine = (function(){
     out.headingNumbering = Object.assign({}, d.headingNumbering, s.headingNumbering || {});
     out.header = mergeHF(s.header, d.header, "header");
     out.footer = mergeHF(s.footer, d.footer, "footer");
+    out.coverHeader = mergeHF(s.coverHeader, d.coverHeader, "header");
+    out.coverFooter = mergeHF(s.coverFooter, d.coverFooter, "footer");
     out.pagesBefore = s.pagesBefore || [];
     out.pagesAfter = s.pagesAfter || [];
     return out;
@@ -1000,7 +1005,7 @@ window.DocxStyleEngine = (function(){
 
     let logoInfo = null;
     const hfUses = (hf, type) => !!(hf && hf.enabled && HF_KEYS.some(k => hf[k] && hf[k].type === type));
-    if (style.coverPage && style.coverPage.logoDataUrl && (style.coverPage.enabled || hfUses(style.header, "logo") || hfUses(style.footer, "logo"))){
+    if (style.coverPage && style.coverPage.logoDataUrl && (style.coverPage.enabled || hfUses(style.header, "logo") || hfUses(style.footer, "logo") || hfUses(style.coverHeader, "logo") || hfUses(style.coverFooter, "logo"))){
       try{
         logoInfo = await dataUrlToBlobAndDims(style.coverPage.logoDataUrl);
       }catch(e){ logoInfo = null; }
@@ -1020,15 +1025,17 @@ window.DocxStyleEngine = (function(){
 
     const hfDate = (function(){ const d = new Date(); return d.getDate() + "." + (d.getMonth()+1) + "." + d.getFullYear(); })();
     let hfLogoMediaAdded = false;
-    function buildHeaderFooterRef(kind, hf){
+    // tag: "1" = pääsisältö, "2" = kansilehti, "3" = tyhjä (estää tunnisteen perimisen edelliseltä sectiolta)
+    function buildHeaderFooterRef(kind, hf, tag){
+      tag = tag || "1";
       const rId = importCtx.relCounter.value++;
-      const fileName = kind + "1.xml";
+      const fileName = kind + tag + ".xml";
       const o = { font: style.fonts.body, sz: pt2hp(hf.fontSize || 9), color: hf.color || "#7a7566" };
       const ctx = { title: meta.title || "", dateStr: hfDate, logo: null };
       let relsContent = "";
       if (logoInfo && HF_KEYS.some(k => hf[k].type === "logo")){
         const { cx, cy } = scaledDims(logoInfo.w, logoInfo.h, 900000, 600000);
-        ctx.logo = { rId:1, cx, cy, docPrId: kind === "header" ? 900 : 901 };
+        ctx.logo = { rId:1, cx, cy, docPrId: (kind === "header" ? 900 : 910) + Number(tag) };
         if (!hfLogoMediaAdded){ mediaFiles.push({ name:"header-logo.jpeg", blob: logoInfo.blob }); hfLogoMediaAdded = true; }
         relsContent = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/header-logo.jpeg"/></Relationships>';
       }
@@ -1044,6 +1051,18 @@ window.DocxStyleEngine = (function(){
     }
     if (style.header && style.header.enabled) headerRefXml = buildHeaderFooterRef("header", style.header);
     if (style.footer && style.footer.enabled) footerRefXml = buildHeaderFooterRef("footer", style.footer);
+
+    // Kansilehden OMA ylä-/alatunniste (vain sovelluksen generoimalle kansilehdelle).
+    // Word perii puuttuvan tunnisteen edelliseltä sectiolta, joten jos kansilehdellä on
+    // tunniste mutta pääsisällöllä ei, pääsisällölle luodaan tyhjä tunniste.
+    let coverHeaderRefXml = "", coverFooterRefXml = "";
+    if (style.coverPage && style.coverPage.enabled && style.coverPage.sourceMode !== "docx"){
+      if (style.coverHeader && style.coverHeader.enabled) coverHeaderRefXml = buildHeaderFooterRef("header", style.coverHeader, "2");
+      if (style.coverFooter && style.coverFooter.enabled) coverFooterRefXml = buildHeaderFooterRef("footer", style.coverFooter, "2");
+    }
+    const blankHF = { fontSize:9, color:"#7a7566", left:emptySlot(), center:emptySlot(), right:emptySlot() };
+    if (coverHeaderRefXml && !headerRefXml) headerRefXml = buildHeaderFooterRef("header", blankHF, "3");
+    if (coverFooterRefXml && !footerRefXml) footerRefXml = buildHeaderFooterRef("footer", blankHF, "3");
 
     // Sivukohtaisesti tuoduille vakiotekstisivuille (importDocxAsSection,
     // label "page") jaettavat samat viittaukset, ks. kommentti kohdassa
@@ -1105,7 +1124,7 @@ window.DocxStyleEngine = (function(){
       // Sectionin päätös: ladatulla sivulla sen OMA sivukoko/marginaalit (ja ylä-/alatunniste,
       // jos sillä oli sellainen); generoidulla kansilehdellä ennallaan puhdas, ilman ylä/alatunnistetta.
       finalBodyParts.push(
-        '<w:p><w:pPr>' + (coverSectPr || '<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1417" w:right="1417" w:bottom="1417" w:left="1417"/></w:sectPr>') + '</w:pPr></w:p>'
+        '<w:p><w:pPr>' + (coverSectPr || '<w:sectPr>' + coverHeaderRefXml + coverFooterRefXml + '<w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1417" w:right="1417" w:bottom="1417" w:left="1417"/></w:sectPr>') + '</w:pPr></w:p>'
       );
     }
 

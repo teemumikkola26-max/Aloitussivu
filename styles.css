@@ -469,3 +469,7 @@
 }
 
 [contenteditable][data-placeholder]:empty::before{content:attr(data-placeholder);color:#9a9a9a;pointer-events:none;}
+
+.group-head{display:flex;align-items:center;gap:9px;margin:18px 4px 8px;font-size:1.05rem;font-weight:700;color:var(--brand-deep);}
+.group-head .section-num{font-size:.78rem;padding:3px 8px;}
+.group-label{margin:14px 0 6px;padding:4px 8px;font-size:.8rem;font-weight:700;color:var(--brand-deep);border-left:4px solid var(--brand);background:var(--paper);}

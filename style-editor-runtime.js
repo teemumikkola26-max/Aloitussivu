@@ -114,6 +114,10 @@ function renderEditor(){
   const root = document.getElementById("editorRoot");
   root.innerHTML = "";
   root.appendChild(buildCoverCard());
+  if (style.coverPage.enabled && style.coverPage.sourceMode !== "docx"){
+    root.appendChild(buildHeaderFooterCard("coverHeader", "Kansilehden ylätunniste", "Näytä ylätunniste kansilehdellä"));
+    root.appendChild(buildHeaderFooterCard("coverFooter", "Kansilehden alatunniste", "Näytä alatunniste kansilehdellä"));
+  }
   root.appendChild(buildHeaderCard());
   root.appendChild(buildFooterCard());
   root.appendChild(buildFontsCard());
@@ -802,8 +806,8 @@ function resizeImageToDataUrl(file, maxDim){
   });
 }
 
-function buildHeaderCard(){ return buildHeaderFooterCard("header", "Ylätunniste", "Näytä ylätunniste jokaisella sivulla"); }
-function buildFooterCard(){ return buildHeaderFooterCard("footer", "Alatunniste", "Näytä alatunniste jokaisella sivulla"); }
+function buildHeaderCard(){ return buildHeaderFooterCard("header", "Ylätunniste (muut sivut)", "Näytä ylätunniste kansilehden jälkeisillä sivuilla"); }
+function buildFooterCard(){ return buildHeaderFooterCard("footer", "Alatunniste (muut sivut)", "Näytä alatunniste kansilehden jälkeisillä sivuilla"); }
 
 /* Ylä- ja alatunniste ovat samanlaiset: kolme kenttää (vasen, keski, oikea),
    joihin kuhunkin valitaan sisältötyyppi ja tarvittaessa sisältö. */
