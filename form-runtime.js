@@ -1091,18 +1091,7 @@ async function loadDocStyle(){
       .eq("form_key", FORM_ID)
       .maybeSingle();
     if (error || !data){ loadedDocStyle = window.DocxStyleEngine.defaultStyle(); return; }
-    const d = window.DocxStyleEngine.defaultStyle();
-    const s = data.style || {};
-    loadedDocStyle = {
-      coverPage: Object.assign({}, d.coverPage, s.coverPage || {}),
-      header: Object.assign({}, d.header, s.header || {}),
-      footer: Object.assign({}, d.footer, s.footer || {}),
-      fonts: Object.assign({}, d.fonts, s.fonts || {}),
-      colors: Object.assign({}, d.colors, s.colors || {}),
-      toc: Object.assign({}, d.toc, s.toc || {}),
-      pagesBefore: s.pagesBefore || [],
-      pagesAfter: s.pagesAfter || []
-    };
+    loadedDocStyle = window.DocxStyleEngine.mergeStyle(data.style);
     await fetchDocxAttachments(loadedDocStyle);
   }catch(err){
     loadedDocStyle = window.DocxStyleEngine.defaultStyle();
@@ -1149,7 +1138,7 @@ async function buildDocx(){
   bodyParts.push(engine.paraXml(headerLines, { font:s.fonts.body, sz:engine.pt2hp(s.fonts.bodySize), color:s.colors.body, after:240 }));
 
   DEF.sections.forEach((sec, secIdx) => {
-    bodyParts.push(engine.paraXml((secIdx+1) + ". " + sec.title, { bold:true, sz:engine.pt2hp(s.fonts.headingSize), font:s.fonts.heading, color:s.colors.heading, pStyle:"Heading1", before:260, after:120 }));
+    bodyParts.push(engine.paraXml(sec.title, { bold:true, sz:engine.pt2hp(s.fonts.headingSize), font:s.fonts.heading, color:s.colors.heading, pStyle:"Heading1", before:260, after:120 }));
 
     sec.fields.forEach((field) => {
       const itemId = sec.id + "_" + field.id;
