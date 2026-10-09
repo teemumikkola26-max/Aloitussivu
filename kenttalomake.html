@@ -797,6 +797,15 @@ input:focus,select:focus,textarea:focus{
 }
 .setting-row{display:flex;gap:10px;align-items:center;font-size:14px;padding:6px 0}
 .setting-row input{width:22px;height:22px;margin:0}
+.plan-open-btn{margin-bottom:12px}
+.pdfv .pv-top{min-height:56px}
+.pdfv-title{font-size:14px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:0 1 auto}
+.pdfv-zoom{font-size:12px;min-width:44px;text-align:center}
+.pdfv-scroll{flex:1;min-height:0;overflow:auto;background:#1c1c19;padding:8px;-webkit-overflow-scrolling:touch;touch-action:pan-x pan-y pinch-zoom}
+.pdfv-page{background:#fff;margin:0 auto 8px;box-shadow:0 1px 6px rgba(0,0,0,.5)}
+.pdfv-page canvas{display:block}
+.pdfv-msg{color:#ddd;padding:24px;text-align:center;font-size:14px}
+.pdfv-ind{position:absolute;left:50%;transform:translateX(-50%);bottom:calc(14px + env(safe-area-inset-bottom));background:rgba(0,0,0,.7);color:#fff;font-size:12px;padding:4px 10px;border-radius:999px;pointer-events:none}
 </style>
 </head>
 
@@ -1303,6 +1312,15 @@ let floorPlanPreviewPage=1;
  * jotta yhteysongelma ei voi hävittää pohjakuvaa kokonaan.
  */
 let pendingOldFloorPlanPath=null;
+/* Tutkimussuunnitelma (PDF) */
+let researchPlanBlob=null;
+let researchPlanPath=null;
+let researchPlanName="";
+let pendingOldResearchPlanPath=null;
+let researchPlanCleared=false;
+const RESEARCH_PLAN_MAX_BYTES=25*1024*1024;
+/* Sovelluksen sisäinen PDF-katselin (null kun suljettu) */
+let pdfViewer=null;
 
 const MARKER_COLORS=[
   "#e85908",
@@ -1418,6 +1436,9 @@ const DB_STORE="state";
 
 function floorPlanKey(){
   return "kenttalomake_floorplan_"+SUBMISSION_ID;
+}
+function researchPlanKey(){
+  return "kenttalomake_researchplan_"+SUBMISSION_ID;
 }
 
 /*
@@ -2060,6 +2081,21 @@ async function mergeRemote(remote){
       console.warn("Pohjakuvan haku epäonnistui",err);
     }
   }
+  /* Tutkimussuunnitelma: otetaan pilven versio, ellei paikallinen ole vielä lähettämättä */
+  const rpl=d.researchPlan;
+  const rplLocalPending=!!(researchPlanBlob && !researchPlanPath);
+  if(rpl && rpl.path && !rplLocalPending && !researchPlanCleared && rpl.path!==researchPlanPath){
+    try{
+      const blob=await window.SubmissionSync.downloadPhoto(rpl.path);
+      researchPlanBlob=blob;
+      researchPlanPath=rpl.path;
+      researchPlanName=rpl.name||"tutkimussuunnitelma.pdf";
+      await persistResearchPlanLocal();
+      out.changed=true;
+    }catch(err){
+      console.warn("Tutkimussuunnitelman haku epäonnistui",err);
+    }
+  }
 
   return out;
 }
@@ -2246,6 +2282,30 @@ async function syncToCloud(){
      * joilla on olemassa oleva storage-polku.
      */
     /*
+     * Tutkimussuunnitelma. Jokainen versio saa oman tiedostonimen,
+     * jolloin vanha voidaan poistaa vasta uuden tallennuttua.
+     */
+    if(researchPlanBlob && !researchPlanPath){
+      try{
+        const np=await window.SubmissionSync.uploadPhoto(
+          SUBMISSION_ID,
+          "tutkimussuunnitelma-"+Date.now()+".pdf",
+          researchPlanBlob
+        );
+        if(np){
+          researchPlanPath=np;
+          await persistResearchPlanLocal();
+          if(pendingOldResearchPlanPath && pendingOldResearchPlanPath!==np){
+            const toDelete=pendingOldResearchPlanPath;
+            pendingOldResearchPlanPath=null;
+            await window.SubmissionSync.deletePhotoFile(toDelete);
+          }
+        }
+      }catch(err){
+        console.warn("Tutkimussuunnitelman lataus epäonnistui",err);
+      }
+    }
+    /*
      * Haetaan pilven tuorein versio ja yhdistetään se paikalliseen,
      * jotta toisen käyttäjän lisäykset eivät ylikirjoitu.
      */
@@ -2292,7 +2352,10 @@ async function syncToCloud(){
         project,
         entries:cloudEntries,
         deletedEntryIds,
-        floorPlanPath:floorPlanPath||null
+        floorPlanPath:floorPlanPath||null,
+        researchPlan:researchPlanPath
+          ? {path:researchPlanPath,name:researchPlanName||"tutkimussuunnitelma.pdf"}
+          : null
       }
     });
 
@@ -2300,6 +2363,7 @@ async function syncToCloud(){
       (savedRow && savedRow.updated_at) || lastRemoteUpdatedAt;
 
     projectDirty={};
+    researchPlanCleared=false;
 
     markEntriesSynced();
 
@@ -2507,6 +2571,29 @@ async function loadState(){
       }
 
 
+      /*
+       * Tutkimussuunnitelma.
+       */
+      if(sub.data.researchPlan && sub.data.researchPlan.path){
+        try{
+          researchPlanBlob=
+            await window.SubmissionSync.downloadPhoto(
+              sub.data.researchPlan.path
+            );
+          researchPlanPath=sub.data.researchPlan.path;
+          researchPlanName=
+            sub.data.researchPlan.name||"tutkimussuunnitelma.pdf";
+          await persistResearchPlanLocal();
+        }catch(err){
+          console.warn("Tutkimussuunnitelman lataus epäonnistui",err);
+          researchPlanBlob=null;
+          researchPlanPath=null;
+          researchPlanName="";
+        }
+      }else{
+        /* Paikallinen, vielä pilveen lähettämätön suunnitelma */
+        await loadResearchPlanLocal();
+      }
       loadedFromCloud=true;
 
       setSyncStatus(
@@ -2782,7 +2869,8 @@ function confirmClearForm(){
     !project.nimi &&
     !project.tilaaja &&
     entries.length===0 &&
-    !floorPlanBlob
+    !floorPlanBlob &&
+    !researchPlanBlob
   ){
 
     toast("Lomake on jo tyhjä");
@@ -2802,7 +2890,7 @@ function confirmClearForm(){
   if(
     confirm(
       "Tyhjennetäänkö koko lomake?\n\n"+
-      "Kaikki kohteen tiedot, menetelmät, valokuvat ja pohjakuva "+
+      "Kaikki kohteen tiedot, menetelmät, valokuvat, pohjakuva ja tutkimussuunnitelma "+
       "poistetaan pysyvästi — myös pilvestä."
     )
   ){
@@ -2834,6 +2922,7 @@ async function clearForm(){
   const oldSubmissionId=SUBMISSION_ID;
   const oldDbName=DB_NAME;
   const oldFloorPlanKey=floorPlanKey();
+  const oldResearchPlanKey=researchPlanKey();
 
 
   /*
@@ -2852,6 +2941,11 @@ async function clearForm(){
   }
 
 
+  try{
+    await idbDel(oldResearchPlanKey);
+  }catch(err){
+    console.warn(err);
+  }
   /*
    * KORJAUS: poistetaan koko vanhan submissionin IndexedDB-tietokanta,
    * jotta tyhjiä tietokantoja ei jää roikkumaan selaimen tallennustilaan.
@@ -2972,6 +3066,11 @@ async function clearForm(){
   floorPlanPath=null;
   floorPlanPreviewPage=1;
   pendingOldFloorPlanPath=null;
+  researchPlanBlob=null;
+  researchPlanPath=null;
+  researchPlanName="";
+  pendingOldResearchPlanPath=null;
+  researchPlanCleared=false;
 
 
   _pdfDocCache=null;
@@ -3382,6 +3481,122 @@ function handleCameraOriginal(file){
 }
 
 /* ============================================================
+   KAIKKIEN KUVIEN TALLENNUS LAITTEELLE (yksi painike)
+   ============================================================
+ * Työpöytäselain (Chrome/Edge): käyttäjä valitsee kansion.
+ * Puhelin/tabletti: jakovalikko, josta valitaan tallennuspaikka
+ *   (iOS: "Tallenna tiedostoihin"/"Tallenna kuvat", Android: Tiedostot/Drive).
+ * Muut selaimet: kuvat ladataan yhtenä ZIP-tiedostona.
+ */
+function fileSafe(s,max){
+  return String(s||"").trim()
+    .replace(/[^a-z0-9äöå]+/gi,"_")
+    .replace(/^_+|_+$/g,"")
+    .slice(0,max||30);
+}
+function collectPhotoFiles(list){
+  const files=[];
+  const used=new Set();
+  let skipped=0;
+  const proj=fileSafe(project.nimi,30)||"kohde";
+  list.forEach(e=>{
+    const m=METHODS.find(x=>x.id===e.methodId);
+    let idx=entries.indexOf(e)+1;
+    if(!idx)idx=entries.length+1;
+    const mName=fileSafe((m&&(m.short||m.name))||"menetelma",24)||"menetelma";
+    const place=fileSafe(e.values&&e.values.paikka,24);
+    (e.photos||[]).forEach((p,k)=>{
+      if(!(p.blob instanceof Blob)){skipped++;return;}
+      const ext=/png/.test(p.blob.type||"")?"png":"jpg";
+      let name=proj+"_"+String(idx).padStart(2,"0")+"_"+mName+
+        (place?"_"+place:"")+"_"+String(k+1).padStart(2,"0")+"."+ext;
+      while(used.has(name))name="_"+name;
+      used.add(name);
+      files.push({blob:p.blob,name});
+    });
+  });
+  return {files,skipped};
+}
+async function saveFilesToDevice(files,zipName){
+  /* 1. Työpöytä: kansion valinta */
+  if(window.showDirectoryPicker){
+    let dir=null;
+    try{
+      dir=await window.showDirectoryPicker({mode:"readwrite",id:"kenttalomake-kuvat"});
+    }catch(err){
+      if(err&&err.name==="AbortError")return "cancel";
+      dir=null;
+    }
+    if(dir){
+      try{
+        for(const f of files){
+          const h=await dir.getFileHandle(f.name,{create:true});
+          const w=await h.createWritable();
+          await w.write(f.blob);
+          await w.close();
+        }
+        return "folder";
+      }catch(err){
+        console.warn("Kansioon tallennus epäonnistui",err);
+      }
+    }
+  }
+  /* 2. Mobiili: jakovalikko */
+  try{
+    const shareFiles=files.map(
+      f=>new File([f.blob],f.name,{type:f.blob.type||"image/jpeg"})
+    );
+    if(navigator.canShare && navigator.canShare({files:shareFiles})){
+      try{
+        await navigator.share({files:shareFiles});
+        return "share";
+      }catch(err){
+        if(err&&err.name==="AbortError")return "cancel";
+        console.warn("Jakaminen epäonnistui",err);
+      }
+    }
+  }catch(err){}
+  /* 3. ZIP-lataus */
+  if(window.JSZip){
+    const zip=new JSZip();
+    files.forEach(f=>zip.file(f.name,f.blob,{binary:true}));
+    const zb=await zip.generateAsync({type:"blob",compression:"STORE"});
+    downloadBlob(zb,zipName);
+    return "zip";
+  }
+  files.forEach((f,i)=>setTimeout(()=>downloadBlob(f.blob,f.name),i*400));
+  return "download";
+}
+async function saveEntryPhotosToDevice(list,btn){
+  const {files,skipped}=collectPhotoFiles(list);
+  if(!files.length){
+    toast("Ei tallennettavia kuvia");
+    return;
+  }
+  const d=new Date();
+  const p2=n=>String(n).padStart(2,"0");
+  const zipName="Kenttakuvat_"+(fileSafe(project.nimi,30)||"kohde")+"_"+
+    d.getFullYear()+p2(d.getMonth()+1)+p2(d.getDate())+".zip";
+  if(btn)btn.disabled=true;
+  try{
+    const res=await saveFilesToDevice(files,zipName);
+    if(res==="cancel"){
+      toast("Tallennus peruttu");
+    }else{
+      toast(
+        files.length+(files.length===1?" kuva":" kuvaa")+
+        (res==="zip"?" ladattu ZIP-tiedostona":" tallennettu")+
+        (skipped?(" ("+skipped+" ei ollut ladattavissa)"):"")
+      );
+    }
+  }catch(err){
+    console.warn("Kuvien tallennus epäonnistui",err);
+    toast("Kuvien tallennus epäonnistui");
+  }finally{
+    if(btn)btn.disabled=false;
+  }
+}
+/* ============================================================
    SANELU (puheentunnistus)
    ============================================================ */
 const SpeechRec=window.SpeechRecognition||window.webkitSpeechRecognition;
@@ -3537,6 +3752,10 @@ function navBack(){
 }
 
 window.addEventListener("popstate",()=>{
+  if(pdfViewer){
+    pdfViewer.close();
+    return;
+  }
   if(programmaticBack){
     programmaticBack=false;
     return;
@@ -3700,6 +3919,9 @@ function _renderView(){
     );
 
     app.appendChild(
+      renderResearchPlanCard()
+    );
+    app.appendChild(
       renderFloorPlanCard()
     );
 
@@ -3740,6 +3962,10 @@ function _renderView(){
 
     app.appendChild(
       renderMethodGrid()
+    );
+    const planBtnMS=renderPlanOpenButton();
+    if(planBtnMS)app.appendChild(
+      planBtnMS
     );
 
     footer.innerHTML=
@@ -4200,6 +4426,18 @@ function renderEntriesCard(){
     };
     c.appendChild(card);
   });
+  const totalSavable=entries.reduce(
+    (n,e)=>n+(e.photos||[]).filter(p=>p.blob instanceof Blob).length,0
+  );
+  if(totalSavable>0){
+    const saveAllBtn=el(`
+      <button type="button" class="btn btn-outline btn-block" style="margin-top:10px;">
+        ⬇ Tallenna kaikki kuvat laitteelle (${totalSavable})
+      </button>
+    `);
+    saveAllBtn.onclick=()=>saveEntryPhotosToDevice(entries.slice(),saveAllBtn);
+    c.appendChild(saveAllBtn);
+  }
   return c;
 }
 
@@ -4443,44 +4681,13 @@ async function getGuideBlob(guide){
 }
 
 /*
- * Ikkuna avataan heti napin painalluksella (ennen asynkronista latausta),
- * koska mobiiliselaimet (erityisesti iOS Safari) estävät ikkunan
- * avaamisen, jos se tehdään vasta latauksen jälkeen.
+ * Ohje avataan sovelluksen sisäisessä katselimessa (pdf.js), joten
+ * tiedostoa ei tarvitse ladata laitteelle.
  */
-async function openMethodGuide(guide){
+function openMethodGuide(guide){
   if(!guide||!guide.path)return;
-  const win=window.open("","_blank");
-  if(win){
-    try{
-      win.document.title=guide.name||"Ohje";
-      win.document.body.style.cssText="font-family:sans-serif;padding:24px;color:#555";
-      win.document.body.textContent="Ladataan ohjetta...";
-    }catch(err){}
-  }
-  try{
-    const blob=await getGuideBlob(guide);
-    const url=URL.createObjectURL(blob);
-    if(win&&!win.closed){
-      win.location.href=url;
-    }else{
-      const a=document.createElement("a");
-      a.href=url;
-      a.target="_blank";
-      a.rel="noopener";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    }
-    setTimeout(()=>URL.revokeObjectURL(url),10*60*1000);
-  }catch(err){
-    console.warn("Ohjeen avaus epäonnistui",err);
-    if(win){
-      try{win.close();}catch(e){}
-    }
-    toast("Ohjeen avaus epäonnistui. Ei verkkoyhteyttä eikä tiedostoa laitteella.");
-  }
+  openPdfViewer(guide.name||"Ohje",()=>getGuideBlob(guide));
 }
-
 async function deleteGuideFile(guide){
   if(!guide||!guide.path)return;
   try{
@@ -6368,6 +6575,8 @@ function renderEntryForm(){
   };
   container.addEventListener("input",clearErrOnEdit);
   container.addEventListener("change",clearErrOnEdit);
+  const planBtnEF=renderPlanOpenButton();
+  if(planBtnEF)container.appendChild(planBtnEF);
 
 
   /*
@@ -6698,6 +6907,16 @@ function renderEntryForm(){
   thumbs.appendChild(addGal);
 
   pc.appendChild(thumbs);
+  const nSavable=editingEntry.photos.filter(p=>p.blob instanceof Blob).length;
+  if(nSavable>0){
+    const saveAll=el(`
+      <button type="button" class="btn btn-outline btn-block" style="margin-top:10px;">
+        ⬇ Tallenna kaikki kuvat laitteelle (${nSavable})
+      </button>
+    `);
+    saveAll.onclick=()=>saveEntryPhotosToDevice([editingEntry],saveAll);
+    pc.appendChild(saveAll);
+  }
 
 
   pc.appendChild(
@@ -8820,6 +9039,7 @@ async function saveFloorPlan(blob){
 
 
 async function loadFloorPlan(){
+  await loadResearchPlanLocal();
 
   try{
 
@@ -9560,6 +9780,326 @@ function renderFloorPlanCard(){
 }
 
 
+/* ============================================================
+   PDF-KATSELIN (sovelluksen sisällä, ei latausta laitteelle)
+   ============================================================ */
+function openPdfViewer(title,getBlob){
+  if(pdfViewer)return;
+  const overlay=el(`
+    <div class="pv-overlay pdfv" role="dialog" aria-modal="true">
+      <div class="pv-top">
+        <button type="button" class="pv-btn" data-a="close" aria-label="Sulje">‹ Sulje</button>
+        <div class="pdfv-title"></div>
+        <span class="sp"></span>
+        <button type="button" class="pv-btn" data-a="zout" aria-label="Loitonna">−</button>
+        <span class="pdfv-zoom" aria-live="polite">100 %</span>
+        <button type="button" class="pv-btn" data-a="zin" aria-label="Lähennä">+</button>
+      </div>
+      <div class="pdfv-scroll"><div class="pdfv-msg">Ladataan...</div></div>
+      <div class="pdfv-ind" hidden></div>
+    </div>
+  `);
+  overlay.querySelector(".pdfv-title").textContent=title||"PDF";
+  const scroll=overlay.querySelector(".pdfv-scroll");
+  const zoomLbl=overlay.querySelector(".pdfv-zoom");
+  const ind=overlay.querySelector(".pdfv-ind");
+  const bIn=overlay.querySelector('[data-a="zin"]');
+  const bOut=overlay.querySelector('[data-a="zout"]');
+  let pdf=null,zoom=1,token=0,io=null,closed=false,blobRef=null,blobUrl=null;
+  let lastW=0,resizeTimer=null,holders=[];
+  const MIN_Z=0.5,MAX_Z=4;
+  function onKey(e){if(e.key==="Escape")requestClose();}
+  function onResize(){
+    clearTimeout(resizeTimer);
+    resizeTimer=setTimeout(()=>{
+      if(!pdf||closed)return;
+      if(Math.abs(scroll.clientWidth-lastW)>20)layout(true);
+    },250);
+  }
+  function close(){
+    if(closed)return;
+    closed=true;
+    token++;
+    if(io){io.disconnect();io=null;}
+    clearTimeout(resizeTimer);
+    document.removeEventListener("keydown",onKey);
+    window.removeEventListener("resize",onResize);
+    if(blobUrl){try{URL.revokeObjectURL(blobUrl);}catch(e){}}
+    try{if(pdf)pdf.destroy();}catch(e){}
+    overlay.remove();
+    pdfViewer=null;
+  }
+  function requestClose(){
+    if(closed)return;
+    history.back();
+    /* Varmistus, jos popstate ei jostain syystä laukea. */
+    setTimeout(()=>{if(!closed)close();},400);
+  }
+  function updateIndicator(){
+    if(!holders.length){ind.hidden=true;return;}
+    const ref=scroll.scrollTop+scroll.clientHeight/3;
+    let cur=1;
+    for(const h of holders){
+      if(h.offsetTop<=ref)cur=Number(h.dataset.n);else break;
+    }
+    ind.textContent="Sivu "+cur+" / "+holders.length;
+    ind.hidden=holders.length<2;
+  }
+  let scrollRaf=0;
+  scroll.addEventListener("scroll",()=>{
+    if(scrollRaf)return;
+    scrollRaf=requestAnimationFrame(()=>{scrollRaf=0;updateIndicator();});
+  });
+  async function layout(keepPos){
+    const my=++token;
+    const ratio=keepPos&&scroll.scrollHeight>0?scroll.scrollTop/scroll.scrollHeight:0;
+    if(io){io.disconnect();io=null;}
+    scroll.innerHTML="";
+    lastW=scroll.clientWidth;
+    const cssW=Math.max(160,lastW-16)*zoom;
+    const dpr=Math.min(window.devicePixelRatio||1,3);
+    const first=await pdf.getPage(1);
+    if(my!==token)return;
+    const fv=first.getViewport({scale:1});
+    const est=cssW*fv.height/fv.width;
+    holders=[];
+    for(let n=1;n<=pdf.numPages;n++){
+      const h=document.createElement("div");
+      h.className="pdfv-page";
+      h.dataset.n=String(n);
+      h.style.width=cssW+"px";
+      h.style.height=est+"px";
+      scroll.appendChild(h);
+      holders.push(h);
+    }
+    scroll.scrollTop=ratio*scroll.scrollHeight;
+    let chain=Promise.resolve();
+    const renderHolder=h=>{
+      chain=chain.then(async()=>{
+        if(my!==token||h.dataset.done)return;
+        h.dataset.done="1";
+        try{
+          const page=await pdf.getPage(Number(h.dataset.n));
+          if(my!==token)return;
+          const base=page.getViewport({scale:1});
+          const outScale=Math.min(cssW/base.width*dpr,4096/base.width);
+          const vp=page.getViewport({scale:outScale});
+          const cv=document.createElement("canvas");
+          cv.width=Math.round(vp.width);
+          cv.height=Math.round(vp.height);
+          cv.style.width=cssW+"px";
+          cv.style.height=(cssW*base.height/base.width)+"px";
+          await page.render({
+            canvasContext:cv.getContext("2d",{alpha:false}),
+            viewport:vp
+          }).promise;
+          if(my!==token)return;
+          h.style.height=cv.style.height;
+          h.appendChild(cv);
+        }catch(err){
+          console.warn("PDF-sivun piirto epäonnistui",err);
+          delete h.dataset.done;
+        }
+      });
+    };
+    io=new IntersectionObserver(es=>{
+      es.forEach(e=>{if(e.isIntersecting)renderHolder(e.target);});
+    },{root:scroll,rootMargin:"800px 0px"});
+    holders.forEach(h=>io.observe(h));
+    zoomLbl.textContent=Math.round(zoom*100)+" %";
+    bIn.disabled=zoom>=MAX_Z-0.01;
+    bOut.disabled=zoom<=MIN_Z+0.01;
+    updateIndicator();
+  }
+  function setZoom(z){
+    if(!pdf)return;
+    zoom=Math.min(MAX_Z,Math.max(MIN_Z,z));
+    layout(true);
+  }
+  overlay.querySelector('[data-a="close"]').onclick=requestClose;
+  bIn.onclick=()=>setZoom(zoom*1.25);
+  bOut.onclick=()=>setZoom(zoom/1.25);
+  document.addEventListener("keydown",onKey);
+  window.addEventListener("resize",onResize);
+  document.body.appendChild(overlay);
+  history.pushState({pv:1},"");
+  pdfViewer={close};
+  (async()=>{
+    try{
+      blobRef=await getBlob();
+      if(closed)return;
+      if(!blobRef)throw new Error("Ei tiedostoa");
+      if(!window.pdfjsLib)throw new Error("PDF.js ei ole ladattu");
+      const buf=await blobRef.arrayBuffer();
+      pdf=await pdfjsLib.getDocument({data:buf}).promise;
+      if(closed){try{pdf.destroy();}catch(e){}return;}
+      await layout(false);
+    }catch(err){
+      console.warn("PDF:n avaus epäonnistui",err);
+      if(closed)return;
+      scroll.innerHTML="";
+      const msg=el('<div class="pdfv-msg"></div>');
+      if(blobRef){
+        msg.textContent="PDF:n näyttäminen sovelluksessa ei onnistunut.";
+        const b=el('<button type="button" class="btn btn-outline" style="margin-top:14px;background:#fff;">Avaa selaimen katselimessa</button>');
+        b.onclick=()=>{
+          if(!blobUrl)blobUrl=URL.createObjectURL(blobRef);
+          window.open(blobUrl,"_blank");
+        };
+        msg.appendChild(document.createElement("br"));
+        msg.appendChild(b);
+      }else{
+        msg.textContent="Tiedostoa ei saatu ladattua. Tarkista verkkoyhteys.";
+      }
+      scroll.appendChild(msg);
+    }
+  })();
+}
+
+/* ============================================================
+   TUTKIMUSSUUNNITELMA (PDF)
+   ============================================================ */
+async function persistResearchPlanLocal(){
+  try{
+    if(researchPlanBlob){
+      await idbSet(researchPlanKey(),{
+        blob:researchPlanBlob,
+        name:researchPlanName,
+        path:researchPlanPath||null
+      });
+    }else{
+      await idbDel(researchPlanKey());
+    }
+  }catch(err){
+    console.warn("Tutkimussuunnitelman paikallinen tallennus epäonnistui",err);
+  }
+}
+async function loadResearchPlanLocal(){
+  try{
+    const v=await idbGet(researchPlanKey());
+    if(v && v.blob instanceof Blob){
+      researchPlanBlob=v.blob;
+      researchPlanName=v.name||"tutkimussuunnitelma.pdf";
+      researchPlanPath=v.path||null;
+    }
+  }catch(err){
+    console.warn("Tutkimussuunnitelman lataus IndexedDB:stä epäonnistui",err);
+  }
+}
+async function saveResearchPlan(file){
+  const blob=file.type==="application/pdf"
+    ?file
+    :new Blob([file],{type:"application/pdf"});
+  if(researchPlanPath)pendingOldResearchPlanPath=researchPlanPath;
+  researchPlanBlob=blob;
+  researchPlanName=file.name||"tutkimussuunnitelma.pdf";
+  researchPlanPath=null;
+  researchPlanCleared=false;
+  await persistResearchPlanLocal();
+  autosave();
+}
+async function removeResearchPlan(){
+  const paths=[researchPlanPath,pendingOldResearchPlanPath].filter(Boolean);
+  researchPlanBlob=null;
+  researchPlanPath=null;
+  researchPlanName="";
+  pendingOldResearchPlanPath=null;
+  researchPlanCleared=true;
+  if(window.SubmissionSync){
+    for(const p of paths){
+      try{await window.SubmissionSync.deletePhotoFile(p);}catch(err){}
+    }
+  }
+  await persistResearchPlanLocal();
+  autosave();
+}
+function openResearchPlan(){
+  if(!researchPlanBlob){
+    toast("Tutkimussuunnitelmaa ei ole lisätty");
+    return;
+  }
+  const blob=researchPlanBlob;
+  openPdfViewer(researchPlanName||"Tutkimussuunnitelma",async()=>blob);
+}
+function renderPlanOpenButton(){
+  if(!researchPlanBlob)return null;
+  const b=el('<button type="button" class="btn btn-outline btn-block plan-open-btn">📄 Avaa tutkimussuunnitelma</button>');
+  b.onclick=openResearchPlan;
+  return b;
+}
+function renderResearchPlanCard(){
+  const c=el(`
+    <div class="card">
+      <h2>Tutkimussuunnitelma (PDF)</h2>
+    </div>
+  `);
+  async function onPick(e){
+    const f=e.target.files&&e.target.files[0];
+    e.target.value="";
+    if(!f)return;
+    const isPdf=f.type==="application/pdf"||/\.pdf$/i.test(f.name||"");
+    if(!isPdf){
+      toast("Valitse PDF-tiedosto");
+      return;
+    }
+    if(f.size>RESEARCH_PLAN_MAX_BYTES){
+      toast("PDF on liian suuri (enintään 25 Mt)");
+      return;
+    }
+    const replacing=!!researchPlanBlob;
+    await saveResearchPlan(f);
+    render();
+    toast(replacing?"Tutkimussuunnitelma vaihdettu":"Tutkimussuunnitelma lisätty");
+  }
+  if(!researchPlanBlob){
+    c.appendChild(el(`
+      <div class="hint" style="margin-bottom:8px;">
+        Lisää kohteen tutkimussuunnitelma PDF-muodossa. Voit tarkastella
+        sitä tutkimusten aikana ilman latausta laitteelle.
+      </div>
+    `));
+    const lbl=el(`
+      <label class="btn btn-outline btn-block" style="cursor:pointer;">
+        Valitse PDF
+        <input type="file" accept="application/pdf,.pdf" style="display:none;">
+      </label>
+    `);
+    lbl.querySelector("input").onchange=onPick;
+    c.appendChild(lbl);
+  }else{
+    c.appendChild(el(`
+      <div class="guide-file">
+        <span class="guide-ico">📄</span>
+        <div>
+          <div class="entry-title">${escapeHtml(researchPlanName||"tutkimussuunnitelma.pdf")}</div>
+          <div class="entry-sub">${escapeHtml(formatGuideSize(researchPlanBlob.size))}</div>
+        </div>
+      </div>
+    `));
+    const open=el('<button type="button" class="btn btn-primary btn-block">Avaa tutkimussuunnitelma</button>');
+    open.onclick=openResearchPlan;
+    c.appendChild(open);
+    const row=el('<div style="display:flex;gap:8px;margin-top:8px;"></div>');
+    const lbl=el(`
+      <label class="btn btn-outline" style="cursor:pointer;flex:1;">
+        Vaihda PDF
+        <input type="file" accept="application/pdf,.pdf" style="display:none;">
+      </label>
+    `);
+    lbl.querySelector("input").onchange=onPick;
+    const rm=el('<button type="button" class="btn btn-danger" style="flex:0 0 auto;">Poista</button>');
+    rm.onclick=async()=>{
+      if(!confirm("Poistetaanko tutkimussuunnitelma?"))return;
+      await removeResearchPlan();
+      render();
+      toast("Tutkimussuunnitelma poistettu");
+    };
+    row.appendChild(lbl);
+    row.appendChild(rm);
+    c.appendChild(row);
+  }
+  return c;
+}
 /* ============================================================
    MERKKIENNIN EDITORI
    ============================================================ */
