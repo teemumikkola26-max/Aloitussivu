@@ -228,6 +228,19 @@
   <a href="migroi-lomakkeet.html" style="font-size:.75rem;color:var(--ink-soft);">Lomakkeiden siirtotyökalu</a>
 </div>
 
+<section aria-labelledby="backupTitle" style="max-width:680px;margin:28px auto 24px;padding:0 14px;">
+  <details style="border:1px solid var(--line, #d8dce2);border-radius:12px;padding:12px 14px;background:var(--surface, #fff);">
+    <summary id="backupTitle" style="cursor:pointer;font-weight:600;">Varmuuskopioi lomakepohjat</summary>
+    <p style="font-size:.85rem;color:var(--ink-soft);line-height:1.5;margin:10px 0 12px;">Tallenna omat lomakepohjat tiedostoksi tai palauta ne aiemmin tehdystä varmuuskopiosta. Varmuuskopio sisältää lomakepohjien rakenteet, ei täytettyjä lomakkeita tai valokuvia. Palautus korvaa samannumeroisten lomakkeiden nykyiset versiot.</p>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;">
+      <button type="button" class="dc-btn dc-btn-primary" id="exportFormsBackup">Lataa varmuuskopio</button>
+      <button type="button" class="dc-btn" id="importFormsBackup">Palauta varmuuskopiosta</button>
+      <input type="file" id="formsBackupFile" accept=".json,application/json" style="display:none;">
+    </div>
+    <div id="backupStatus" role="status" aria-live="polite" style="font-size:.85rem;margin-top:10px;"></div>
+  </details>
+</section>
+
 <script>
 "use strict";
 /* =========================================================================
@@ -552,6 +565,138 @@ waitForSupabaseClient(async (supabaseClient) => {
 });
 
 waitForSupabaseClient(() => { renderDrafts(); });
+
+/* ---------- Lomakepohjien varmuuskopiointi ----------
+   Tallentaa forms-taulun lomakepohjat sekä kenttalomake.html:n
+   muokatut tutkimusmenetelmät/kenttärakenteet (custom_methods.methods).
+   Täytettyjä tarkastuksia, havaintoja tai valokuvia ei lueta mukaan.
+*/
+const BACKUP_FORMAT = "pbm-lomakepohjat-backup";
+const BACKUP_VERSION = 2;
+const METHODS_STORAGE_KEY = "kenttalomake_custom_methods_v1";
+const backupButton = document.getElementById("exportFormsBackup");
+const restoreButton = document.getElementById("importFormsBackup");
+const backupFileInput = document.getElementById("formsBackupFile");
+const backupStatus = document.getElementById("backupStatus");
+
+function setBackupStatus(message, isError){
+  backupStatus.textContent = message;
+  backupStatus.style.color = isError ? "#a12622" : "var(--ink-soft)";
+}
+
+function downloadJsonFile(data, filename){
+  const blob = new Blob([JSON.stringify(data)], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+backupButton.addEventListener("click", async () => {
+  if (!window.__supabaseClient){ setBackupStatus("Yhteys ei ole vielä valmis. Yritä hetken kuluttua uudelleen.", true); return; }
+  backupButton.disabled = true;
+  setBackupStatus("Luodaan varmuuskopiota…", false);
+  try {
+    const { data, error } = await window.__supabaseClient.from("forms").select("id,title,tag,description,icon,definition,created_at,updated_at").order("title", { ascending:true });
+    if (error) throw error;
+    const { data: methodsRow, error: methodsError } = await window.__supabaseClient.from("custom_methods").select("methods").maybeSingle();
+    if (methodsError) throw methodsError;
+    let methods = methodsRow && Array.isArray(methodsRow.methods) ? methodsRow.methods : null;
+    // Jos pilvessä ei ole vielä muokattuja menetelmiä, ota mukaan tämän laitteen kopio.
+    if (!methods) {
+      try {
+        const localMethods = JSON.parse(localStorage.getItem(METHODS_STORAGE_KEY) || "null");
+        if (Array.isArray(localMethods)) methods = localMethods;
+      } catch (_) {}
+    }
+    const backup = { format: BACKUP_FORMAT, version: BACKUP_VERSION, exportedAt: new Date().toISOString(), forms: data || [], kenttalomake: { methods: methods || [] } };
+    const date = new Date().toISOString().slice(0, 10);
+    downloadJsonFile(backup, "lomakepohjat-varmuuskopio-" + date + ".json");
+    setBackupStatus("Varmuuskopio luotu (" + backup.forms.length + " lomakepohjaa ja " + (methods || []).length + " kenttälomakkeen menetelmää/kenttärakennetta). Täytettyjä tarkastuksia ei tallenneta.", false);
+  } catch (err) {
+    setBackupStatus("Varmuuskopion luonti epäonnistui: " + (err.message || "Tuntematon virhe"), true);
+  } finally {
+    backupButton.disabled = false;
+  }
+});
+
+restoreButton.addEventListener("click", () => {
+  backupFileInput.value = "";
+  backupFileInput.click();
+});
+
+backupFileInput.addEventListener("change", async () => {
+  const file = backupFileInput.files && backupFileInput.files[0];
+  if (!file) return;
+  if (!window.__supabaseClient){ setBackupStatus("Yhteys ei ole vielä valmis. Yritä hetken kuluttua uudelleen.", true); return; }
+  let backup;
+  try {
+    backup = JSON.parse(await file.text());
+  } catch (_) {
+    setBackupStatus("Tiedosto ei ole kelvollinen JSON-varmuuskopio.", true);
+    return;
+  }
+  if (!backup || backup.format !== BACKUP_FORMAT || ![1, 2].includes(backup.version) || !Array.isArray(backup.forms)) {
+    setBackupStatus("Tiedosto ei ole tämän sovelluksen tukema lomakepohjien varmuuskopio.", true);
+    return;
+  }
+  const backedUpMethods = backup.version >= 2 ? backup.kenttalomake && backup.kenttalomake.methods : null;
+  if (backup.version >= 2 && (!Array.isArray(backedUpMethods) || !backedUpMethods.every(m => m && typeof m === "object" && typeof m.id === "string" && Array.isArray(m.fields)))) {
+    setBackupStatus("Varmuuskopion kenttälomakkeen menetelmä- tai kenttärakenne ei ole kelvollinen. Mitään ei palautettu.", true);
+    return;
+  }
+  const valid = backup.forms.every(row => row && typeof row.id === "string" && row.id.length > 0 && typeof row.title === "string" && row.definition && typeof row.definition === "object");
+  if (!valid) {
+    setBackupStatus("Varmuuskopio sisältää puutteellisia lomaketietoja. Mitään ei palautettu.", true);
+    return;
+  }
+  const methodCount = Array.isArray(backedUpMethods) ? backedUpMethods.length : 0;
+  const restoreMessage = "Palautetaanko " + backup.forms.length + " lomakepohjaa" + (backup.version >= 2 ? " sekä " + methodCount + " kenttälomakkeen menetelmää/kenttärakennetta" : "") + "? Samalla tunnisteella olevat tiedot korvataan varmuuskopion versiolla. Muita lomakkeita ei poisteta.";
+  if (!confirm(restoreMessage)) return;
+
+  restoreButton.disabled = true;
+  backupButton.disabled = true;
+  setBackupStatus("Palautetaan lomakepohjia…", false);
+  try {
+    // Upsert palauttaa myös aiemmin poistetut rivit alkuperäisillä tunnisteilla.
+    // Lähetetään vain lomakepohjan tarvitsemat sarakkeet, ei mahdollisia ylimääräisiä kenttiä.
+    const rows = backup.forms.map(row => ({
+      id: row.id,
+      title: row.title,
+      tag: row.tag ?? null,
+      description: row.description ?? null,
+      icon: row.icon ?? "📋",
+      definition: row.definition,
+      ...(row.created_at ? { created_at: row.created_at } : {}),
+      ...(row.updated_at ? { updated_at: row.updated_at } : {})
+    }));
+    if (rows.length) {
+      const { error } = await window.__supabaseClient.from("forms").upsert(rows, { onConflict: "id" });
+      if (error) throw error;
+    }
+    if (backup.version >= 2) {
+      // Päivitä myös paikallinen kopio, jotta kenttalomake.html käyttää palautettuja rakenteita heti.
+      localStorage.setItem(METHODS_STORAGE_KEY, JSON.stringify(backedUpMethods));
+      const { error: methodsRestoreError } = await window.__supabaseClient.from("custom_methods").upsert(
+        { methods: backedUpMethods, updated_at: new Date().toISOString() },
+        { onConflict: "user_id" }
+      );
+      if (methodsRestoreError) throw methodsRestoreError;
+    }
+    setBackupStatus("Palautus valmis (" + rows.length + " lomakepohjaa" + (backup.version >= 2 ? " ja " + methodCount + " kenttälomakkeen menetelmää/kenttärakennetta" : "") + "). Päivitä sivu tai avaa kenttälomake uudelleen, jotta palautetut muutokset tulevat käyttöön.", false);
+    const { data, error } = await window.__supabaseClient.from("forms").select("id,title,tag,description,icon,updated_at").order("updated_at", { ascending:false });
+    if (!error) renderCustomForms(data || []);
+  } catch (err) {
+    setBackupStatus("Palautus epäonnistui: " + (err.message || "Tuntematon virhe") + ". Tarkista käyttöoikeudet ja yritä uudelleen.", true);
+  } finally {
+    restoreButton.disabled = false;
+    backupButton.disabled = false;
+  }
+});
 
 renderForms();
 document.getElementById("footerNote").textContent =
