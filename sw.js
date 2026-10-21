@@ -2,11 +2,11 @@
    - Oman sivuston tiedostot: verkko ensin (3,5 s), muuten välimuisti.
    - CDN-kirjastot (supabase, jszip, pdf.js, pdf-lib): välimuisti ensin.
    - Supabasen omat API-kutsut eivät kulje tämän kautta. */
-const CACHE = "aloitussivu-v6";
+const CACHE = "aloitussivu-v7";
 const SHELL = [
   "./", "index.html", "kenttalomake.html", "form.html", "editor.html",
   "style-editor.html", "styles.css", "auth-gate.js", "submission-sync.js", "users.js",
-  "form-runtime.js", "editor-runtime.js", "style-editor-runtime.js",
+  "form-common.js", "form-runtime.js", "editor-runtime.js", "style-editor-runtime.js",
   "docx-style-engine.js"
 ];
 const CDN_HOSTS = ["cdn.jsdelivr.net", "cdnjs.cloudflare.com"];

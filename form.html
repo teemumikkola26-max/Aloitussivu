@@ -312,6 +312,13 @@
   }
   .add-photo-btn:active{background:#f1efe8;}
 
+  /* ---- Kuvatekstit ---- */
+  .photo-caps{display:flex;flex-direction:column;gap:6px;margin-top:8px;}
+  .photo-cap-row{display:flex;gap:8px;align-items:center;}
+  .photo-cap-row .cap-thumb{width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid var(--line-strong);flex-shrink:0;cursor:zoom-in;}
+  .photo-cap-row .cap-input{flex:1;min-width:0;}
+  .photo-caption{width:100%;border:1px solid var(--line-strong);border-radius:7px;padding:9px 10px;font-size:1rem;font-family:inherit;background:#fff;}
+
   /* ---- Footer action bar ---- */
   footer.actionbar{
     position:fixed;bottom:0;left:0;right:0;
@@ -473,6 +480,7 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="docx-style-engine.js"></script>
+<script src="form-common.js"></script>
 <script src="form-runtime.js"></script>
 </body>
 </html>

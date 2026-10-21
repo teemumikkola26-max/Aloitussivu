@@ -162,6 +162,12 @@ async function doSave(){
   for (const id of Object.keys(state.items)){
     const it = state.items[id];
     await idbPut("items", { id, status: it.status, note: it.note, action: it.action, value: it.value, table: it.table });
+    for (const p of it.photos){
+      if (p._capDirty && db){
+        const ok = await idbPut("photos", { id: p.id, itemId: id, blob: p.blob, w: p.w, h: p.h, caption: p.caption || "", ts: Date.now() });
+        if (ok) p._capDirty = false;
+      }
+    }
   }
   setSaveIndicator("Tallennettu laitteelle…");
   syncToCloud();
@@ -185,7 +191,7 @@ async function syncToCloud(){
       const it = state.items[id];
       cloudItems[id] = {
         status: it.status, note: it.note, action: it.action, value: it.value, table: it.table,
-        photos: it.photos.filter(p => p.path).map(p => ({ id:p.id, path:p.path, w:p.w, h:p.h }))
+        photos: it.photos.filter(p => p.path).map(p => ({ id:p.id, path:p.path, w:p.w, h:p.h, caption:p.caption || "" }))
       };
     });
     await window.SubmissionSync.saveSubmission({
@@ -218,7 +224,7 @@ async function loadFromStorage(){
           try{
             const blob = await window.SubmissionSync.downloadPhoto(p.path);
             const url = URL.createObjectURL(blob);
-            state.items[id].photos.push({ id:p.id, path:p.path, blob, url, w:p.w, h:p.h });
+            state.items[id].photos.push({ id:p.id, path:p.path, blob, url, w:p.w, h:p.h, caption:p.caption || "" });
           }catch(e){ console.warn("Yksittäisen kuvan lataus epäonnistui -- jatketaan muilla", e); }
         }
       }
@@ -246,7 +252,7 @@ async function loadFromStorage(){
     photoRows.forEach(row => {
       if (state.items[row.itemId]){
         const url = URL.createObjectURL(row.blob);
-        state.items[row.itemId].photos.push({ id: row.id, blob: row.blob, url, w: row.w, h: row.h });
+        state.items[row.itemId].photos.push({ id: row.id, blob: row.blob, url, w: row.w, h: row.h, caption: row.caption || "" });
       }
     });
     if (headerRow || itemRows.length){
@@ -284,6 +290,7 @@ function fileToStrippedBlob(file){
 }
 
 let pendingPhotoItemId = null;
+if (window.AppPerm) window.AppPerm.guardFileInput(document.getElementById("cameraInput"), "camera");
 document.getElementById("cameraInput").addEventListener("change", async (e) => {
   const file = e.target.files && e.target.files[0];
   e.target.value = "";
@@ -295,7 +302,7 @@ document.getElementById("cameraInput").addEventListener("change", async (e) => {
     if (db){
       id = await new Promise((resolve) => {
         const tx = db.transaction("photos", "readwrite");
-        const req = tx.objectStore("photos").add({ itemId, blob, w, h, ts: Date.now() });
+        const req = tx.objectStore("photos").add({ itemId, blob, w, h, caption: "", ts: Date.now() });
         req.onsuccess = () => resolve(req.result);
         req.onerror = () => resolve("local_" + Date.now());
       });
@@ -303,7 +310,7 @@ document.getElementById("cameraInput").addEventListener("change", async (e) => {
       id = "local_" + Date.now();
     }
     const url = URL.createObjectURL(blob);
-    state.items[itemId].photos.push({ id, blob, url, w, h });
+    state.items[itemId].photos.push({ id, blob, url, w, h, caption: "" });
     renderSections();
     saveDebounced();
   }catch(err){
@@ -485,7 +492,7 @@ async function openPhotoViewer(itemId, photo){
     /* Sama tiedostonimi ylikirjoitetaan pilvessä seuraavassa synkronoinnissa. */
     photo.path = null;
     if (db){
-      try{ await idbPut("photos", { id: photo.id, itemId, blob, w: NW, h: NH, ts: Date.now() }); }catch(e){ console.warn(e); }
+      try{ await idbPut("photos", { id: photo.id, itemId, blob, w: NW, h: NH, caption: photo.caption || "", ts: Date.now() }); }catch(e){ console.warn(e); }
     }
     closeViewer();
     renderSections();
@@ -496,18 +503,14 @@ async function openPhotoViewer(itemId, photo){
 }
 
 /* ---------- Sanelu (puheentunnistus) ---------- */
-const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
-let activeDictation = null;
+const SpeechRec = window.AppDictation && window.AppDictation.supported;
 
 function stopDictation(){
-  if (activeDictation){
-    activeDictation.stopped = true;
-    try{ activeDictation.rec.stop(); }catch(e){}
-  }
+  if (window.AppDictation) window.AppDictation.stop();
 }
-document.addEventListener("visibilitychange", () => { if (document.hidden) stopDictation(); });
 
-/* Palauttaa kentän ympäröivän kääreen, jossa on 🎤-painike (jos selain tukee). */
+/* Palauttaa kentän ympäröivän kääreen, jossa on 🎤-painike (jos selain tukee).
+   Sanelulogiikka ja käyttöoikeushuomautukset ovat form-common.js:ssä. */
 function withDictation(input){
   if (!SpeechRec) return input;
   const wrap = document.createElement("div");
@@ -520,58 +523,7 @@ function withDictation(input){
   btn.setAttribute("aria-label", "Sanele");
   wrap.appendChild(input);
   wrap.appendChild(btn);
-  const setRec = on => {
-    btn.classList.toggle("rec", on);
-    btn.textContent = on ? "⏹" : "🎤";
-    btn.setAttribute("aria-label", on ? "Lopeta sanelu" : "Sanele");
-  };
-  btn.addEventListener("click", () => {
-    if (activeDictation && activeDictation.btn === btn){ stopDictation(); return; }
-    stopDictation();
-    const rec = new SpeechRec();
-    rec.lang = "fi-FI";
-    rec.continuous = true;
-    rec.interimResults = true;
-    const st = { rec, btn, stopped:false };
-    let base = input.value;
-    const sep = () => base && !/\s$/.test(base) ? " " : "";
-    rec.onresult = e => {
-      /* Android toistaa saman lauseen kasvavina osittaistuloksina -- yhdistetään ne. */
-      const pieces = [];
-      for (let i = 0; i < e.results.length; i++){
-        const t = String(e.results[i][0].transcript || "").trim();
-        if (!t) continue;
-        const last = pieces.length ? pieces[pieces.length-1] : null;
-        const tl = t.toLowerCase();
-        if (last !== null && tl.startsWith(last.toLowerCase())) pieces[pieces.length-1] = t;
-        else if (last !== null && last.toLowerCase().startsWith(tl)) continue;
-        else pieces.push(t);
-      }
-      const txt = pieces.join(" ").trim();
-      if (!txt) return;
-      input.value = base + sep() + txt;
-      input.dispatchEvent(new Event("input", { bubbles:true }));
-    };
-    rec.onerror = e => {
-      const err = e.error;
-      if (err === "no-speech" || err === "aborted") return;
-      st.stopped = true;
-      if (err === "not-allowed" || err === "service-not-allowed") showToast("Mikrofonin käyttö on estetty selaimen asetuksissa.");
-      else if (err === "network") showToast("Sanelu vaatii verkkoyhteyden.");
-      else if (err === "audio-capture") showToast("Mikrofonia ei löytynyt.");
-      else showToast("Sanelu epäonnistui.");
-    };
-    rec.onend = () => {
-      if (!st.stopped && activeDictation === st){
-        base = input.value;
-        try{ rec.start(); return; }catch(e){}
-      }
-      setRec(false);
-      if (activeDictation === st) activeDictation = null;
-    };
-    activeDictation = st;
-    try{ rec.start(); setRec(true); }catch(err){ activeDictation = null; showToast("Sanelua ei voitu käynnistää."); }
-  });
+  window.AppDictation.bind(btn, input, { toast: showToast });
   return wrap;
 }
 
@@ -589,6 +541,8 @@ function removePhoto(itemId, photoId){
 }
 
 /* ---------- Renderöinti ---------- */
+const COMBO_INPUT_STYLE = "width:100%;border:1px solid var(--line-strong);border-radius:7px;padding:9px 10px;font-family:inherit;background:#fff;";
+
 function renderHeaderFields(){
   const wrap = document.getElementById("headerFields");
   wrap.innerHTML = "";
@@ -602,6 +556,7 @@ function renderHeaderFields(){
     label.setAttribute("for", "hf_" + f.id);
     div.appendChild(label);
     let input;
+    let isCombo = false;
     if (f.type === "textarea"){
       input = document.createElement("textarea");
     } else if (f.type === "user"){
@@ -615,16 +570,10 @@ function renderHeaderFields(){
         if (window.AppUsers && document.body.contains(input)) window.AppUsers.populateSelect(input, state.header[f.id] || "");
       });
     } else if (f.type === "select"){
-      input = document.createElement("select");
-      input.style.cssText = "width:100%;border:1px solid var(--line-strong);border-radius:7px;padding:9px 10px;font-size:.95rem;font-family:inherit;background:#fff;";
-      const emptyOpt = document.createElement("option");
-      emptyOpt.value = ""; emptyOpt.textContent = "— valitse —";
-      input.appendChild(emptyOpt);
-      (f.options || []).forEach(optText => {
-        const o = document.createElement("option");
-        o.value = optText; o.textContent = optText;
-        input.appendChild(o);
-      });
+      /* Ehdottava valikko: teksti-input, josta tehdään valikko appendChild:n jälkeen. */
+      input = document.createElement("input");
+      input.type = "text";
+      isCombo = true;
     } else {
       input = document.createElement("input");
       input.type = f.type === "date" ? "date" : (f.type === "number" ? "number" : "text");
@@ -639,6 +588,9 @@ function renderHeaderFields(){
       saveDebounced();
     });
     div.appendChild(input);
+    if (isCombo && window.AppCombo){
+      window.AppCombo.enhance(input, { options: f.options || [], allowCustom: !!f.allowCustom, inputStyle: COMBO_INPUT_STYLE });
+    }
     wrap.appendChild(div);
   });
 }
@@ -914,20 +866,14 @@ function renderSections(){
         const valArea = document.createElement("div");
         valArea.className = "note-area show";
         let input;
+        let isCombo = false;
         if (field.type === "text"){
           input = document.createElement("textarea");
           input.placeholder = "Kirjaa tiedot…";
         } else if (field.type === "select"){
-          input = document.createElement("select");
-          input.style.cssText = "width:100%;border:1px solid var(--line-strong);border-radius:7px;padding:9px 10px;font-size:.95rem;font-family:inherit;background:#fff;";
-          const emptyOpt = document.createElement("option");
-          emptyOpt.value = ""; emptyOpt.textContent = "— valitse —";
-          input.appendChild(emptyOpt);
-          (field.options || []).forEach(optText => {
-            const o = document.createElement("option");
-            o.value = optText; o.textContent = optText;
-            input.appendChild(o);
-          });
+          input = document.createElement("input");
+          input.type = "text";
+          isCombo = true;
         } else {
           input = document.createElement("input");
           input.type = field.type === "date" ? "date" : (field.type === "number" ? "number" : "text");
@@ -939,7 +885,12 @@ function renderSections(){
           refreshHints();
           saveDebounced();
         });
-        valArea.appendChild((field.type === "text" || (input.tagName === "INPUT" && input.type === "text")) ? withDictation(input) : input);
+        if (isCombo){
+          valArea.appendChild(input);
+          if (window.AppCombo) window.AppCombo.enhance(input, { options: field.options || [], allowCustom: !!field.allowCustom, inputStyle: COMBO_INPUT_STYLE });
+        } else {
+          valArea.appendChild((field.type === "text" || (input.tagName === "INPUT" && input.type === "text")) ? withDictation(input) : input);
+        }
         if (field.unit){
           const unitSpan = document.createElement("div");
           unitSpan.style.cssText = "font-size:.76rem;color:var(--ink-soft);margin-top:4px;";
@@ -978,6 +929,40 @@ function renderSections(){
         });
         photoRow.appendChild(addBtn);
         itemDiv.appendChild(photoRow);
+
+        /* Kuvatekstit: yksi rivi per kuva (pienoiskuva + teksti + sanelu). */
+        if (itState.photos.length){
+          const capList = document.createElement("div");
+          capList.className = "photo-caps";
+          itState.photos.forEach((p, i) => {
+            const row = document.createElement("div");
+            row.className = "photo-cap-row";
+            const th = document.createElement("img");
+            th.className = "cap-thumb";
+            th.src = p.url;
+            th.alt = "Avaa kuva " + (i + 1);
+            th.addEventListener("click", () => openPhotoViewer(itemId, p));
+            const inp = document.createElement("input");
+            inp.type = "text";
+            inp.className = "photo-caption";
+            inp.placeholder = "Kuvateksti";
+            inp.autocomplete = "off";
+            inp.setAttribute("aria-label", "Kuvateksti, kuva " + (i + 1));
+            inp.value = p.caption || "";
+            inp.addEventListener("input", () => {
+              p.caption = inp.value;
+              p._capDirty = true;
+              saveDebounced();
+            });
+            const holder = document.createElement("div");
+            holder.className = "cap-input";
+            holder.appendChild(withDictation(inp));
+            row.appendChild(th);
+            row.appendChild(holder);
+            capList.appendChild(row);
+          });
+          itemDiv.appendChild(capList);
+        }
       }
 
       itemsWrap.appendChild(itemDiv);
@@ -1161,6 +1146,7 @@ async function buildDocx(){
   const extraMedia = [];
   let imgRelCounter = 200;   // pidetään selvästi erillään moottorin omista (10-13) rel-id:istä
   let imgDocPrCounter = 1000;
+  let photoNumber = 1;   // "Kuva N." juoksee koko raportin läpi
 
   const headerLines = (DEF.headerFields||[]).map(f => f.label + ": " + (state.header[f.id] || "—")).join("\n");
   bodyParts.push(engine.paraXml(headerLines, { font:s.fonts.body, sz:engine.pt2hp(s.fonts.bodySize), color:s.colors.body, after:240 }));
@@ -1219,11 +1205,14 @@ async function buildDocx(){
       }
 
       for (const p of it.photos){
-        const { cx, cy } = engine.scaledDims(p.w, p.h, 4938000);
+        /* Koko, lukittu kuvasuhde ja kuvateksti tulevat yhteisestä engine.photoBlockXml:stä (sama kuin kenttalomake.html). */
         const rId = imgRelCounter++;
         const mediaName = "image" + (extraMedia.length+1) + ".jpeg";
         extraMedia.push({ rId, name: mediaName, blob: p.blob });
-        bodyParts.push(engine.imageXml(rId, cx, cy, imgDocPrCounter++));
+        bodyParts.push(engine.photoBlockXml({
+          rId, w:p.w, h:p.h, docPrId: imgDocPrCounter++,
+          number: photoNumber++, caption: p.caption, style: s
+        }));
       }
     });
   });

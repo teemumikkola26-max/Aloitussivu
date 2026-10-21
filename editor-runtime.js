@@ -325,7 +325,10 @@ function buildHeaderFieldsCard(){
     row.appendChild(typeSelect);
     row.appendChild(delBtn);
     body.appendChild(row);
-    if (hf.type === "select") body.appendChild(optionsTextarea(hf));
+    if (hf.type === "select"){
+      body.appendChild(optionsTextarea(hf));
+      body.appendChild(allowCustomCheckbox(hf));
+    }
   });
 
   const addBtn = document.createElement("button");
@@ -361,6 +364,21 @@ function optionsTextarea(field){
     refreshCondOptions();
   });
   return ta;
+}
+
+/* Valinta: hyväksytäänkö valikkoon kirjoitettu arvo, jota ei ole vaihtoehtojen joukossa. */
+function allowCustomCheckbox(field){
+  const label = document.createElement("label");
+  label.style.cssText = "display:flex;align-items:center;gap:6px;font-size:.78rem;color:var(--ink-soft);margin:0 0 8px;";
+  const chk = document.createElement("input");
+  chk.type = "checkbox";
+  chk.checked = !!field.allowCustom;
+  chk.addEventListener("change", () => {
+    if (chk.checked) field.allowCustom = true; else delete field.allowCustom;
+  });
+  label.appendChild(chk);
+  label.appendChild(document.createTextNode("Salli myös muut arvot kuin valikon vaihtoehdot (täyttäjä voi kirjoittaa oman arvon; kirjoitettaessa ehdotetaan silti sopivaa vaihtoehtoa)"));
+  return label;
 }
 
 /* ---------- Ehdolliset ohjeet ---------- */
@@ -847,6 +865,7 @@ function buildFieldBlockCore(sec, field, fieldIdx){
       refreshCondOptions();
     });
     wrap.appendChild(optionsArea);
+    wrap.appendChild(allowCustomCheckbox(field));
     return wrap;
   } else if (field.type === "table"){
     if (!field.tableRows) field.tableRows = 3;

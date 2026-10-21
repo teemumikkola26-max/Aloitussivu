@@ -8,6 +8,7 @@
 <script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("sw.js").catch(function(){});});}</script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.4"></script>
 <script src="auth-gate.js" defer></script>
+<script src="form-common.js"></script>
 <script src="submission-sync.js" defer></script>
 <script src="users.js" defer></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
@@ -396,6 +397,54 @@ input[type=number]::-webkit-outer-spin-button{
   padding:6px 5px;
   border:1px solid var(--line);
   border-radius:4px
+}
+
+.photo-caps{
+  margin-top:12px;
+  border-top:1px solid var(--line);
+  padding-top:8px
+}
+
+.photo-caps-title{
+  font-size:12px;
+  font-weight:700;
+  color:var(--muted);
+  text-transform:uppercase;
+  letter-spacing:.04em;
+  margin-bottom:6px
+}
+
+.photo-cap-row{
+  display:flex;
+  gap:8px;
+  align-items:center;
+  margin-bottom:6px
+}
+
+.photo-cap-row .cap-thumb{
+  flex:0 0 44px;
+  width:44px;
+  height:44px;
+  cursor:zoom-in
+}
+
+.cap-input-wrap{
+  position:relative;
+  flex:1;
+  min-width:0
+}
+
+.cap-input-wrap .photo-caption{
+  font-size:16px;
+  padding:10px 46px 10px 10px;
+  border:1.5px solid var(--line);
+  border-radius:8px
+}
+
+.cap-input-wrap .dictate-btn{
+  top:50%;
+  right:4px;
+  margin-top:-18px
 }
 
 .empty{
@@ -3599,87 +3648,19 @@ async function saveEntryPhotosToDevice(list,btn){
 /* ============================================================
    SANELU (puheentunnistus)
    ============================================================ */
-const SpeechRec=window.SpeechRecognition||window.webkitSpeechRecognition;
-let activeDictation=null;
+const SpeechRec=window.AppDictation&&window.AppDictation.supported;
 
 function stopDictation(){
-  if(activeDictation){
-    activeDictation.stopped=true;
-    try{activeDictation.rec.stop();}catch(e){}
-  }
+  if(window.AppDictation)window.AppDictation.stop();
 }
-document.addEventListener("visibilitychange",()=>{
-  if(document.hidden)stopDictation();
-});
 
+/* Sanelupainike kentälle. Logiikka (ja käyttöoikeushuomautukset) on form-common.js:ssä. */
 function attachDictation(host,input){
   if(!SpeechRec)return;
   const btn=el(`<button type="button" class="dictate-btn" aria-label="Sanele" title="Sanele">🎤</button>`);
   host.classList.add("has-dictate");
   host.appendChild(btn);
-  const setRec=on=>{
-    btn.classList.toggle("rec",on);
-    btn.textContent=on?"⏹":"🎤";
-    btn.setAttribute("aria-label",on?"Lopeta sanelu":"Sanele");
-  };
-  btn.onclick=()=>{
-    if(activeDictation && activeDictation.btn===btn){
-      stopDictation();
-      return;
-    }
-    stopDictation();
-    const rec=new SpeechRec();
-    rec.lang="fi-FI";
-    rec.continuous=true;
-    rec.interimResults=true;
-    const st={rec,btn,stopped:false};
-    let base=input.value;
-    const sep=()=>base && !/\s$/.test(base)?" ":"";
-    rec.onresult=e=>{
-      /* Android toistaa saman lauseen kasvavina osittaistuloksina
-         ("testailen", "testailen", "testailen sanelua") -- yhdistetään ne. */
-      const pieces=[];
-      for(let i=0;i<e.results.length;i++){
-        const t=String(e.results[i][0].transcript||"").trim();
-        if(!t)continue;
-        const last=pieces.length?pieces[pieces.length-1]:null;
-        const tl=t.toLowerCase();
-        if(last!==null && tl.startsWith(last.toLowerCase()))pieces[pieces.length-1]=t;
-        else if(last!==null && last.toLowerCase().startsWith(tl))continue;
-        else pieces.push(t);
-      }
-      const txt=pieces.join(" ").trim();
-      if(!txt)return;
-      input.value=base+sep()+txt;
-      input.dispatchEvent(new Event("input",{bubbles:true}));
-    };
-    rec.onerror=e=>{
-      const err=e.error;
-      if(err==="no-speech"||err==="aborted")return;
-      st.stopped=true;
-      if(err==="not-allowed"||err==="service-not-allowed")toast("Mikrofonin käyttö on estetty selaimen asetuksissa");
-      else if(err==="network")toast("Sanelu vaatii verkkoyhteyden");
-      else if(err==="audio-capture")toast("Mikrofonia ei löytynyt");
-      else toast("Sanelu epäonnistui");
-    };
-    rec.onend=()=>{
-      if(!st.stopped && activeDictation===st){
-        /* Selain päättää tunnistuksen hiljaisuuden jälkeen -- jatketaan. */
-        base=input.value;
-        try{rec.start();return;}catch(e){}
-      }
-      setRec(false);
-      if(activeDictation===st)activeDictation=null;
-    };
-    activeDictation=st;
-    try{
-      rec.start();
-      setRec(true);
-    }catch(err){
-      activeDictation=null;
-      toast("Sanelua ei voitu käynnistää");
-    }
-  };
+  window.AppDictation.bind(btn,input,{toast});
 }
 
 let guardPushed=false;
@@ -4941,6 +4922,13 @@ function syncFieldColumnsFromDom(f,fieldIdx){
           .map(s=>s.trim())
           .filter(Boolean);
     }
+
+    const allowCustomChk=
+      document.getElementById(
+        `mf_col_allowcustom_${fieldIdx}_${cIdx}`
+      );
+
+    if(allowCustomChk)col.allowCustom=allowCustomChk.checked;
   });
 }
 
@@ -5399,6 +5387,15 @@ function renderMethodFieldRow(f,idx,fields){
       <div id="mf_options_wrap_${idx}" style="${f.type==="select"?"":"display:none;"}">
         <label>Vaihtoehdot (yksi per rivi)</label>
         <textarea id="mf_options_${idx}" placeholder="Vaihtoehto 1&#10;Vaihtoehto 2">${escapeHtml((f.options||[]).join("\n"))}</textarea>
+        <label class="setting-row" style="font-weight:400;margin:6px 0 0;">
+          <input type="checkbox" id="mf_allowcustom_${idx}" ${f.allowCustom?"checked":""}>
+          Salli myös muut arvot kuin valikon vaihtoehdot
+        </label>
+        <div class="hint">
+          Täytettäessä kirjoitettu teksti ehdottaa sopivaa vaihtoehtoa
+          (esim. "min" &rarr; "mineraalivilla"). Jos valintaa ei ole päällä,
+          kenttään voi tallentaa vain valikon vaihtoehtoja.
+        </div>
       </div>
 
       <div id="mf_table_wrap_${idx}" style="${f.type==="table"?"":"display:none;"}margin-top:8px;">
@@ -5671,6 +5668,10 @@ function renderMethodFieldRow(f,idx,fields){
           <div id="mf_col_options_wrap_${idx}_${cIdx}" style="${col.type==="select"?"":"display:none;"}margin-top:6px;">
             <label style="margin-top:0;">Vaihtoehdot (yksi per rivi)</label>
             <textarea id="mf_col_options_${idx}_${cIdx}" placeholder="Vaihtoehto 1&#10;Vaihtoehto 2">${escapeHtml((col.options||[]).join("\n"))}</textarea>
+            <label class="setting-row" style="font-weight:400;margin:6px 0 0;">
+              <input type="checkbox" id="mf_col_allowcustom_${idx}_${cIdx}" ${col.allowCustom?"checked":""}>
+              Salli myös muut arvot kuin valikon vaihtoehdot
+            </label>
           </div>
         </div>
       `);
@@ -5843,6 +5844,13 @@ function renderMethodFieldRow(f,idx,fields){
   row.querySelector(`#mf_label_${idx}`).addEventListener("input",e=>{
     f.label=e.target.value;
   });
+
+  const allowCustomChk=row.querySelector(`#mf_allowcustom_${idx}`);
+  if(allowCustomChk){
+    allowCustomChk.addEventListener("change",e=>{
+      f.allowCustom=e.target.checked;
+    });
+  }
 
   const optionsTa=row.querySelector(`#mf_options_${idx}`);
   if(optionsTa){
@@ -6324,8 +6332,12 @@ async function saveMethodEdit(){
         toast('Anna "'+label+'" -kentälle vähintään yksi vaihtoehto');
         return;
       }
+      const acChk=document.getElementById("mf_allowcustom_"+i);
+      if(acChk)fields[i].allowCustom=acChk.checked;
+      if(!fields[i].allowCustom)delete fields[i].allowCustom;
     }else{
       delete fields[i].options;
+      delete fields[i].allowCustom;
     }
 
     if(fields[i].type==="table"){
@@ -6352,6 +6364,7 @@ async function saveMethodEdit(){
                 (col.options||[])
                   .map(s=>String(s).trim())
                   .filter(Boolean);
+              if(col.allowCustom)cleaned.allowCustom=true;
             }
 
             return cleaned;
@@ -6738,13 +6751,6 @@ function renderEntryForm(){
             title="Poista kuva"
           >×</button>
 
-          <input
-            type="text"
-            class="photo-caption"
-            placeholder="Kuvateksti"
-            autocomplete="off"
-          >
-
         </div>
       `);
 
@@ -6754,9 +6760,6 @@ function renderEntryForm(){
 
     const rm=
       t.querySelector(".rm");
-
-    const caption=
-      t.querySelector(".photo-caption");
 
 
     appendPhotoToThumb(
@@ -6770,10 +6773,6 @@ function renderEntryForm(){
         openPhotoViewer(editingEntry,p,afterPhotoChange);
       }
     };
-
-
-    caption.value=
-      p.caption||"";
 
 
     rm.onclick=async()=>{
@@ -6825,15 +6824,6 @@ function renderEntryForm(){
 
       autosave();
       refreshPhotoCard();
-    };
-
-
-    caption.oninput=e=>{
-
-      p.caption=
-        e.target.value;
-
-      scheduleAutosave();
     };
 
 
@@ -6906,7 +6896,84 @@ function renderEntryForm(){
   thumbs.appendChild(addCam);
   thumbs.appendChild(addGal);
 
+  /* Kameran käyttö estetty -> kerrotaan miksi kuvaa ei voi ottaa. */
+  if(window.AppPerm){
+    window.AppPerm.guardFileInput(addCam.querySelector("input"),"camera");
+  }
+
   pc.appendChild(thumbs);
+
+  /*
+   * Kuvatekstit: yksi rivi per kuva (pienoiskuva + teksti + sanelu).
+   * Teksti tulee Word-raporttiin muodossa "Kuva N. teksti".
+   */
+  if(editingEntry.photos.length){
+
+    const caps=
+      el(`
+        <div class="photo-caps">
+          <div class="photo-caps-title">Kuvatekstit</div>
+        </div>
+      `);
+
+    editingEntry.photos.forEach((p,i)=>{
+
+      const row=
+        el(`
+          <div class="photo-cap-row">
+            <div class="thumb cap-thumb" role="button" tabindex="0" aria-label="Avaa kuva ${i+1}"></div>
+            <div class="cap-input-wrap">
+              <input
+                type="text"
+                class="photo-caption"
+                placeholder="Kuvateksti"
+                aria-label="Kuvateksti, kuva ${i+1}"
+                autocomplete="off"
+              >
+            </div>
+          </div>
+        `);
+
+      const capThumb=
+        row.querySelector(".cap-thumb");
+
+      appendPhotoToThumb(
+        capThumb,
+        p
+      );
+
+      capThumb.onclick=()=>openPhotoViewer(editingEntry,p,afterPhotoChange);
+      capThumb.onkeydown=ev=>{
+        if(ev.key==="Enter"||ev.key===" "){
+          ev.preventDefault();
+          openPhotoViewer(editingEntry,p,afterPhotoChange);
+        }
+      };
+
+      const capInput=
+        row.querySelector(".photo-caption");
+
+      capInput.value=
+        p.caption||"";
+
+      capInput.oninput=e=>{
+
+        p.caption=
+          e.target.value;
+
+        scheduleAutosave();
+      };
+
+      attachDictation(
+        row.querySelector(".cap-input-wrap"),
+        capInput
+      );
+
+      caps.appendChild(row);
+    });
+
+    pc.appendChild(caps);
+  }
   const nSavable=editingEntry.photos.filter(p=>p.blob instanceof Blob).length;
   if(nSavable>0){
     const saveAll=el(`
@@ -7058,6 +7125,7 @@ function renderField(f,values){
   let ih;
   const useChips=
     f.type==="select" &&
+    !f.allowCustom &&
     Array.isArray(f.options) &&
     f.options.length>=1 &&
     f.options.length<=4 &&
@@ -7086,25 +7154,16 @@ function renderField(f,values){
     ih=chipsHtml;
   }else if(f.type==="select"){
 
+    /* Ehdottava valikko: kirjoita tekstiä, niin sopivat vaihtoehdot ehdotetaan.
+       Näkyvä kenttä rakennetaan AppCombo.enhance-kutsulla alempana. */
     ih=
       `
-        <select
+        <input
+          type="text"
           id="fld_${escapeAttribute(f.id)}"
+          autocomplete="off"
+          value="${escapeAttribute(val)}"
         >
-          <option value="">
-            Valitse...
-          </option>
-
-          ${f.options.map(o=>`
-            <option
-              value="${escapeAttribute(o)}"
-              ${o===val?"selected":""}
-            >
-              ${escapeHtml(o)}
-            </option>
-          `).join("")}
-
-        </select>
       `;
 
   }else{
@@ -7167,6 +7226,13 @@ function renderField(f,values){
       `#fld_${CSS.escape(f.id)}`
     );
 
+
+  if(f.type==="select" && !useChips && window.AppCombo){
+    window.AppCombo.enhance(input,{
+      options:f.options||[],
+      allowCustom:!!f.allowCustom
+    });
+  }
 
   let refreshHint=()=>{};
 
@@ -7337,17 +7403,13 @@ function renderTableField(f,values){
 
                 return `
                   <td>
-                    <select
+                    <input
+                      type="text"
+                      aria-label="${escapeAttribute(c.label||"")}"
                       id="tblcell_${escapeAttribute(f.id)}_${rIdx}_${escapeAttribute(c.id)}"
+                      autocomplete="off"
+                      value="${escapeAttribute(curVal)}"
                     >
-                      <option value="">Valitse...</option>
-                      ${(c.options||[]).map(o=>`
-                        <option
-                          value="${escapeAttribute(o)}"
-                          ${o===curVal?"selected":""}
-                        >${escapeHtml(o)}</option>
-                      `).join("")}
-                    </select>
                   </td>
                 `;
               }
@@ -7463,6 +7525,13 @@ function renderTableField(f,values){
           tr.querySelector(
             `#tblcell_${CSS.escape(f.id)}_${rIdx}_${CSS.escape(c.id)}`
           );
+
+        if(c.type==="select" && window.AppCombo){
+          window.AppCombo.enhance(inp,{
+            options:c.options||[],
+            allowCustom:!!c.allowCustom
+          });
+        }
 
         inp.oninput=e=>{
           row[c.id]=e.target.value;
@@ -8692,30 +8761,17 @@ async function exportWord(){
           );
 
 
-        const maxCx=4200000;
-        const maxCy=2700000; // 7,5 cm — pystysuuntaisen kuvan enimmäiskorkeus
-
-        const {
-          cx,
-          cy
-        }=
-          engine.scaledDims(
-            n.width,
-            n.height,
-            maxCx,
-            maxCy
-          );
-
-
+        /*
+         * Kuvan koko, lukittu kuvasuhde ja kuvateksti tulevat yhteisestä
+         * engine.photoBlockXml-funktiosta (sama kaikilla lomakkeilla).
+         */
         const rId=
           imgRelCounter++;
-
 
         const mediaName=
           "image"+
           (extraMedia.length+1)+
           ".jpeg";
-
 
         extraMedia.push({
           rId,
@@ -8723,57 +8779,16 @@ async function exportWord(){
           blob
         });
 
-
         bodyParts.push(
-          engine.imageXml(
+          engine.photoBlockXml({
             rId,
-            cx,
-            cy,
-            imgDocPrCounter++,
-            "left"
-          )
-        );
-
-
-        {
-
-          const captionText=
-            `Kuva ${photoNumber}.`+
-            (
-              p.caption &&
-              p.caption.trim()
-                ? " "+p.caption.trim()
-                : ""
-            );
-
-          photoNumber++;
-
-          bodyParts.push(
-            engine.paraXml(
-              captionText,
-              {
-                italic:true,
-                align:"left",
-                font:s.fonts.body,
-                sz:engine.pt2hp(
-                  Math.max(
-                    9,
-                    s.fonts.bodySize-1
-                  )
-                ),
-                color:"000000",
-                after:160
-              }
-            )
-          );
-        }
-
-
-        bodyParts.push(
-          engine.paraXml(
-            "",
-            {after:100}
-          )
+            w:n.width,
+            h:n.height,
+            docPrId:imgDocPrCounter++,
+            number:photoNumber++,
+            caption:p.caption,
+            style:s
+          })
         );
       }
     }

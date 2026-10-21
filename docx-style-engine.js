@@ -786,9 +786,22 @@ window.DocxStyleEngine = (function(){
     return { bodyXml: bodyInner, sectPr: cleanSectPr };
   }
 
-  function imageXml(rId, cx, cy, docPrId, align){
-    const pPr = align ? '<w:pPr><w:jc w:val="' + align + '"/></w:pPr>' : "";
-    return '<w:p>' + pPr + '<w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="'+cx+'" cy="'+cy+'"/><wp:docPr id="'+docPrId+'" name="Kuva'+docPrId+'"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="'+docPrId+'" name="Kuva'+docPrId+'"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rId'+rId+'"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="'+cx+'" cy="'+cy+'"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>';
+  /*
+   * Kuva riviin. Kuvasuhde on lukittu (noChangeAspect), jolloin Wordissa
+   * "Lukitse kuvasuhde" on oletuksena päällä eikä kuva veny vahingossa
+   * kokoa muutettaessa. opts.keepNext pitää kuvan samalla sivulla seuraavan
+   * kappaleen (esim. kuvatekstin) kanssa.
+   */
+  function imageXml(rId, cx, cy, docPrId, align, opts){
+    opts = opts || {};
+    const pPrParts = [];
+    if (opts.keepNext) pPrParts.push('<w:keepNext/>');
+    if (align) pPrParts.push('<w:jc w:val="' + align + '"/>');
+    const pPr = pPrParts.length ? '<w:pPr>' + pPrParts.join('') + '</w:pPr>' : "";
+    const A = 'http://schemas.openxmlformats.org/drawingml/2006/main';
+    return '<w:p>' + pPr + '<w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="'+cx+'" cy="'+cy+'"/><wp:docPr id="'+docPrId+'" name="Kuva'+docPrId+'"/>' +
+      '<wp:cNvGraphicFramePr><a:graphicFrameLocks xmlns:a="' + A + '" noChangeAspect="1"/></wp:cNvGraphicFramePr>' +
+      '<a:graphic xmlns:a="' + A + '"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="'+docPrId+'" name="Kuva'+docPrId+'"/><pic:cNvPicPr><a:picLocks noChangeAspect="1"/></pic:cNvPicPr></pic:nvPicPr><pic:blipFill><a:blip r:embed="rId'+rId+'"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="'+cx+'" cy="'+cy+'"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>';
   }
 
   function pageNumberFieldXml(prefixText, align, opts){
@@ -923,6 +936,34 @@ window.DocxStyleEngine = (function(){
       cy = Math.round(cy * s);
     }
     return { cx, cy };
+  }
+
+  /*
+   * LOMAKKEIDEN VALOKUVIEN YHTEISET ASETUKSET (kenttalomake.html ja form.html).
+   * Kuva skaalataan suhteet säilyttäen enintään näihin mittoihin; vaakakuvan
+   * leveys 11,67 cm ja pystykuvan korkeus enintään 7,5 cm.
+   */
+  const PHOTO_MAX_CX = 4200000;
+  const PHOTO_MAX_CY = 2700000;
+  function photoDims(w, h){ return scaledDims(w, h, PHOTO_MAX_CX, PHOTO_MAX_CY); }
+
+  /*
+   * Kuva + kuvateksti + pieni väli. o: { rId, w, h, docPrId, number, caption, style }
+   * Kuvateksti on muotoa "Kuva N. teksti" (numero juoksee koko raportin läpi).
+   */
+  function photoBlockXml(o){
+    const s = o.style;
+    const { cx, cy } = photoDims(o.w, o.h);
+    const cap = "Kuva " + o.number + "." + (o.caption && String(o.caption).trim() ? " " + String(o.caption).trim() : "");
+    return imageXml(o.rId, cx, cy, o.docPrId, "left", { keepNext:true }) +
+      paraXml(cap, {
+        italic:true, align:"left",
+        font:s.fonts.body,
+        sz:pt2hp(Math.max(9, s.fonts.bodySize - 1)),
+        color:"000000",
+        after:160
+      }) +
+      paraXml("", { after:100 });
   }
 
 
@@ -1293,5 +1334,5 @@ window.DocxStyleEngine = (function(){
     return zip.generateAsync({ type:"blob", mimeType:"application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
   }
 
-  return { defaultStyle, FONT_CHOICES, xmlEsc, paraXml, imageXml, pageBreakXml, tocFieldXml, tableXml, pxToEmu, scaledDims, pt2hp, assembleDocx, normalizePage, mergeStyle, HF_SLOT_TYPES, runsPlain };
+  return { defaultStyle, FONT_CHOICES, xmlEsc, paraXml, imageXml, pageBreakXml, tocFieldXml, tableXml, pxToEmu, scaledDims, photoDims, photoBlockXml, PHOTO_MAX_CX, PHOTO_MAX_CY, pt2hp, assembleDocx, normalizePage, mergeStyle, HF_SLOT_TYPES, runsPlain };
 })();
