@@ -4357,6 +4357,8 @@ function renderEntriesCard(){
             </div>
           </div>
           <div class="entry-actions">
+            <button type="button" class="btn btn-outline btn-sm" data-act="up" aria-label="Siirrä menetelmää ylöspäin" ${idx===0?"disabled":""}>↑ Ylös</button>
+            <button type="button" class="btn btn-outline btn-sm" data-act="down" aria-label="Siirrä menetelmää alaspäin" ${idx===entries.length-1?"disabled":""}>↓ Alas</button>
             <button type="button" class="btn btn-outline btn-sm" data-act="edit">${canEditEntry(entry)?"Muokkaa":"Avaa"}</button>
             <button type="button" class="btn btn-outline btn-sm" data-act="copy">Kopioi</button>
           </div>
@@ -4404,6 +4406,26 @@ function renderEntriesCard(){
     card.querySelector('[data-act="copy"]').onclick=e=>{
       e.stopPropagation();
       duplicateEntry(entry);
+    };
+    const moveEntry=(delta)=>{
+      const from=entries.indexOf(entry);
+      const to=from+delta;
+      if(from<0||to<0||to>=entries.length)return;
+      const reordered=entries.slice();
+      const [moved]=reordered.splice(from,1);
+      reordered.splice(to,0,moved);
+      entries=reordered;
+      scheduleAutosave();
+      render();
+      toast("Menetelmien järjestys päivitetty");
+    };
+    card.querySelector('[data-act="up"]').onclick=e=>{
+      e.stopPropagation();
+      moveEntry(-1);
+    };
+    card.querySelector('[data-act="down"]').onclick=e=>{
+      e.stopPropagation();
+      moveEntry(1);
     };
     c.appendChild(card);
   });
@@ -8393,46 +8415,11 @@ async function exportWord(){
 
 
   /*
-   * Vientiä varten merkinnät ryhmitellään menetelmätyypin mukaan
-   * (esim. kaikki rakenneavaukset peräkkäin) sen sijaan, että ne
-   * tulostetaan siinä sekalaisessa järjestyksessä, jossa ne on
-   * kirjattu. Ryhmien järjestys noudattaa METHODS-listan järjestystä
-   * (sama kuin "Muokkaa menetelmiä" -näkymässä), ja saman ryhmän
-   * sisällä alkuperäinen kirjaamisjärjestys säilyy.
-   *
-   * Otsikon numero ("Menetelmä N") pysyy kunkin merkinnän
-   * ALKUPERÄISENÄ paikkana entries-taulukossa (originalIndex+1), ei
-   * uutena järjestysnumerona. Tämä on tärkeää, koska sama numero on
-   * poltettu pohjakuvan PDF-merkintöihin (ks. kohta jossa
-   * "Menetelmä ${idx+1}" muodostetaan annotaatioihin) — jos
-   * numeroitaisiin uudelleen ryhmittelyn mukaan, Word-raportin
-   * numerot eivät enää täsmäisi pohjakuvan merkintöihin.
+   * Word-viennissä käytetään käyttäjän valitsemaa järjestystä.
+   * Ylös/Alas-painikkeet muuttavat entries-taulukkoa, joten järjestys
+   * säilyy myös tallennuksessa ja Word-raportissa.
    */
-  const exportOrder=
-    entries
-      .map((e,originalIndex)=>({e,originalIndex}))
-      .sort((a,b)=>{
-
-        const ai=
-          METHODS.findIndex(
-            x=>x.id===a.e.methodId
-          );
-
-        const bi=
-          METHODS.findIndex(
-            x=>x.id===b.e.methodId
-          );
-
-        const aOrder=
-          ai===-1?METHODS.length:ai;
-
-        const bOrder=
-          bi===-1?METHODS.length:bi;
-
-        if(aOrder!==bOrder)return aOrder-bOrder;
-
-        return a.originalIndex-b.originalIndex;
-      });
+  const exportOrder=entries.map((e,originalIndex)=>({e,originalIndex}));
 
   /*
    * Suomenkieliset monikkomuodot vakiomenetelmien ryhmäotsikoihin
