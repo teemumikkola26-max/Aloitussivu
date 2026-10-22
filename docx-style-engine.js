@@ -155,6 +155,11 @@ window.DocxStyleEngine = (function(){
    */
   function renderPageBlocks(blocks, style){
     const parts = [];
+    // Sivun otsikko on Heading1. Sivun sisällä ylin käytetty otsikkotaso on Heading2
+    // (1.1) ja sitä seuraava Heading3 (1.1.1), jotta tasoja ei ohiteta: jos sivulla on
+    // vain alaotsikkolohkoja, ne ovat Heading2 eikä Heading3.
+    const hasHeadingBlock = blocks.some(x => (x.type || "paragraph") === "heading");
+    const subStyle = hasHeadingBlock ? "Heading3" : "Heading2";
     blocks.forEach(b => {
       const type = b.type || "paragraph";
       if (type === "heading"){
@@ -167,7 +172,7 @@ window.DocxStyleEngine = (function(){
         parts.push(paraXml(b.text || "", {
           bold:true, sz: pt2hp(style.fonts.subheadingSize||11), font: style.fonts.heading,
           color: b.color || style.colors.heading, before:120, after:80,
-          pStyle:"Heading3"
+          pStyle: subStyle
         }));
       } else if (type === "bullets" || type === "numbered"){
         listItemsOf(b).forEach(item => {
