@@ -160,12 +160,14 @@ window.DocxStyleEngine = (function(){
       if (type === "heading"){
         parts.push(paraXml(b.text || "", {
           bold:true, sz: pt2hp((style.fonts.headingSize||14)), font: style.fonts.heading,
-          color: b.color || style.colors.heading, before:160, after:100
+          color: b.color || style.colors.heading, before:160, after:100,
+          pStyle:"Heading2"
         }));
       } else if (type === "subheading"){
         parts.push(paraXml(b.text || "", {
           bold:true, sz: pt2hp(style.fonts.subheadingSize||11), font: style.fonts.heading,
-          color: b.color || style.colors.heading, before:120, after:80
+          color: b.color || style.colors.heading, before:120, after:80,
+          pStyle:"Heading3"
         }));
       } else if (type === "bullets" || type === "numbered"){
         listItemsOf(b).forEach(item => {
@@ -1178,7 +1180,7 @@ window.DocxStyleEngine = (function(){
     for (const page of (style.pagesBefore || [])){
       finalBodyParts.push(paraXml(page.title || "Sivu", {
         bold:true, sz: pt2hp(style.fonts.headingSize), font: style.fonts.heading, color: style.colors.heading,
-        pStyle:"Heading1", noNum:true, after:160
+        pStyle:"Heading1", after:160
       }));
       if (page.sourceMode === "docx"){
         if (page._docxBytes){
@@ -1211,7 +1213,7 @@ window.DocxStyleEngine = (function(){
       finalBodyParts.push(pageBreakXml());
       finalBodyParts.push(paraXml(page.title || "Sivu", {
         bold:true, sz: pt2hp(style.fonts.headingSize), font: style.fonts.heading, color: style.colors.heading,
-        pStyle:"Heading1", noNum:true, after:160
+        pStyle:"Heading1", after:160
       }));
       if (page.sourceMode === "docx"){
         if (page._docxBytes){
