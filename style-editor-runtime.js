@@ -209,10 +209,11 @@ function blockTypeSelect(value, onChange){
 /* ---------- Rikas teksti (lihavointi + väri yksittäiselle sanalle) ---------- */
 const RICH_COLORS = ["#000000","#c0392b","#d35400","#1e7a46","#1f5fa8","#7a3fa0"];
 
-function richRunsToHtml(runs){
+function richRunsToHtml(runs, pxPerPt){
   const esc = t => String(t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
   return (runs || []).map(r => {
     let h = esc(r.text || "").replace(/\n/g, "<br>");
+    if (r.size > 0) h = '<span data-pt="' + r.size + '" style="font-size:' + (r.size * (pxPerPt || 1.4)).toFixed(2) + 'px">' + h + '</span>';
     if (r.color) h = '<span style="color:' + r.color + '">' + h + '</span>';
     if (r.bold) h = "<b>" + h + "</b>";
     return h;
@@ -237,8 +238,8 @@ function richParseLines(root){
   const flush = () => { lines.push(cur); cur = []; };
   function push(text, fmt){
     const last = cur[cur.length - 1];
-    if (last && !!last.bold === !!fmt.bold && (last.color || "") === (fmt.color || "")) last.text += text;
-    else { const r = { text }; if (fmt.bold) r.bold = true; if (fmt.color) r.color = fmt.color; cur.push(r); }
+    if (last && !!last.bold === !!fmt.bold && (last.color || "") === (fmt.color || "") && (last.size || 0) === (fmt.size || 0)) last.text += text;
+    else { const r = { text }; if (fmt.bold) r.bold = true; if (fmt.color) r.color = fmt.color; if (fmt.size) r.size = fmt.size; cur.push(r); }
   }
   function walk(node, fmt){
     if (node.nodeType === 3){
@@ -256,6 +257,10 @@ function richParseLines(root){
     if (fw === "normal" || (fw && Number(fw) > 0 && Number(fw) < 600)) f.bold = false;
     if (tag === "FONT" && node.getAttribute("color")) f.color = rgbToHex(node.getAttribute("color")) || f.color;
     if (node.style && node.style.color) f.color = rgbToHex(node.style.color) || f.color;
+    if (node.dataset && node.dataset.pt !== undefined){
+      const pt = Number(node.dataset.pt);
+      if (pt > 0) f.size = pt; else delete f.size;   // data-pt="0" = palautus oletuskokoon
+    }
     const isBlock = tag === "DIV" || tag === "P" || tag === "LI";
     if (isBlock && cur.length) flush();
     node.childNodes.forEach(ch => walk(ch, f));
@@ -280,7 +285,7 @@ function runsToLines(runs){
   (runs || []).forEach(r => {
     String(r.text || "").split("\n").forEach((part, i) => {
       if (i > 0) lines.push([]);
-      if (part) { const x = { text: part }; if (r.bold) x.bold = true; if (r.color) x.color = r.color; lines[lines.length - 1].push(x); }
+      if (part) { const x = { text: part }; if (r.bold) x.bold = true; if (r.color) x.color = r.color; if (r.size) x.size = r.size; lines[lines.length - 1].push(x); }
     });
   });
   return lines;
@@ -291,7 +296,7 @@ function runsToLines(runs){
  * mode "list": jokainen rivi = yksi kohta (b.itemRuns).
  * b.text / b.items pidetään rinnalla pelkkänä tekstinä (vanhat tallenteet ja varalle).
  */
-function richEditor(b, mode, placeholder, baseColorFn){
+function richEditor(b, mode, placeholder, baseColorFn, baseSizeFn){
   const wrap = document.createElement("div");
 
   const bar = document.createElement("div");
@@ -300,14 +305,17 @@ function richEditor(b, mode, placeholder, baseColorFn){
   ed.contentEditable = "true";
   ed.setAttribute("role", "textbox");
   ed.setAttribute("aria-multiline", "true");
-  ed.style.cssText = "min-height:80px;padding:9px 11px;border:1px solid var(--line-strong);border-radius:8px;background:#fff;white-space:pre-wrap;word-break:break-word;font-size:.92rem;line-height:1.4;outline:none;";
+  ed.style.cssText = "min-height:80px;padding:9px 11px;border:1px solid var(--line-strong);border-radius:8px;background:#fff;white-space:pre-wrap;word-break:break-word;font-size:15px;line-height:1.4;outline:none;";
+  // Esikatselu: 1 pt vastaa tässä px-arvoa niin, että raportin leipätekstin koko = 15 px.
+  const basePt = () => { const v = baseSizeFn ? Number(baseSizeFn()) : 10.5; return v > 0 ? v : 10.5; };
+  const pxPerPt = () => 15 / basePt();
   ed.style.color = baseColorFn();
   ed.dataset.placeholder = placeholder || "";
 
   const initial = mode === "list"
     ? (Array.isArray(b.itemRuns) && b.itemRuns.length ? richLinesToRuns(b.itemRuns) : plainToRuns((b.items || []).join("\n")))
     : (Array.isArray(b.runs) && b.runs.length ? b.runs : plainToRuns(b.text));
-  ed.innerHTML = richRunsToHtml(initial);
+  ed.innerHTML = richRunsToHtml(initial, pxPerPt());
 
   function sync(){
     const lines = richParseLines(ed);
@@ -345,6 +353,34 @@ function richEditor(b, mode, placeholder, baseColorFn){
     saveSel();
     sync();
   }
+  // Fonttikoko valitulle tekstille. execCommand("fontSize") tekee väliaikaisen
+  // "xxx-large"-merkinnän, jonka korvaamme tarkalla pt-koolla (data-pt).
+  function applySize(pt){
+    restoreSel();
+    document.execCommand("styleWithCSS", false, true);
+    document.execCommand("fontSize", false, "7");
+    const marked = [];
+    ed.querySelectorAll("font, span").forEach(el => {
+      const isFont = el.tagName === "FONT" && el.getAttribute("size") === "7";
+      const fs = (el.style && el.style.fontSize) || "";
+      if (isFont || /xxx-large/.test(fs)) marked.push(el);
+    });
+    marked.forEach(el => {
+      let target = el;
+      if (el.tagName === "FONT"){
+        const sp = document.createElement("span");
+        while (el.firstChild) sp.appendChild(el.firstChild);
+        el.parentNode.replaceChild(sp, el);
+        target = sp;
+      }
+      // Sisäkkäiset aiemmat koot ylikirjoitetaan uudella koolla.
+      target.querySelectorAll("[data-pt]").forEach(d => { d.removeAttribute("data-pt"); d.style.fontSize = ""; });
+      target.dataset.pt = String(pt);
+      target.style.fontSize = ((pt > 0 ? pt : basePt()) * pxPerPt()).toFixed(2) + "px";
+    });
+    saveSel();
+    sync();
+  }
   function barBtn(label, title, onClick, extraStyle){
     const btn = document.createElement("button");
     btn.type = "button";
@@ -367,15 +403,47 @@ function richEditor(b, mode, placeholder, baseColorFn){
   custom.style.cssText = "width:34px;height:30px;border:none;padding:0;background:none;";
   custom.addEventListener("change", () => applyCmd("foreColor", custom.value));
   bar.appendChild(custom);
-  bar.appendChild(barBtn("Tyhjennä", "Poista lihavointi ja väri valitulta tekstiltä", () => applyCmd("removeFormat"), "font-size:.74rem;"));
+  const sizeSel = document.createElement("select");
+  sizeSel.title = "Fonttikoko valitulle tekstille";
+  sizeSel.style.cssText = "height:34px;border:1px solid var(--line-strong);border-radius:8px;background:#fff;padding:0 6px;font-size:.8rem;";
+  const optHead = document.createElement("option");
+  optHead.value = ""; optHead.textContent = "Koko…";
+  sizeSel.appendChild(optHead);
+  const optDef = document.createElement("option");
+  optDef.value = "0"; optDef.textContent = "Oletuskoko";
+  sizeSel.appendChild(optDef);
+  [8, 9, 10, 10.5, 11, 12, 13, 14, 16, 18, 20, 24, 28].forEach(n => {
+    const o = document.createElement("option");
+    o.value = String(n); o.textContent = n + " pt";
+    sizeSel.appendChild(o);
+  });
+  sizeSel.addEventListener("change", () => {
+    const v = sizeSel.value;
+    sizeSel.value = "";
+    if (v === "") return;
+    applySize(Number(v));
+  });
+  bar.appendChild(sizeSel);
+  bar.appendChild(barBtn("Tyhjennä", "Poista lihavointi, väri ja koko valitulta tekstiltä", () => {
+    applyCmd("removeFormat");
+    // removeFormat ei poista data-pt-kokoja: nollataan ne valinnasta.
+    const sel = window.getSelection();
+    if (sel.rangeCount){
+      const range = sel.getRangeAt(0);
+      ed.querySelectorAll("[data-pt]").forEach(el => {
+        if (range.intersectsNode(el)){ el.removeAttribute("data-pt"); el.style.fontSize = ""; }
+      });
+      sync();
+    }
+  }, "font-size:.74rem;"));
 
   wrap.appendChild(bar);
   wrap.appendChild(ed);
   const hint = document.createElement("div");
   hint.style.cssText = "font-size:.74rem;color:var(--ink-soft);margin-top:4px;";
   hint.textContent = mode === "list"
-    ? "Yksi kohta per rivi (Enter = uusi kohta). Valitse sana ja paina B tai väriä."
-    : "Valitse sana tai lause ja paina B (lihavointi) tai väriä — voit muotoilla myös yksittäisen sanan lauseen keskeltä.";
+    ? "Yksi kohta per rivi (Enter = uusi kohta). Valitse sana ja paina B, väriä tai valitse koko."
+    : "Valitse sana tai lause ja paina B (lihavointi), väriä tai valitse fonttikoko — voit muotoilla myös yksittäisen sanan lauseen keskeltä.";
   wrap.appendChild(hint);
   wrap.setBaseColor = c => { ed.style.color = c; };
   return wrap;
@@ -453,7 +521,7 @@ function renderBlockEditor(blocks, idx, rerenderBlocks){
     colorRow.appendChild(colorPicker(b.color || style.colors.heading, v => b.color = v));
     wrap.appendChild(colorRow);
   } else if (b.type === "paragraph"){
-    const re = richEditor(b, "paragraph", "Kappaleen teksti…", () => b.color || style.colors.body);
+    const re = richEditor(b, "paragraph", "Kappaleen teksti…", () => b.color || style.colors.body, () => style.fonts.bodySize);
     wrap.appendChild(re);
     const colorRow = document.createElement("div");
     colorRow.style.cssText = "display:flex;align-items:center;gap:8px;margin-top:6px;font-size:.78rem;color:var(--ink-soft);";
@@ -461,7 +529,7 @@ function renderBlockEditor(blocks, idx, rerenderBlocks){
     colorRow.appendChild(colorPicker(b.color || style.colors.body, v => { b.color = v; re.setBaseColor(v); }));
     wrap.appendChild(colorRow);
   } else if (b.type === "bullets" || b.type === "numbered"){
-    const re = richEditor(b, "list", "Yksi kohta per rivi…", () => b.color || style.colors.body);
+    const re = richEditor(b, "list", "Yksi kohta per rivi…", () => b.color || style.colors.body, () => style.fonts.bodySize);
     wrap.appendChild(re);
     const colorRow = document.createElement("div");
     colorRow.style.cssText = "display:flex;align-items:center;gap:8px;margin-top:6px;font-size:.78rem;color:var(--ink-soft);";

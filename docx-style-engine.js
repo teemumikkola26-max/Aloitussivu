@@ -255,7 +255,7 @@ window.DocxStyleEngine = (function(){
     let runsOut;
     if (Array.isArray(opts.runs) && opts.runs.length){
       runsOut = opts.runs.filter(r => r && r.text).map(r => '<w:r>' + rPrFor({
-        font: opts.font, sz: opts.sz, italic: opts.italic,
+        font: opts.font, sz: (r.size > 0 && r.size <= 72) ? pt2hp(r.size) : opts.sz, italic: opts.italic,
         bold: opts.bold || r.bold, color: r.color || opts.color
       }) + textRuns(r.text) + '</w:r>').join("");
     } else {
@@ -298,7 +298,7 @@ window.DocxStyleEngine = (function(){
       '<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"' + (extraNsAttrs || '') + '>' +
       '<w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="bullet"/>' +
       '<w:lvlText w:val="•"/><w:lvlJc w:val="left"/><w:pPr><w:ind w:left="432" w:hanging="432"/></w:pPr>' +
-      '<w:rPr><w:rFonts w:ascii="Symbol" w:hAnsi="Symbol" w:hint="default"/></w:rPr></w:lvl></w:abstractNum>' +
+      '<w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial" w:hint="default"/><w:color w:val="000000"/></w:rPr></w:lvl></w:abstractNum>' +
       '<w:abstractNum w:abstractNumId="1"><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="decimal"/>' +
       '<w:lvlText w:val="%1."/><w:lvlJc w:val="left"/><w:pPr><w:ind w:left="432" w:hanging="432"/></w:pPr></w:lvl></w:abstractNum>' +
       headingNumberingAbstractXml() +
@@ -670,6 +670,58 @@ window.DocxStyleEngine = (function(){
         normalStyleId = prefix + "Normal"; cellStyleId = prefix + "NormalCell";
       }
       bodyInner = remapStyleIds(bodyInner);
+
+      /*
+       * Tuodun vakiotekstisivun (label "page") otsikkotyylit liitetään raportin
+       * omiin Heading2/Heading3-tyyleihin, jotta väliotsikot numeroituvat samalla
+       * monitasonumeroinnilla kuin muu raportti (sivun otsikko = taso 1, tuodun
+       * tiedoston ylin otsikkotaso = taso 2, seuraava = taso 3). Muut tyylit
+       * (leipäteksti, taulukot jne.) säilyvät tuotuina.
+       */
+      if (label === "page" && ctx.mapImportedHeadings){
+        const headingLevelOf = (id, seen) => {
+          seen = seen || {};
+          if (!id || seen[id] || !srcById[id]) return 0;
+          seen[id] = true;
+          const blk = srcById[id];
+          const nm = (/<w:name\s+w:val="([^"]*)"/.exec(blk) || [])[1] || "";
+          const nmm = /^(?:heading|otsikko)\s*([1-9])$/i.exec(nm.trim());
+          if (nmm) return parseInt(nmm[1], 10);
+          const ol = /<w:outlineLvl\s+w:val="(\d)"/.exec(blk.replace(/<w:rPr>[\s\S]*?<\/w:rPr>/, ""));
+          if (ol) return parseInt(ol[1], 10) + 1;
+          const bo = /<w:basedOn\s+w:val="([^"]+)"/.exec(blk);
+          return bo ? headingLevelOf(bo[1], seen) : 0;
+        };
+        const levelOfNew = newId => (newId && newId.indexOf(prefix) === 0)
+          ? headingLevelOf(newId.slice(prefix.length)) : 0;
+        const pPrRe = /<w:pPr>((?:(?!<\/w:pPr>)[\s\S])*)<\/w:pPr>/g;
+        let minLvl = 99;
+        bodyInner.replace(pPrRe, (m, inner) => {
+          if (inner.indexOf("<w:pPrChange") !== -1) return m;
+          const sm = /<w:pStyle\s+w:val="([^"]+)"\s*\/>/.exec(inner);
+          const lv = sm ? levelOfNew(sm[1]) : 0;
+          if (lv && lv < minLvl) minLvl = lv;
+          return m;
+        });
+        if (minLvl !== 99){
+          bodyInner = bodyInner.replace(pPrRe, (m, inner) => {
+            if (inner.indexOf("<w:pPrChange") !== -1) return m;
+            const sm = /<w:pStyle\s+w:val="([^"]+)"\s*\/>/.exec(inner);
+            const lv = sm ? levelOfNew(sm[1]) : 0;
+            if (!lv) return m;
+            const hostLvl = Math.min(3, (lv - minLvl) + 2);
+            const rest = inner
+              .replace(/<w:pStyle\b[^>]*\/>/, "")
+              .replace(/<w:numPr>[\s\S]*?<\/w:numPr>/, "")
+              .replace(/<w:spacing\b[^>]*\/>/, "")
+              .replace(/<w:ind\b[^>]*\/>/, "");
+            const spacing = hostLvl === 2
+              ? '<w:spacing w:before="200" w:after="80"/>'
+              : '<w:spacing w:before="120" w:after="40"/>';
+            return '<w:pPr>' + mergeProps('<w:pStyle w:val="Heading' + hostLvl + '"/>' + spacing, rest, PPR_ORDER) + '</w:pPr>';
+          });
+        }
+      }
     }
 
     // ---- numerointi: poimi, nimeä uudelleen ----
@@ -1044,7 +1096,8 @@ window.DocxStyleEngine = (function(){
       defaultStyleTypes: {},
       extraDefaultExts: new Set(),
       extraNamespaces: {},
-      theme: { xml: null }
+      theme: { xml: null },
+      mapImportedHeadings: !(style.headingNumbering && style.headingNumbering.enabled === false)
     };
 
     extraMedia.forEach(m => {
