@@ -1337,6 +1337,8 @@ let lastRemoteUpdatedAt=null;
 let projectDirty={};
 let entrySyncSig={};
 let pullInFlight=false;
+/* Menetelmien järjestystä on muutettu paikallisesti eikä sitä ole vielä viety pilveen */
+let entryOrderDirty=false;
 
 let view="project";
 let editingEntry=null;
@@ -1671,6 +1673,7 @@ function createPortableState(){
   return {
     project,
     deletedEntryIds,
+    entryOrderDirty,
     entries:entries.map(e=>({
       id:e.id,
       author:e.author||"",
@@ -1707,6 +1710,7 @@ function createIndexedDbState(){
     project,
     entries,
     deletedEntryIds,
+    entryOrderDirty,
     view,
     editingEntry,
     editingIsNew
@@ -2070,26 +2074,48 @@ async function mergeRemote(remote){
     out.changed=true;
   }
 
-  /* Järjestys: pilven järjestys ensin, paikalliset vain-paikalliset perään */
-  const ordered=[];
+  /*
+   * Järjestys: jos järjestystä on muutettu paikallisesti eikä muutosta
+   * ole vielä viety pilveen, paikallinen järjestys säilyy (uudet pilven
+   * merkinnät on jo lisätty loppuun) ja se viedään pilveen. Muuten
+   * pilven järjestys ensin, paikalliset vain-paikalliset perään.
+   */
+  if(entryOrderDirty){
 
-  remoteIds.forEach(id=>{
-    const e=entries.find(x=>x.id===id);
-    if(e)ordered.push(e);
-  });
+    const remoteOrderIds=remoteIds.filter(
+      id=>entries.some(x=>x.id===id)
+    );
 
-  const localOnly=entries.filter(e=>remoteIds.indexOf(e.id)===-1);
+    const localOrderIds=entries
+      .map(e=>e.id)
+      .filter(id=>remoteIds.indexOf(id)!==-1);
 
-  if(localOnly.length)out.needsPush=true;
+    if(remoteOrderIds.join(",")!==localOrderIds.join(",")){
+      out.needsPush=true;
+    }
 
-  const newOrder=ordered.concat(localOnly);
+  }else{
 
-  if(newOrder.length===entries.length &&
-     newOrder.some((e,i)=>e!==entries[i])){
-    out.changed=true;
+    const ordered=[];
+
+    remoteIds.forEach(id=>{
+      const e=entries.find(x=>x.id===id);
+      if(e)ordered.push(e);
+    });
+
+    const localOnly=entries.filter(e=>remoteIds.indexOf(e.id)===-1);
+
+    if(localOnly.length)out.needsPush=true;
+
+    const newOrder=ordered.concat(localOnly);
+
+    if(newOrder.length===entries.length &&
+       newOrder.some((e,i)=>e!==entries[i])){
+      out.changed=true;
+    }
+
+    entries=newOrder;
   }
-
-  entries=newOrder;
 
   /* Projektikentät */
   const rp=d.project||{};
@@ -2363,6 +2389,8 @@ async function syncToCloud(){
 
     const mergeResult=await mergeRemote(remoteNow);
 
+    const orderSnapshot=entries.map(e=>e.id).join(",");
+
     const cloudEntries=entries.map(e=>({
 
       id:e.id,
@@ -2413,6 +2441,10 @@ async function syncToCloud(){
 
     projectDirty={};
     researchPlanCleared=false;
+
+    if(entries.map(e=>e.id).join(",")===orderSnapshot){
+      entryOrderDirty=false;
+    }
 
     markEntriesSynced();
 
@@ -2764,6 +2796,8 @@ async function loadState(){
           ?value.deletedEntryIds.slice()
           :[];
 
+      entryOrderDirty=!!value.entryOrderDirty;
+
 
       for(const e of entries){
 
@@ -3104,6 +3138,7 @@ async function clearForm(){
   entries=[];
 
   deletedEntryIds=[];
+  entryOrderDirty=false;
   lastRemoteUpdatedAt=null;
   projectDirty={};
   entrySyncSig={};
@@ -4364,28 +4399,7 @@ function renderEntriesCard(){
           </div>
         </div>
       `);
-    if(entry.photos?.length){
-      const thumbs=el('<div class="thumbs"></div>');
-      entry.photos.forEach(p=>{
-        const wrapper=
-          el(`
-            <div style="display:flex;flex-direction:column;align-items:center;width:56px;">
-              <div class="thumb"></div>
-              <div style="font-size:11px;color:#555;text-align:center;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:56px;">${escapeHtml(p.caption||"")}</div>
-            </div>
-          `);
-        appendPhotoToThumb(wrapper.querySelector(".thumb"),p);
-        wrapper.style.cursor="zoom-in";
-        wrapper.setAttribute("role","button");
-        wrapper.setAttribute("aria-label","Avaa kuva");
-        wrapper.onclick=ev=>{
-          ev.stopPropagation();
-          openPhotoViewer(entry,p,()=>render());
-        };
-        thumbs.appendChild(wrapper);
-      });
-      card.appendChild(thumbs);
-    }
+    // Aloitussivun menetelmäkortissa ei näytetä valokuvien pikkukuvia.
     const edit=()=>{
       editingEntry=entry;
       editingIsNew=false;
@@ -4415,6 +4429,7 @@ function renderEntriesCard(){
       const [moved]=reordered.splice(from,1);
       reordered.splice(to,0,moved);
       entries=reordered;
+      entryOrderDirty=true;
       scheduleAutosave();
       render();
       toast("Menetelmien järjestys päivitetty");
