@@ -651,7 +651,8 @@ const FIELD_TYPE_LABELS = {
   number:"Numero",
   date:"Päivämäärä",
   select:"Pudotusvalikko",
-  table:"Taulukko (vakiotsikot + täytettävät solut)"
+  table:"Taulukko (vakiotsikot + täytettävät solut)",
+  rowtable:"Taulukko (täyttäjä lisää rivejä)"
 };
 
 function buildSectionsCard(){
@@ -965,10 +966,117 @@ function buildFieldBlockCore(sec, field, fieldIdx){
     hint.textContent = "Muut solut jäävät tyhjiksi lomakkeeseen — kentän täyttäjä kirjoittaa ne itse.";
     wrap.appendChild(hint);
     return wrap;
+  } else if (field.type === "rowtable"){
+    wrap.appendChild(row2);
+    buildRowTableEditor(field, wrap);
+    return wrap;
   }
 
   wrap.appendChild(row2);
   return wrap;
+}
+
+/* ---------- Taulukko, johon täyttäjä lisää rivejä ----------
+   Editorissa määritetään vain sarakkeet (otsikko + tyyppi). Rivit lisätään
+   lomakkeen täytön aikana. Sarakkeet: field.columns = [{id,label,type,options,allowCustom}] */
+const ROWTABLE_COL_TYPES = { text:"Teksti", number:"Numero", select:"Valintalista" };
+const ROWTABLE_LAYOUTS = {
+  scroll:"Taulukko (vieritetään sivuttain)",
+  sticky:"Taulukko, ensimmäinen sarake kiinnitetty",
+  cards:"Kortit (jokainen rivi omana korttinaan)"
+};
+
+function buildRowTableEditor(field, wrap){
+  if (!Array.isArray(field.columns) || !field.columns.length){
+    field.columns = [
+      { id:genId(), label:"", type:"text" },
+      { id:genId(), label:"", type:"text" }
+    ];
+  }
+  if (!ROWTABLE_LAYOUTS[field.layout]) field.layout = "scroll";
+
+  const intro = document.createElement("div");
+  intro.style.cssText = "font-size:.74rem;color:var(--ink-soft);margin:8px 0 6px;";
+  intro.textContent = "Sarakkeet, joita täyttäjä täyttää rivi kerrallaan (esim. \"Rakennekerros\", \"Paksuus (mm)\"). Täyttäjä lisää lomakkeella niin monta riviä kuin tarvitsee.";
+  wrap.appendChild(intro);
+
+  field.columns.forEach((col, i) => {
+    const box = document.createElement("div");
+    box.style.cssText = "border:1px solid var(--line-strong);border-radius:8px;padding:8px;margin-bottom:8px;background:#fff;";
+
+    const top = document.createElement("div");
+    top.className = "editor-row";
+    const labelInput = textInput(col.label, v => col.label = v, "Sarakkeen otsikko " + (i+1));
+    labelInput.style.flex = "1";
+    const typeSel = document.createElement("select");
+    typeSel.className = "type-select";
+    Object.keys(ROWTABLE_COL_TYPES).forEach(t => {
+      const o = document.createElement("option");
+      o.value = t; o.textContent = ROWTABLE_COL_TYPES[t];
+      if ((col.type || "text") === t) o.selected = true;
+      typeSel.appendChild(o);
+    });
+    typeSel.addEventListener("change", () => {
+      col.type = typeSel.value;
+      if (col.type === "select" && !Array.isArray(col.options)) col.options = [];
+      renderEditor();
+    });
+    const delBtn = document.createElement("button");
+    delBtn.type = "button"; delBtn.className = "icon-btn icon-btn-danger"; delBtn.textContent = "✕";
+    delBtn.setAttribute("aria-label", "Poista sarake");
+    delBtn.disabled = field.columns.length <= 1;
+    delBtn.addEventListener("click", () => {
+      field.columns.splice(i, 1);
+      renderEditor();
+    });
+    top.appendChild(labelInput);
+    top.appendChild(typeSel);
+    top.appendChild(delBtn);
+    box.appendChild(top);
+
+    if (col.type === "select"){
+      const optionsArea = document.createElement("textarea");
+      optionsArea.placeholder = "Yksi vaihtoehto per rivi";
+      optionsArea.style.cssText = "width:100%;margin:6px 0;border:1px solid var(--line-strong);border-radius:7px;padding:8px 9px;font-size:.85rem;font-family:inherit;min-height:56px;";
+      optionsArea.value = (col.options || []).join("\n");
+      optionsArea.addEventListener("input", () => {
+        col.options = optionsArea.value.split("\n").map(s => s.trim()).filter(Boolean);
+      });
+      box.appendChild(optionsArea);
+      box.appendChild(allowCustomCheckbox(col));
+    }
+    wrap.appendChild(box);
+  });
+
+  const addCol = document.createElement("button");
+  addCol.type = "button"; addCol.className = "btn btn-secondary";
+  addCol.style.cssText = "flex:0 0 auto;padding:8px 12px;font-size:.82rem;";
+  addCol.textContent = "+ Lisää sarake";
+  addCol.addEventListener("click", () => {
+    field.columns.push({ id:genId(), label:"", type:"text" });
+    renderEditor();
+  });
+  wrap.appendChild(addCol);
+
+  const layoutLabel = document.createElement("div");
+  layoutLabel.style.cssText = "font-size:.74rem;color:var(--ink-soft);margin:12px 0 3px;";
+  layoutLabel.textContent = "Näkymä täytettäessä:";
+  wrap.appendChild(layoutLabel);
+  const layoutSel = document.createElement("select");
+  layoutSel.className = "type-select";
+  Object.keys(ROWTABLE_LAYOUTS).forEach(k => {
+    const o = document.createElement("option");
+    o.value = k; o.textContent = ROWTABLE_LAYOUTS[k];
+    if (field.layout === k) o.selected = true;
+    layoutSel.appendChild(o);
+  });
+  layoutSel.addEventListener("change", () => { field.layout = layoutSel.value; });
+  wrap.appendChild(layoutSel);
+
+  const note = document.createElement("div");
+  note.style.cssText = "font-size:.74rem;color:var(--ink-soft);margin-top:4px;";
+  note.textContent = "Word-raportissa tieto on aina taulukkona; tyhjät rivit jätetään pois.";
+  wrap.appendChild(note);
 }
 
 /* ---------- Tallennus ---------- */
@@ -988,6 +1096,13 @@ function validateDef(){
     if (secErr) return secErr;
     for (const f of sec.fields){
       if (f.type === "select" && !(f.options || []).length) return 'Pudotusvalikolla "' + f.label + '" ei ole vaihtoehtoja.';
+      if (f.type === "rowtable"){
+        const cols = f.columns || [];
+        if (!cols.some(c => c.label && c.label.trim())) return 'Taulukolle "' + f.label + '" pitää antaa vähintään yhdelle sarakkeelle otsikko.';
+        for (const c of cols){
+          if (c.type === "select" && !(c.options || []).length) return 'Taulukon "' + f.label + '" valintalistasarakkeella "' + (c.label || "(nimetön)") + '" ei ole vaihtoehtoja.';
+        }
+      }
       const fErr = validateHints(f.hints, 'kenttä "' + f.label + '"', sourceMap);
       if (fErr) return fErr;
     }

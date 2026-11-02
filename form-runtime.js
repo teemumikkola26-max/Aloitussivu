@@ -54,10 +54,45 @@ function allItemIds(){
   return ids;
 }
 
+/* ---------- Taulukko, johon täyttäjä lisää rivejä (type "rowtable") ----------
+   Arvot tallentuvat samaan it.table-olioon: "r<rivi>_<sarakeId>" (rivit 1...) ja
+   rivien lukumäärä avaimeen "_rows". Alaviivalla alkavat avaimet eivät ole käyttäjän
+   syöttämää tietoa. */
+function rowTableCols(field){
+  return Array.isArray(field.columns) && field.columns.length ? field.columns : [{ id:"c1", label:"Arvo", type:"text" }];
+}
+function rowTableCount(it){
+  const n = parseInt(it.table && it.table._rows, 10);
+  return Number.isFinite(n) && n >= 0 ? n : 1;
+}
+function rowTableCell(it, r, col){
+  const v = it.table && it.table["r" + r + "_" + col.id];
+  return v === undefined || v === null ? "" : String(v);
+}
+function rowTableRowHasData(it, field, r){
+  return rowTableCols(field).some(c => rowTableCell(it, r, c).trim() !== "");
+}
+function rowTableHasData(it, field){
+  const n = rowTableCount(it);
+  for (let r = 1; r <= n; r++) if (rowTableRowHasData(it, field, r)) return true;
+  return false;
+}
+function rowTableColWidthPercents(cols){
+  const minPct = 12, maxPct = 28;
+  const raw = cols.map(c => Math.max(1, Math.min(1.8, String(c.label || "").trim().length / 8)));
+  if (minPct * raw.length >= 100) return raw.map(() => Math.floor(100 / raw.length));
+  const remaining = 100 - minPct * raw.length;
+  const rawSum = raw.reduce((a, b) => a + b, 0);
+  const capped = raw.map(r => Math.min(maxPct, minPct + remaining * (r / rawSum)));
+  const sum = capped.reduce((a, b) => a + b, 0);
+  return capped.map(v => v * 100 / sum);
+}
+
 function isFieldDone(field, itemId){
   const it = state.items[itemId];
   if (field.type === "checklist") return it.status !== DEFAULT_STATUS;
   if (field.type === "table") return Object.values(it.table || {}).some(v => v && String(v).trim() !== "");
+  if (field.type === "rowtable") return rowTableHasData(it, field);
   return !!(it.value && String(it.value).trim() !== "");
 }
 
@@ -704,6 +739,103 @@ function computeSectionNumbering(){
   });
 }
 
+function buildRowTableInput(field, itState){
+  if (!itState.table) itState.table = {};
+  if (itState.table._rows === undefined) itState.table._rows = 1;
+  const cols = rowTableCols(field);
+  const layout = (field.layout === "sticky" || field.layout === "cards") ? field.layout : "scroll";
+
+  const root = document.createElement("div");
+  root.className = "rt rt-" + layout;
+  const scroll = document.createElement("div");
+  scroll.className = "rt-scroll";
+  const table = document.createElement("table");
+  table.className = "rt-table";
+  const thead = document.createElement("thead");
+  const hr = document.createElement("tr");
+  cols.forEach(c => {
+    const th = document.createElement("th");
+    th.textContent = c.label || "";
+    hr.appendChild(th);
+  });
+  const thAct = document.createElement("th");
+  thAct.className = "rt-action";
+  hr.appendChild(thAct);
+  thead.appendChild(hr);
+  const tbody = document.createElement("tbody");
+  table.appendChild(thead);
+  table.appendChild(tbody);
+  scroll.appendChild(table);
+  root.appendChild(scroll);
+
+  const addBtn = document.createElement("button");
+  addBtn.type = "button";
+  addBtn.className = "rt-add";
+  addBtn.textContent = "+ Lisää rivi";
+  root.appendChild(addBtn);
+
+  function renderRows(){
+    tbody.innerHTML = "";
+    const n = rowTableCount(itState);
+    for (let r = 1; r <= n; r++){
+      const tr = document.createElement("tr");
+      cols.forEach(c => {
+        const td = document.createElement("td");
+        td.setAttribute("data-label", c.label || "");
+        const input = document.createElement("input");
+        input.type = c.type === "number" ? "number" : "text";
+        if (c.type === "number") input.step = "any";
+        input.autocomplete = "off";
+        input.setAttribute("aria-label", (c.label || "Arvo") + ", rivi " + r);
+        input.value = rowTableCell(itState, r, c);
+        const key = "r" + r + "_" + c.id;
+        const commit = () => { itState.table[key] = input.value; saveDebounced(); };
+        input.addEventListener("input", commit);
+        input.addEventListener("change", commit);
+        td.appendChild(input);
+        tr.appendChild(td);
+        if (c.type === "select" && window.AppCombo){
+          /* Solu on liitettävä DOM:iin ennen kuin ehdottava valikko voi kiinnittyä siihen. */
+          tbody.appendChild(tr);
+          window.AppCombo.enhance(input, { options: c.options || [], allowCustom: !!c.allowCustom });
+        }
+      });
+      const tdAct = document.createElement("td");
+      tdAct.className = "rt-action";
+      const rm = document.createElement("button");
+      rm.type = "button";
+      rm.className = "rt-rm";
+      rm.textContent = "✕";
+      rm.setAttribute("aria-label", "Poista rivi " + r);
+      rm.addEventListener("click", () => {
+        if (rowTableRowHasData(itState, field, r) && !confirm("Poistetaanko rivi " + r + "?")) return;
+        const total = rowTableCount(itState);
+        for (let k = r; k < total; k++){
+          cols.forEach(c => { itState.table["r" + k + "_" + c.id] = itState.table["r" + (k + 1) + "_" + c.id] || ""; });
+        }
+        cols.forEach(c => { delete itState.table["r" + total + "_" + c.id]; });
+        itState.table._rows = total - 1;
+        renderRows();
+        saveDebounced();
+      });
+      tdAct.appendChild(rm);
+      tr.appendChild(tdAct);
+      tbody.appendChild(tr);
+    }
+  }
+
+  addBtn.addEventListener("click", () => {
+    itState.table._rows = rowTableCount(itState) + 1;
+    renderRows();
+    const first = tbody.querySelector("tr:last-child input");
+    if (first) first.focus();
+    saveDebounced();
+  });
+
+  renderRows();
+  return root;
+}
+
 function renderSections(){
   stopDictation();
   const main = document.getElementById("sections");
@@ -862,6 +994,8 @@ function renderSections(){
         }
         tableWrap.appendChild(tableEl);
         itemDiv.appendChild(tableWrap);
+      } else if (field.type === "rowtable"){
+        itemDiv.appendChild(buildRowTableInput(field, itState));
       } else {
         const valArea = document.createElement("div");
         valArea.className = "note-area show";
@@ -1198,6 +1332,22 @@ async function buildDocx(){
         }
         bodyParts.push(engine.tableXml(tableRows2D, { headerRowCount:1, headerColCount:(fixedFirstCol?1:0), font:s.fonts.body, sz:engine.pt2hp(s.fonts.bodySize), color:s.colors.body }));
         bodyParts.push(engine.paraXml("", { after:140 }));
+      } else if (field.type === "rowtable"){
+        const cols = rowTableCols(field);
+        const dataRows = [];
+        const total = rowTableCount(it);
+        for (let r = 1; r <= total; r++){
+          if (rowTableRowHasData(it, field, r)) dataRows.push(cols.map(c => rowTableCell(it, r, c)));
+        }
+        if (dataRows.length){
+          bodyParts.push(engine.tableXml([cols.map(c => c.label || ""), ...dataRows], {
+            headerRowCount:1, colWidthPercents: rowTableColWidthPercents(cols),
+            font:s.fonts.body, sz:engine.pt2hp(s.fonts.bodySize), color:s.colors.body
+          }));
+          bodyParts.push(engine.paraXml("", { after: it.photos.length ? 60 : 140 }));
+        } else {
+          bodyParts.push(engine.paraXml("—", { font:s.fonts.body, sz:engine.pt2hp(s.fonts.bodySize), color:s.colors.body, after: it.photos.length ? 60 : 140 }));
+        }
       } else {
         let displayVal = it.value || "—";
         if (field.type === "number" && field.unit && it.value) displayVal = it.value + " " + field.unit;
