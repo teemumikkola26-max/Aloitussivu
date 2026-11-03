@@ -721,6 +721,7 @@ function buildSectionBlock(sec, secIdx){
     const tmp = ed.sections[secIdx+1]; ed.sections[secIdx+1] = ed.sections[secIdx]; ed.sections[secIdx] = tmp;
     renderEditor();
   });
+  const dupBtn = dupButton("Monista osio", () => duplicateSection(secIdx));
   const delBtn = document.createElement("button");
   delBtn.type = "button"; delBtn.className = "icon-btn icon-btn-danger"; delBtn.textContent = "✕";
   delBtn.addEventListener("click", () => {
@@ -732,6 +733,7 @@ function buildSectionBlock(sec, secIdx){
   head.appendChild(titleInput);
   head.appendChild(upBtn);
   head.appendChild(downBtn);
+  head.appendChild(dupBtn);
   head.appendChild(delBtn);
   block.appendChild(head);
 
@@ -749,6 +751,7 @@ function buildSectionBlock(sec, secIdx){
   });
 
   block.appendChild(buildHintsEditor(sec, "s:" + sec.id, "💡 Osion ohjeet (näkyvät osion alussa)"));
+  block.appendChild(buildShowIfEditor(sec, "sv:" + sec.id, "👁 Osion näkyvyysehto", collectSourcesBefore(secIdx, null), "osio"));
   const hintGap = document.createElement("div");
   hintGap.style.height = "10px";
   block.appendChild(hintGap);
@@ -773,6 +776,7 @@ function buildSectionBlock(sec, secIdx){
 function buildFieldBlock(sec, field, fieldIdx){
   const wrap = buildFieldBlockCore(sec, field, fieldIdx);
   wrap.appendChild(buildHintsEditor(field, "f:" + sec.id + "_" + field.id, "💡 Ohjeet tälle kentälle"));
+  wrap.appendChild(buildShowIfEditor(field, "fv:" + sec.id + "_" + field.id, "👁 Kentän näkyvyysehto", collectSourcesBefore(ed.sections.indexOf(sec), fieldIdx), "kenttä"));
   return wrap;
 }
 
@@ -809,6 +813,7 @@ function buildFieldBlockCore(sec, field, fieldIdx){
     const tmp = sec.fields[fieldIdx+1]; sec.fields[fieldIdx+1] = sec.fields[fieldIdx]; sec.fields[fieldIdx] = tmp;
     renderEditor();
   });
+  const dupBtn = dupButton("Monista kenttä", () => duplicateField(sec, fieldIdx));
   const delBtn = document.createElement("button");
   delBtn.type = "button"; delBtn.className = "icon-btn icon-btn-danger"; delBtn.textContent = "✕";
   delBtn.addEventListener("click", () => { sec.fields.splice(fieldIdx,1); renderEditor(); });
@@ -817,6 +822,7 @@ function buildFieldBlockCore(sec, field, fieldIdx){
   row1.appendChild(typeSelect);
   row1.appendChild(upBtn);
   row1.appendChild(downBtn);
+  row1.appendChild(dupBtn);
   row1.appendChild(delBtn);
   wrap.appendChild(row1);
 
@@ -976,11 +982,162 @@ function buildFieldBlockCore(sec, field, fieldIdx){
   return wrap;
 }
 
+/* ---------- Monistus ---------- */
+function refreshHintIds(list){
+  (list || []).forEach(h => {
+    h.id = genId();
+    (h.conditions || []).forEach(c => { c.id = genId(); });
+  });
+}
+
+function cloneFieldDeep(field){
+  const c = JSON.parse(JSON.stringify(field));
+  c.id = genId();
+  refreshHintIds(c.hints);
+  if (c.showIf) refreshHintIds([c.showIf]);
+  return c;
+}
+
+function duplicateField(sec, fieldIdx){
+  const src = sec.fields[fieldIdx];
+  const c = cloneFieldDeep(src);
+  c.label = (src.label || "") + " (kopio)";
+  sec.fields.splice(fieldIdx + 1, 0, c);
+  renderEditor();
+}
+
+/* Osion kopioon luodaan uudet tunnisteet. Kopion sisäiset ehdot (kopion kenttä viittaa saman
+   osion toiseen kenttään) siirretään osoittamaan kopion omiin kenttiin, jotta kopio toimii
+   itsenäisesti. Viittaukset muihin osioihin ja kohteen tietoihin säilyvät ennallaan. */
+function duplicateSection(secIdx){
+  const src = ed.sections[secIdx];
+  const c = JSON.parse(JSON.stringify(src));
+  c.id = genId();
+  c.title = (src.title || "") + " (kopio)";
+  const map = {};
+  c.fields.forEach((f, i) => {
+    const nid = genId();
+    map["f:" + src.id + "_" + src.fields[i].id] = "f:" + c.id + "_" + nid;
+    f.id = nid;
+  });
+  const remap = list => (list || []).forEach(h => (h.conditions || []).forEach(cd => {
+    if (map[cd.source]) cd.source = map[cd.source];
+  }));
+  refreshHintIds(c.hints); remap(c.hints);
+  if (c.showIf){ refreshHintIds([c.showIf]); remap([c.showIf]); }
+  c.fields.forEach(f => {
+    refreshHintIds(f.hints); remap(f.hints);
+    if (f.showIf){ refreshHintIds([f.showIf]); remap([f.showIf]); }
+  });
+  ed.sections.splice(secIdx + 1, 0, c);
+  renderEditor();
+}
+
+function dupButton(title, onClick){
+  const b = document.createElement("button");
+  b.type = "button"; b.className = "icon-btn"; b.textContent = "⧉";
+  b.title = title; b.setAttribute("aria-label", title);
+  b.addEventListener("click", onClick);
+  return b;
+}
+
+/* ---------- Näkyvyysehdot ----------
+   target.showIf = { match:"all"|"any", conditions:[ { source, op, values?, value?, value2? } ] }
+   Kenttä tai osio näytetään lomakkeella vain, kun ehdot täyttyvät. Ehdon lähteenä voi olla vain
+   kohteen tieto tai kenttä, joka on lomakkeessa ENNEN tätä kenttää/osiota. Näin ehdot eivät voi
+   muodostaa kehää. */
+function collectSourcesBefore(secIdx, fieldIdx){
+  const allowed = new Set(ed.headerFields.map(h => "h:" + h.id));
+  ed.sections.forEach((sec, si) => sec.fields.forEach((f, fi) => {
+    if (si < secIdx || (si === secIdx && fieldIdx != null && fi < fieldIdx)) allowed.add("f:" + sec.id + "_" + f.id);
+  }));
+  return collectSources().filter(x => allowed.has(x.key));
+}
+
+function buildShowIfEditor(target, key, titleText, sources, what){
+  const si = target.showIf && Array.isArray(target.showIf.conditions) ? target.showIf : null;
+  const n = si ? si.conditions.length : 0;
+
+  const details = document.createElement("details");
+  details.className = "hints-editor";
+  if (openHintEditors.has(key)) details.open = true;
+  details.addEventListener("toggle", () => {
+    if (details.open) openHintEditors.add(key); else openHintEditors.delete(key);
+  });
+  const summary = document.createElement("summary");
+  summary.textContent = titleText + (n ? " (" + n + ")" : "");
+  details.appendChild(summary);
+
+  const box = document.createElement("div");
+  box.className = "hint-edit-block";
+
+  const note = document.createElement("div");
+  note.className = "hint-note";
+  note.textContent = n
+    ? what + " näytetään lomakkeella vain, kun " + (si.conditions.length > 1 ? "ehdot täyttyvät" : "ehto täyttyy") + ". Piilossa olevan tiedot eivät tule Word-raporttiin."
+    : "Ei ehtoja: " + what + " näkyy aina. Lisää ehto, niin " + what + " tulee näkyviin vasta kun ehto täyttyy. Ehdon voi perustaa vain numero- tai pudotusvalikkokenttään, joka on lomakkeessa ennen tätä.";
+  box.appendChild(note);
+
+  if (n > 1){
+    const matchSel = document.createElement("select");
+    matchSel.className = "type-select";
+    [["all","Kaikki ehdot täyttyvät"],["any","Jokin ehdoista täyttyy"]].forEach(([v, t]) => {
+      const o = document.createElement("option");
+      o.value = v; o.textContent = t;
+      if ((si.match || "all") === v) o.selected = true;
+      matchSel.appendChild(o);
+    });
+    matchSel.addEventListener("change", () => { si.match = matchSel.value; });
+    box.appendChild(matchSel);
+  }
+
+  if (n) si.conditions.forEach((c, ci) => box.appendChild(buildCondRow(si, c, ci, sources)));
+
+  const addCond = document.createElement("button");
+  addCond.type = "button";
+  addCond.className = "add-row-btn add-row-btn-sub";
+  addCond.textContent = "+ Lisää ehto";
+  addCond.addEventListener("click", () => {
+    if (!sources.length){
+      showToast("Lisää ensin ennen tätä numero- tai pudotusvalikkokenttä (tai kohteen tietoihin numero/valikko), jonka perusteella " + what + " näytetään.");
+      return;
+    }
+    if (!target.showIf || !Array.isArray(target.showIf.conditions)) target.showIf = { match:"all", conditions:[] };
+    target.showIf.conditions.push({ id:genId(), source:sources[0].key, op:defaultOp(sources[0].type), values:[], value:"", value2:"" });
+    openHintEditors.add(key);
+    renderEditor();
+  });
+  box.appendChild(addCond);
+  details.appendChild(box);
+  return details;
+}
+
+function validateShowIf(target, where, secIdx, fieldIdx, sourceMap){
+  const si = target.showIf;
+  if (!si || !(si.conditions || []).length) return null;
+  const before = new Set(collectSourcesBefore(secIdx, fieldIdx).map(x => x.key));
+  for (const c of si.conditions){
+    const src = sourceMap[c.source];
+    if (!src) return "Näkyvyysehto viittaa kenttään, jota ei ole enää olemassa (" + where + "). Poista ehto tai valitse toinen kenttä.";
+    if (!before.has(c.source)) return "Näkyvyysehdon täytyy perustua kenttään, joka on lomakkeessa ennen tätä (" + where + ").";
+    if (src.type === "number"){
+      const okA = c.value != null && String(c.value).trim() !== "" && !isNaN(parseFloat(c.value));
+      const okB = c.value2 != null && String(c.value2).trim() !== "" && !isNaN(parseFloat(c.value2));
+      if (!okA) return "Näkyvyysehdolta puuttuu numeroarvo (" + where + ").";
+      if (c.op === "between" && !okB) return "Näkyvyysehdolta puuttuu toinen raja-arvo (" + where + ").";
+    } else if (!(c.values || []).some(v => (src.options || []).indexOf(v) !== -1)){
+      return "Valitse näkyvyysehdolle vähintään yksi vaihtoehto (" + where + ").";
+    }
+  }
+  return null;
+}
+
 /* ---------- Taulukko, johon täyttäjä lisää rivejä ----------
    Editorissa määritetään vain sarakkeet (otsikko + tyyppi). Rivit lisätään
    lomakkeen täytön aikana. Sarakkeet: field.columns = [{id,label,type,options,allowCustom}] */
 const ROWTABLE_COL_TYPES = { text:"Teksti", number:"Numero", select:"Valintalista" };
 const ROWTABLE_LAYOUTS = {
+  auto:"Automaattinen (kortit puhelimella, taulukko leveällä näytöllä)",
   scroll:"Taulukko (vieritetään sivuttain)",
   sticky:"Taulukko, ensimmäinen sarake kiinnitetty",
   cards:"Kortit (jokainen rivi omana korttinaan)"
@@ -993,7 +1150,7 @@ function buildRowTableEditor(field, wrap){
       { id:genId(), label:"", type:"text" }
     ];
   }
-  if (!ROWTABLE_LAYOUTS[field.layout]) field.layout = "scroll";
+  if (!ROWTABLE_LAYOUTS[field.layout]) field.layout = "auto";
 
   const intro = document.createElement("div");
   intro.style.cssText = "font-size:.74rem;color:var(--ink-soft);margin:8px 0 6px;";
@@ -1091,10 +1248,14 @@ function validateDef(){
   for (const hf of ed.headerFields){
     if (hf.type === "select" && !(hf.options || []).length) return 'Kohteen tietojen valintakentällä "' + hf.label + '" ei ole vaihtoehtoja.';
   }
-  for (const sec of ed.sections){
+  for (const [si, sec] of ed.sections.entries()){
     const secErr = validateHints(sec.hints, 'osio "' + sec.title + '"', sourceMap);
     if (secErr) return secErr;
-    for (const f of sec.fields){
+    const secVisErr = validateShowIf(sec, 'osio "' + sec.title + '"', si, null, sourceMap);
+    if (secVisErr) return secVisErr;
+    for (const [fi, f] of sec.fields.entries()){
+      const fVisErr = validateShowIf(f, 'kenttä "' + f.label + '"', si, fi, sourceMap);
+      if (fVisErr) return fVisErr;
       if (f.type === "select" && !(f.options || []).length) return 'Pudotusvalikolla "' + f.label + '" ei ole vaihtoehtoja.';
       if (f.type === "rowtable"){
         const cols = f.columns || [];
@@ -1114,6 +1275,9 @@ function validateDef(){
 document.getElementById("btnSaveForm").addEventListener("click", async () => {
   const problem = validateDef();
   if (problem){ showToast(problem); return; }
+  /* Tyhjät näkyvyysehdot pois, jotta lomakepohja pysyy siistinä. */
+  const dropEmptyShowIf = t => { if (t.showIf && !(t.showIf.conditions || []).length) delete t.showIf; };
+  ed.sections.forEach(sec => { dropEmptyShowIf(sec); sec.fields.forEach(dropEmptyShowIf); });
 
   const btn = document.getElementById("btnSaveForm");
   btn.disabled = true;

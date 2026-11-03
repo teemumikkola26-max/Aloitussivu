@@ -19,8 +19,12 @@
                          conditions:[ { source:"h:<headerFieldId>"|"f:<secId>_<fieldId>",
                                         op, values?, value?, value2? } ] } ] }
          ],
-         hints?: [ ...samat kuin kentällä, näytetään osion alussa ]
+         hints?: [ ...samat kuin kentällä, näytetään osion alussa ],
+         showIf?: { match:"all"|"any", conditions:[ ...samat kuin ohjeen ehdot ] }
        }
+   Sekä osiolla että kentällä voi olla showIf (näkyvyysehto): jos se on annettu, osio/kenttä
+   näytetään ja viedään Wordiin vain kun ehdot täyttyvät. Ehdon lähteenä on aina kohteen tieto
+   tai lomakkeessa aiemmin oleva kenttä; piilotetun kentän arvo ei täytä ehtoja.
      ]
    }
    headerFields-kentän type voi olla myös "number" tai "select" (options).
@@ -37,6 +41,10 @@ let db = null;
 const openSections = new Set();
 let hintHolders = [];   // { el, hints, sec }
 let sectionBadges = []; // { el, sec }
+let hiddenSecs = new Set();   // osioiden id:t, jotka näkyvyysehto piilottaa
+let hiddenItems = new Set();  // kenttien itemId:t (osio_kenttä), jotka ehto tai piilotettu osio piilottaa
+let secViews = [];      // { sec, div, gh, numEl, countEl } -- näkyvyyden päivitystä varten
+let itemViews = [];     // { id, el }
 
 function fatalError(message){
   document.documentElement.style.visibility = "visible";
@@ -635,6 +643,7 @@ function getSourceValue(src){
   if (typeof src !== "string") return null;
   if (src.indexOf("h:") === 0) return state.header[src.slice(2)];
   if (src.indexOf("f:") === 0){
+    if (hiddenItems.has(src.slice(2))) return null;   // piilotetun kentän arvo ei vaikuta ehtoihin
     const it = state.items[src.slice(2)];
     return it ? it.value : null;
   }
@@ -659,6 +668,53 @@ function condMet(c){
     case "between": return !isNaN(a) && !isNaN(b) && n >= Math.min(a,b) && n <= Math.max(a,b);
   }
   return false;
+}
+
+/* ---------- Näkyvyysehdot (showIf) ---------- */
+function showIfMet(t){
+  const si = t && t.showIf;
+  if (!si || !Array.isArray(si.conditions) || !si.conditions.length) return true;
+  return si.match === "any" ? si.conditions.some(condMet) : si.conditions.every(condMet);
+}
+
+/* Käydään osiot ja kentät lomakkeen järjestyksessä, jolloin aiemmin piilotetut ehtolähteet
+   ehtivät vaikuttaa myöhempiin. */
+function computeVisibility(){
+  hiddenSecs = new Set();
+  hiddenItems = new Set();
+  if (!DEF) return;
+  DEF.sections.forEach(sec => {
+    const secHidden = !showIfMet(sec);
+    if (secHidden) hiddenSecs.add(sec.id);
+    sec.fields.forEach(f => {
+      if (secHidden || !showIfMet(f)) hiddenItems.add(sec.id + "_" + f.id);
+    });
+  });
+}
+
+function refreshVisibility(){
+  if (!DEF) return;
+  computeVisibility();
+  const nums = computeSectionNumbering();
+  secViews.forEach(v => {
+    const nm = nums[DEF.sections.indexOf(v.sec)];
+    if (!nm) return;
+    v.div.style.display = nm.hidden ? "none" : "";
+    if (v.numEl && !nm.hidden) v.numEl.textContent = nm.label;
+    if (v.gh){
+      v.gh.style.display = nm.groupStart ? "" : "none";
+      const gn = v.gh.querySelector(".section-num");
+      if (gn && nm.groupStart) gn.textContent = nm.groupNum;
+    }
+    if (v.countEl){
+      const { done, total, notes } = fieldCounts(v.sec);
+      v.countEl.textContent = done + "/" + total;
+      v.countEl.className = "section-count " + (done === total ? "complete" : (notes > 0 ? "has-notes" : ""));
+    }
+  });
+  itemViews.forEach(v => { v.el.style.display = hiddenItems.has(v.id) ? "none" : ""; });
+  updateProgress();
+  renderQuickNav();
 }
 
 function hintActive(h){
@@ -686,6 +742,7 @@ function renderHintBoxes(container, active){
 }
 
 function refreshHints(){
+  refreshVisibility();
   const counts = new Map();
   hintHolders.forEach(h => {
     const active = (h.hints || []).filter(hintActive);
@@ -701,8 +758,11 @@ function refreshHints(){
 
 function fieldCounts(sec){
   let done = 0, notes = 0;
+  let total = 0;
   sec.fields.forEach(f => {
     const itemId = sec.id + "_" + f.id;
+    if (hiddenItems.has(itemId)) return;
+    total++;
     if (isFieldDone(f, itemId)) done++;
     const it = state.items[itemId];
     if (f.type === "checklist"){
@@ -710,7 +770,7 @@ function fieldCounts(sec){
       if (scheme && scheme.attention) notes++;
     }
   });
-  return { done, total: sec.fields.length, notes };
+  return { done, total, notes };
 }
 
 function colorWithAlpha(hex, alpha){
@@ -728,6 +788,7 @@ function computeSectionNumbering(){
   let top = 0, sub = 0, lastGroup = null;
   return DEF.sections.map(sec => {
     const g = String(sec.group || "").trim();
+    if (hiddenSecs.has(sec.id)) return { group:g, groupStart:false, groupNum:0, label:"", hidden:true };
     if (g){
       const newGroup = g !== lastGroup;
       if (newGroup){ top++; sub = 0; lastGroup = g; }
@@ -743,7 +804,7 @@ function buildRowTableInput(field, itState){
   if (!itState.table) itState.table = {};
   if (itState.table._rows === undefined) itState.table._rows = 1;
   const cols = rowTableCols(field);
-  const layout = (field.layout === "sticky" || field.layout === "cards") ? field.layout : "scroll";
+  const layout = (field.layout === "scroll" || field.layout === "sticky" || field.layout === "cards") ? field.layout : "auto";
 
   const root = document.createElement("div");
   root.className = "rt rt-" + layout;
@@ -842,18 +903,26 @@ function renderSections(){
   main.innerHTML = "";
   hintHolders = [];
   sectionBadges = [];
+  secViews = [];
+  itemViews = [];
+  computeVisibility();
   const secNums = computeSectionNumbering();
   DEF.sections.forEach((sec, secIdx) => {
     const { done, total, notes } = fieldCounts(sec);
-    if (secNums[secIdx].groupStart){
-      const gh = document.createElement("div");
+    /* Ryhmäotsikko tehdään jokaiselle ryhmälliselle osiolle; näkyviin jää vain ryhmän ensimmäinen
+       näkyvä osio. Näin ryhmän otsikko seuraa osioiden näkyvyysehtoja. */
+    let gh = null;
+    if (secNums[secIdx].group){
+      gh = document.createElement("div");
       gh.className = "group-head";
       gh.innerHTML = '<span class="section-num">' + secNums[secIdx].groupNum + '</span><span>' + escapeHtml(secNums[secIdx].group) + '</span>';
+      gh.style.display = secNums[secIdx].groupStart ? "" : "none";
       main.appendChild(gh);
     }
     const secDiv = document.createElement("div");
     secDiv.className = "section" + (openSections.has(sec.id) ? " open" : "");
     secDiv.id = "sec_" + sec.id;
+    if (secNums[secIdx].hidden) secDiv.style.display = "none";
 
     const head = document.createElement("div");
     head.className = "section-head";
@@ -864,6 +933,7 @@ function renderSections(){
       '<span class="section-count ' + (done===total?'complete':(notes>0?'has-notes':'')) + '">' + done + '/' + total + '</span>' +
       '<span class="chevron"></span>';
     sectionBadges.push({ el: head.querySelector("[data-badge]"), sec });
+    secViews.push({ sec, div: secDiv, gh, numEl: head.querySelector(".section-num"), countEl: head.querySelector(".section-count") });
     head.addEventListener("click", () => {
       if (openSections.has(sec.id)) openSections.delete(sec.id); else openSections.add(sec.id);
       renderSections();
@@ -883,6 +953,8 @@ function renderSections(){
       const itState = state.items[itemId];
       const itemDiv = document.createElement("div");
       itemDiv.className = "item";
+      if (hiddenItems.has(itemId)) itemDiv.style.display = "none";
+      itemViews.push({ id: itemId, el: itemDiv });
 
       const textDiv = document.createElement("div");
       textDiv.className = "item-text";
@@ -956,7 +1028,7 @@ function renderSections(){
       } else if (field.type === "table"){
         if (!itState.table) itState.table = {};
         const tableWrap = document.createElement("div");
-        tableWrap.style.cssText = "overflow-x:auto;margin-bottom:8px;";
+        tableWrap.style.cssText = "overflow-x:auto;max-width:100%;margin-bottom:8px;-webkit-overflow-scrolling:touch;touch-action:pan-x pan-y;";
         const tableEl = document.createElement("table");
         tableEl.style.cssText = "border-collapse:collapse;width:100%;font-size:.85rem;";
         const rows = field.tableRows || 3;
@@ -980,7 +1052,7 @@ function renderSections(){
               const cellInput = document.createElement("input");
               cellInput.type = "text";
               cellInput.autocomplete = "off";
-              cellInput.style.cssText = "width:100%;min-width:70px;border:1px solid var(--line-strong);border-radius:5px;padding:5px 6px;font-size:.85rem;box-sizing:border-box;";
+              cellInput.style.cssText = "width:100%;min-width:90px;border:1px solid var(--line-strong);border-radius:5px;padding:5px 6px;font-size:.85rem;box-sizing:border-box;";
               cellInput.value = itState.table[key] || "";
               cellInput.addEventListener("input", () => {
                 itState.table[key] = cellInput.value;
@@ -1117,6 +1189,7 @@ function renderQuickNav(){
   wrap.innerHTML = "";
   const secNums = computeSectionNumbering();
   DEF.sections.forEach((sec, i) => {
+    if (hiddenSecs.has(sec.id)) return;
     const { done, total, notes } = fieldCounts(sec);
     const chip = document.createElement("button");
     chip.type = "button";
@@ -1146,7 +1219,7 @@ function jumpToSection(id){
 }
 
 function updateProgress(){
-  const ids = allItemIds();
+  const ids = allItemIds().filter(id => !hiddenItems.has(id));
   const done = ids.filter(id => {
     const sf = sectionAndFieldOf(id);
     return sf && isFieldDone(sf.field, id);
@@ -1285,9 +1358,11 @@ async function buildDocx(){
   const headerLines = (DEF.headerFields||[]).map(f => f.label + ": " + (state.header[f.id] || "—")).join("\n");
   bodyParts.push(engine.paraXml(headerLines, { font:s.fonts.body, sz:engine.pt2hp(s.fonts.bodySize), color:s.colors.body, after:240 }));
 
+  computeVisibility();   // ehdolla piilotettujen osioiden ja kenttien tietoja ei viedä raporttiin
   const secNums = computeSectionNumbering();
   const fieldsAsHeadings = !(s.headingNumbering && s.headingNumbering.fieldHeadings === false);
   DEF.sections.forEach((sec, secIdx) => {
+    if (hiddenSecs.has(sec.id)) return;
     const nm = secNums[secIdx];
     if (nm.groupStart){
       // Taso 1: ryhmä = Heading1; sen alla osiot Heading2 (numerointi 1 / 1.1)
@@ -1301,6 +1376,7 @@ async function buildDocx(){
 
     sec.fields.forEach((field) => {
       const itemId = sec.id + "_" + field.id;
+      if (hiddenItems.has(itemId)) return;
       const it = state.items[itemId];
       if (fieldsAsHeadings){
         // Taso 3: kenttä = otsikko (ryhmällisessä lomakkeessa Heading3 = 1.1.1, ryhmättömässä Heading2 = 1.1)
