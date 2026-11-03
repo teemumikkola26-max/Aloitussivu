@@ -66,6 +66,17 @@ function allItemIds(){
    Arvot tallentuvat samaan it.table-olioon: "r<rivi>_<sarakeId>" (rivit 1...) ja
    rivien lukumäärä avaimeen "_rows". Alaviivalla alkavat avaimet eivät ole käyttäjän
    syöttämää tietoa. */
+/* Päivämäärä tallennetaan ISO-muodossa (vvvv-kk-pp), raportissa se näytetään suomalaisittain (p.k.vvvv). */
+function formatDateFi(v){
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v || "").trim());
+  return m ? (parseInt(m[3], 10) + "." + parseInt(m[2], 10) + "." + m[1]) : String(v || "");
+}
+function fieldTitle(field, it){
+  const t = field.titleEditable && it && it.title ? String(it.title).trim() : "";
+  return t || field.label;
+}
+function cellInputType(type){ return type === "number" ? "number" : (type === "date" ? "date" : "text"); }
+
 function rowTableCols(field){
   return Array.isArray(field.columns) && field.columns.length ? field.columns : [{ id:"c1", label:"Arvo", type:"text" }];
 }
@@ -204,7 +215,7 @@ async function doSave(){
   await idbPut("meta", { key:"header", value: state.header });
   for (const id of Object.keys(state.items)){
     const it = state.items[id];
-    await idbPut("items", { id, status: it.status, note: it.note, action: it.action, value: it.value, table: it.table });
+    await idbPut("items", { id, status: it.status, note: it.note, action: it.action, value: it.value, title: it.title || "", table: it.table });
     for (const p of it.photos){
       if (p._capDirty && db){
         const ok = await idbPut("photos", { id: p.id, itemId: id, blob: p.blob, w: p.w, h: p.h, caption: p.caption || "", ts: Date.now() });
@@ -233,7 +244,7 @@ async function syncToCloud(){
     Object.keys(state.items).forEach(id => {
       const it = state.items[id];
       cloudItems[id] = {
-        status: it.status, note: it.note, action: it.action, value: it.value, table: it.table,
+        status: it.status, note: it.note, action: it.action, value: it.value, title: it.title || "", table: it.table,
         photos: it.photos.filter(p => p.path).map(p => ({ id:p.id, path:p.path, w:p.w, h:p.h, caption:p.caption || "" }))
       };
     });
@@ -262,6 +273,7 @@ async function loadFromStorage(){
         state.items[id].note = items[id].note || "";
         state.items[id].action = items[id].action || "";
         state.items[id].value = items[id].value || "";
+        state.items[id].title = items[id].title || "";
         state.items[id].table = items[id].table || {};
         for (const p of (items[id].photos || [])){
           try{
@@ -287,6 +299,7 @@ async function loadFromStorage(){
         state.items[row.id].note = row.note || "";
         state.items[row.id].action = row.action || "";
         state.items[row.id].value = row.value || "";
+        state.items[row.id].title = row.title || "";
         state.items[row.id].table = row.table || {};
       }
     });
@@ -844,8 +857,9 @@ function buildRowTableInput(field, itState){
         const td = document.createElement("td");
         td.setAttribute("data-label", c.label || "");
         const input = document.createElement("input");
-        input.type = c.type === "number" ? "number" : "text";
+        input.type = cellInputType(c.type);
         if (c.type === "number") input.step = "any";
+        if (c.type === "date") input.style.minWidth = "140px";
         input.autocomplete = "off";
         input.setAttribute("aria-label", (c.label || "Arvo") + ", rivi " + r);
         input.value = rowTableCell(itState, r, c);
@@ -958,7 +972,20 @@ function renderSections(){
 
       const textDiv = document.createElement("div");
       textDiv.className = "item-text";
-      textDiv.textContent = field.label;
+      if (field.titleEditable){
+        /* Täytettävä otsikko: täyttäjä kirjoittaa kentän otsikon itse. */
+        const titleInput = document.createElement("input");
+        titleInput.type = "text";
+        titleInput.className = "item-title-input";
+        titleInput.autocomplete = "off";
+        titleInput.placeholder = field.titlePlaceholder || field.label || "";
+        titleInput.setAttribute("aria-label", field.label || "Otsikko");
+        titleInput.value = itState.title || "";
+        titleInput.addEventListener("input", () => { itState.title = titleInput.value; saveDebounced(); });
+        textDiv.appendChild(titleInput);
+      } else {
+        textDiv.textContent = field.label;
+      }
       itemDiv.appendChild(textDiv);
 
       const fieldHintHolder = document.createElement("div");
@@ -1050,9 +1077,10 @@ function renderSections(){
             } else {
               const key = "r" + r + "_c" + c;
               const cellInput = document.createElement("input");
-              cellInput.type = "text";
+              cellInput.type = cellInputType(field.tableCellType);
+              if (field.tableCellType === "number") cellInput.step = "any";
               cellInput.autocomplete = "off";
-              cellInput.style.cssText = "width:100%;min-width:90px;border:1px solid var(--line-strong);border-radius:5px;padding:5px 6px;font-size:.85rem;box-sizing:border-box;";
+              cellInput.style.cssText = "width:100%;min-width:" + (field.tableCellType === "date" ? "140" : "90") + "px;border:1px solid var(--line-strong);border-radius:5px;padding:5px 6px;font-size:.85rem;box-sizing:border-box;";
               cellInput.value = itState.table[key] || "";
               cellInput.addEventListener("input", () => {
                 itState.table[key] = cellInput.value;
@@ -1297,7 +1325,7 @@ document.getElementById("btnNew").addEventListener("click", () => {
 
 function resetState(){
   state = { header:{}, items:{} };
-  allItemIds().forEach(id => state.items[id] = { status:DEFAULT_STATUS, note:"", action:"", value:"", table:{}, photos:[] });
+  allItemIds().forEach(id => state.items[id] = { status:DEFAULT_STATUS, note:"", action:"", value:"", title:"", table:{}, photos:[] });
 }
 
 /* ---------- .DOCX-VIENTI (jaettu DocxStyleEngine) ---------- */
@@ -1380,9 +1408,9 @@ async function buildDocx(){
       const it = state.items[itemId];
       if (fieldsAsHeadings){
         // Taso 3: kenttä = otsikko (ryhmällisessä lomakkeessa Heading3 = 1.1.1, ryhmättömässä Heading2 = 1.1)
-        bodyParts.push(engine.paraXml(field.label, { bold:true, sz:engine.pt2hp(s.fonts.subheadingSize || 11), font:s.fonts.heading, color:s.colors.heading, pStyle: nm.group ? "Heading3" : "Heading2", before:120, after:40 }));
+        bodyParts.push(engine.paraXml(fieldTitle(field, it), { bold:true, sz:engine.pt2hp(s.fonts.subheadingSize || 11), font:s.fonts.heading, color:s.colors.heading, pStyle: nm.group ? "Heading3" : "Heading2", before:120, after:40 }));
       } else {
-        bodyParts.push(engine.paraXml(field.label, { bold:true, font:s.fonts.body, sz:engine.pt2hp(s.fonts.bodySize), color:s.colors.body, after:20 }));
+        bodyParts.push(engine.paraXml(fieldTitle(field, it), { bold:true, font:s.fonts.body, sz:engine.pt2hp(s.fonts.bodySize), color:s.colors.body, after:20 }));
       }
 
       if (field.type === "checklist"){
@@ -1402,7 +1430,7 @@ async function buildDocx(){
             if (r === 0 && c === 0) row.push(field.tableCorner || "");
             else if (r === 0) row.push((field.tableColHeaders && field.tableColHeaders[c-1]) || "");
             else if (c === 0 && fixedFirstCol) row.push((field.tableRowHeaders && field.tableRowHeaders[r-1]) || "");
-            else row.push((it.table && it.table["r"+r+"_c"+c]) || "");
+            else row.push(field.tableCellType === "date" ? formatDateFi(it.table && it.table["r"+r+"_c"+c]) : ((it.table && it.table["r"+r+"_c"+c]) || ""));
           }
           tableRows2D.push(row);
         }
@@ -1413,7 +1441,7 @@ async function buildDocx(){
         const dataRows = [];
         const total = rowTableCount(it);
         for (let r = 1; r <= total; r++){
-          if (rowTableRowHasData(it, field, r)) dataRows.push(cols.map(c => rowTableCell(it, r, c)));
+          if (rowTableRowHasData(it, field, r)) dataRows.push(cols.map(c => c.type === "date" ? formatDateFi(rowTableCell(it, r, c)) : rowTableCell(it, r, c)));
         }
         if (dataRows.length){
           bodyParts.push(engine.tableXml([cols.map(c => c.label || ""), ...dataRows], {

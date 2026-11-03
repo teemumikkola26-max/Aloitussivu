@@ -773,8 +773,35 @@ function buildSectionBlock(sec, secIdx){
   return block;
 }
 
+/* Otsikko täytettävänä kohtana: täyttäjä kirjoittaa kentän otsikon itse (esim. "Seinä 1").
+   Placeholder näkyy tyhjässä otsikkokentässä. Jos otsikko jää tyhjäksi, käytetään Kentän teksti -arvoa. */
+function buildTitleFillEditor(field){
+  const box = document.createElement("div");
+  box.style.cssText = "margin-top:8px;";
+  const lab = document.createElement("label");
+  lab.style.cssText = "display:flex;align-items:center;gap:4px;font-size:.74rem;color:var(--ink-soft);";
+  const chk = document.createElement("input");
+  chk.type = "checkbox";
+  chk.checked = !!field.titleEditable;
+  chk.addEventListener("change", () => { field.titleEditable = chk.checked; renderEditor(); });
+  lab.appendChild(chk);
+  lab.appendChild(document.createTextNode("Otsikko on täytettävä kohta (täyttäjä kirjoittaa otsikon)"));
+  box.appendChild(lab);
+  if (field.titleEditable){
+    const ph = textInput(field.titlePlaceholder, v => field.titlePlaceholder = v, "Placeholder, esim. Kirjoita kohteen nimi");
+    ph.style.cssText = "width:100%;margin-top:5px;";
+    box.appendChild(ph);
+    const note = document.createElement("div");
+    note.style.cssText = "font-size:.74rem;color:var(--ink-soft);margin-top:4px;";
+    note.textContent = "Täyttäjä kirjoittaa otsikon lomakkeella. Jos hän jättää sen tyhjäksi, Word-raportissa käytetään Kentän tekstiä.";
+    box.appendChild(note);
+  }
+  return box;
+}
+
 function buildFieldBlock(sec, field, fieldIdx){
   const wrap = buildFieldBlockCore(sec, field, fieldIdx);
+  wrap.appendChild(buildTitleFillEditor(field));
   wrap.appendChild(buildHintsEditor(field, "f:" + sec.id + "_" + field.id, "💡 Ohjeet tälle kentälle"));
   wrap.appendChild(buildShowIfEditor(field, "fv:" + sec.id + "_" + field.id, "👁 Kentän näkyvyysehto", collectSourcesBefore(ed.sections.indexOf(sec), fieldIdx), "kenttä"));
   return wrap;
@@ -940,6 +967,21 @@ function buildFieldBlockCore(sec, field, fieldIdx){
     fixedColWrap.appendChild(fixedColCheck);
     fixedColWrap.appendChild(document.createTextNode("Kiinteä ensimmäinen sarake (riviotsikot)"));
     wrap.appendChild(fixedColWrap);
+
+    const cellTypeRow = document.createElement("label");
+    cellTypeRow.style.cssText = "display:flex;align-items:center;gap:6px;font-size:.76rem;color:var(--ink-soft);margin-top:6px;";
+    cellTypeRow.appendChild(document.createTextNode("Täytettävien solujen tyyppi"));
+    const cellTypeSel = document.createElement("select");
+    cellTypeSel.className = "type-select";
+    [["text","Teksti"],["number","Numero"],["date","Päivämäärä"]].forEach(([v, t]) => {
+      const o = document.createElement("option");
+      o.value = v; o.textContent = t;
+      if ((field.tableCellType || "text") === v) o.selected = true;
+      cellTypeSel.appendChild(o);
+    });
+    cellTypeSel.addEventListener("change", () => { field.tableCellType = cellTypeSel.value; });
+    cellTypeRow.appendChild(cellTypeSel);
+    wrap.appendChild(cellTypeRow);
 
     const cornerInput = textInput(field.tableCorner, v => field.tableCorner = v, "Vasen yläkulma (valinnainen otsikko)");
     cornerInput.style.cssText = "width:100%;margin-top:8px;";
@@ -1135,7 +1177,7 @@ function validateShowIf(target, where, secIdx, fieldIdx, sourceMap){
 /* ---------- Taulukko, johon täyttäjä lisää rivejä ----------
    Editorissa määritetään vain sarakkeet (otsikko + tyyppi). Rivit lisätään
    lomakkeen täytön aikana. Sarakkeet: field.columns = [{id,label,type,options,allowCustom}] */
-const ROWTABLE_COL_TYPES = { text:"Teksti", number:"Numero", select:"Valintalista" };
+const ROWTABLE_COL_TYPES = { text:"Teksti", number:"Numero", date:"Päivämäärä", select:"Valintalista" };
 const ROWTABLE_LAYOUTS = {
   auto:"Automaattinen (kortit puhelimella, taulukko leveällä näytöllä)",
   scroll:"Taulukko (vieritetään sivuttain)",
