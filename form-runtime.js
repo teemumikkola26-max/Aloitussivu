@@ -23,7 +23,10 @@
          showIf?: { match:"all"|"any", conditions:[ ...samat kuin ohjeen ehdot ] }
        }
    Sekä osiolla että kentällä voi olla showIf (näkyvyysehto): jos se on annettu, osio/kenttä
-   näytetään ja viedään Wordiin vain kun ehdot täyttyvät. Ehdon lähteenä on aina kohteen tieto
+   näytetään ja viedään Wordiin vain kun ehdot täyttyvät. Ehto voi olla myös op "filled"/"empty"
+   (lähde: kenttä "f:", kohteen tieto "h:" tai osio "s:" = jokin osion kenttä täytetty).
+   reveal?: { text } osiolla tai kentällä tuo painikkeen: kohde tulee näkyviin vasta, kun täyttäjä
+   painaa painiketta (tieto säilyy state.reveals-oliossa). Ehdon lähteenä on aina kohteen tieto
    tai lomakkeessa aiemmin oleva kenttä; piilotetun kentän arvo ei täytä ehtoja.
      ]
    }
@@ -35,13 +38,15 @@ let FORM_ID = null;
 let SUBMISSION_ID = null;
 let READ_ONLY = false;   // true, kun toinen käyttäjä täyttää samaa lomaketta
 let DEFAULT_STATUS = "unchecked";
-let state = { header:{}, items:{} };
+let state = { header:{}, items:{}, reveals:{} };
 let saveTimer = null;
 let db = null;
 const openSections = new Set();
 let hintHolders = [];   // { el, hints, sec }
 let sectionBadges = []; // { el, sec }
 let hiddenSecs = new Set();   // osioiden id:t, jotka näkyvyysehto piilottaa
+let pendingSecs = new Set();  // osiot, joiden ehdot täyttyvät mutta joita ei ole vielä tuotu näkyviin painikkeella
+let pendingItems = new Set(); // sama kentille (itemId)
 let hiddenItems = new Set();  // kenttien itemId:t (osio_kenttä), jotka ehto tai piilotettu osio piilottaa
 let secViews = [];      // { sec, div, gh, numEl, countEl } -- näkyvyyden päivitystä varten
 let itemViews = [];     // { id, el }
@@ -205,6 +210,9 @@ function deriveInspector(){
 
 let cloudSyncInFlight = false;
 function saveDebounced(){
+  /* Kaikki muutokset (tekstit, taulukon solut, tilat, kuvat) kulkevat tämän kautta, joten
+     täytetty-ehtojen näkyvyys päivitetään tässä. */
+  try{ refreshVisibility(); }catch(e){ console.warn(e); }
   if (READ_ONLY) return;
   setSaveIndicator("Tallennetaan…");
   clearTimeout(saveTimer);
@@ -213,6 +221,7 @@ function saveDebounced(){
 async function doSave(){
   if (READ_ONLY) return;
   await idbPut("meta", { key:"header", value: state.header });
+  await idbPut("meta", { key:"reveals", value: state.reveals || {} });
   for (const id of Object.keys(state.items)){
     const it = state.items[id];
     await idbPut("items", { id, status: it.status, note: it.note, action: it.action, value: it.value, title: it.title || "", table: it.table });
@@ -250,7 +259,7 @@ async function syncToCloud(){
     });
     await window.SubmissionSync.saveSubmission({
       id: SUBMISSION_ID, formKey: FORM_ID, formLabel: (DEF && DEF.meta && DEF.meta.title) || "Lomake",
-      title: deriveTitle(), inspectorName: deriveInspector(), data: { header: state.header, items: cloudItems }
+      title: deriveTitle(), inspectorName: deriveInspector(), data: { header: state.header, items: cloudItems, reveals: state.reveals || {} }
     });
     setSaveIndicator("Tallennettu pilveen");
   }catch(e){
@@ -266,6 +275,7 @@ async function loadFromStorage(){
     const sub = await window.SubmissionSync.loadSubmission(SUBMISSION_ID);
     if (sub && sub.data){
       state.header = sub.data.header || {};
+      state.reveals = sub.data.reveals || {};
       const items = sub.data.items || {};
       for (const id of Object.keys(items)){
         if (!state.items[id]) continue;
@@ -291,6 +301,8 @@ async function loadFromStorage(){
     const metaRows = await idbGetAll("meta");
     const headerRow = metaRows.find(r => r.key === "header");
     if (headerRow) state.header = headerRow.value || {};
+    const revealsRow = metaRows.find(r => r.key === "reveals");
+    state.reveals = (revealsRow && revealsRow.value) || {};
 
     const itemRows = await idbGetAll("items");
     itemRows.forEach(row => {
@@ -663,7 +675,38 @@ function getSourceValue(src){
   return null;
 }
 
+/* Onko ehdon lähde täytetty? true / false, tai null jos lähde on piilossa (piilotetun tieto ei vaikuta ehtoihin). */
+function sourceFilledState(src){
+  if (typeof src !== "string") return null;
+  const hasText = v => v != null && String(v).trim() !== "";
+  if (src.indexOf("h:") === 0) return hasText(state.header[src.slice(2)]);
+  if (src.indexOf("f:") === 0){
+    const id = src.slice(2);
+    if (hiddenItems.has(id)) return null;
+    return itemHasAnyInput(id);
+  }
+  if (src.indexOf("s:") === 0){
+    const sec = DEF.sections.find(x => x.id === src.slice(2));
+    if (!sec || hiddenSecs.has(sec.id)) return null;
+    return sec.fields.some(f => !hiddenItems.has(sec.id + "_" + f.id) && itemHasAnyInput(sec.id + "_" + f.id));
+  }
+  return null;
+}
+/* "Jokin osa täytetty": kentän arvo, taulukon solu, tila, muistiinpano, lisäkenttä tai kuva. */
+function itemHasAnyInput(itemId){
+  const found = sectionAndFieldOf(itemId);
+  const it = state.items[itemId];
+  if (!found || !it) return false;
+  return isFieldDone(found.field, itemId) || !!(it.note && String(it.note).trim()) ||
+         !!(it.action && String(it.action).trim()) || (it.photos && it.photos.length > 0);
+}
+
 function condMet(c){
+  if (c.op === "filled" || c.op === "empty"){
+    const st = sourceFilledState(c.source);
+    if (st === null) return false;
+    return c.op === "filled" ? st : !st;
+  }
   const raw = getSourceValue(c.source);
   if (raw == null || String(raw).trim() === "") return false;   // ei vielä vastattu -> ehto ei täyty
   if (c.op === "is") return (c.values || []).indexOf(String(raw)) !== -1;
@@ -695,12 +738,25 @@ function showIfMet(t){
 function computeVisibility(){
   hiddenSecs = new Set();
   hiddenItems = new Set();
+  pendingSecs = new Set();
+  pendingItems = new Set();
   if (!DEF) return;
+  const revealed = (state && state.reveals) || {};
   DEF.sections.forEach(sec => {
-    const secHidden = !showIfMet(sec);
+    /* Kohde piilotetaan, jos ehdot eivät täyty TAI jos se näytetään painikkeella eikä painiketta
+       ole vielä painettu. Painike näytetään vain, kun ehdot täyttyvät. */
+    const condsOk = showIfMet(sec);
+    const needReveal = !!sec.reveal && !revealed["s:" + sec.id];
+    const secHidden = !condsOk || needReveal;
     if (secHidden) hiddenSecs.add(sec.id);
+    if (condsOk && needReveal) pendingSecs.add(sec.id);
     sec.fields.forEach(f => {
-      if (secHidden || !showIfMet(f)) hiddenItems.add(sec.id + "_" + f.id);
+      const id = sec.id + "_" + f.id;
+      if (secHidden){ hiddenItems.add(id); return; }
+      const fOk = showIfMet(f);
+      const fNeed = !!f.reveal && !revealed["f:" + id];
+      if (!fOk || fNeed) hiddenItems.add(id);
+      if (fOk && fNeed) pendingItems.add(id);
     });
   });
 }
@@ -713,6 +769,7 @@ function refreshVisibility(){
     const nm = nums[DEF.sections.indexOf(v.sec)];
     if (!nm) return;
     v.div.style.display = nm.hidden ? "none" : "";
+    if (v.rev) v.rev.style.display = pendingSecs.has(v.sec.id) ? "" : "none";
     if (v.numEl && !nm.hidden) v.numEl.textContent = nm.label;
     if (v.gh){
       v.gh.style.display = nm.groupStart ? "" : "none";
@@ -725,7 +782,10 @@ function refreshVisibility(){
       v.countEl.className = "section-count " + (done === total ? "complete" : (notes > 0 ? "has-notes" : ""));
     }
   });
-  itemViews.forEach(v => { v.el.style.display = hiddenItems.has(v.id) ? "none" : ""; });
+  itemViews.forEach(v => {
+    v.el.style.display = hiddenItems.has(v.id) ? "none" : "";
+    if (v.rev) v.rev.style.display = pendingItems.has(v.id) ? "" : "none";
+  });
   updateProgress();
   renderQuickNav();
 }
@@ -911,6 +971,31 @@ function buildRowTableInput(field, itState){
   return root;
 }
 
+/* Painike, jolla täyttäjä tuo piilotetun kentän/osion näkyviin. Painikkeen teksti tulee lomakepohjasta. */
+function makeRevealBlock(cfg, key, pendingNow, getTarget, onReveal){
+  const wrap = document.createElement("div");
+  wrap.className = "reveal-wrap";
+  wrap.style.display = pendingNow ? "" : "none";
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "reveal-btn";
+  btn.textContent = (cfg && cfg.text && String(cfg.text).trim()) || "Näytä seuraava";
+  btn.addEventListener("click", () => {
+    state.reveals[key] = true;
+    if (onReveal) onReveal();
+    refreshVisibility();
+    saveDebounced();
+    const t = getTarget();
+    if (t){
+      try{ t.scrollIntoView({ behavior:"smooth", block:"nearest" }); }catch(e){}
+      const first = key.indexOf("f:") === 0 ? t.querySelector("input,textarea,select") : null;
+      if (first) first.focus({ preventScroll:true });
+    }
+  });
+  wrap.appendChild(btn);
+  return wrap;
+}
+
 function renderSections(){
   stopDictation();
   const main = document.getElementById("sections");
@@ -947,7 +1032,7 @@ function renderSections(){
       '<span class="section-count ' + (done===total?'complete':(notes>0?'has-notes':'')) + '">' + done + '/' + total + '</span>' +
       '<span class="chevron"></span>';
     sectionBadges.push({ el: head.querySelector("[data-badge]"), sec });
-    secViews.push({ sec, div: secDiv, gh, numEl: head.querySelector(".section-num"), countEl: head.querySelector(".section-count") });
+    secViews.push({ sec, div: secDiv, gh, rev: null, numEl: head.querySelector(".section-num"), countEl: head.querySelector(".section-count") });
     head.addEventListener("click", () => {
       if (openSections.has(sec.id)) openSections.delete(sec.id); else openSections.add(sec.id);
       renderSections();
@@ -968,7 +1053,8 @@ function renderSections(){
       const itemDiv = document.createElement("div");
       itemDiv.className = "item";
       if (hiddenItems.has(itemId)) itemDiv.style.display = "none";
-      itemViews.push({ id: itemId, el: itemDiv });
+      const itemView = { id: itemId, el: itemDiv, rev: null };
+      itemViews.push(itemView);
 
       const textDiv = document.createElement("div");
       textDiv.className = "item-text";
@@ -1199,10 +1285,22 @@ function renderSections(){
         }
       }
 
+      if (field.reveal){
+        itemView.rev = makeRevealBlock(field.reveal, "f:" + itemId, pendingItems.has(itemId), () => itemDiv);
+        itemsWrap.appendChild(itemView.rev);
+      }
       itemsWrap.appendChild(itemDiv);
     });
 
     secDiv.appendChild(itemsWrap);
+    if (sec.reveal){
+      const secView = secViews[secViews.length - 1];
+      secView.rev = makeRevealBlock(sec.reveal, "s:" + sec.id, pendingSecs.has(sec.id), () => secDiv, () => {
+        openSections.add(sec.id);
+        secDiv.classList.add("open");
+      });
+      main.appendChild(secView.rev);
+    }
     main.appendChild(secDiv);
   });
 
@@ -1324,7 +1422,7 @@ document.getElementById("btnNew").addEventListener("click", () => {
 });
 
 function resetState(){
-  state = { header:{}, items:{} };
+  state = { header:{}, items:{}, reveals:{} };
   allItemIds().forEach(id => state.items[id] = { status:DEFAULT_STATUS, note:"", action:"", value:"", title:"", table:{}, photos:[] });
 }
 

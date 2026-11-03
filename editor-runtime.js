@@ -387,7 +387,8 @@ const NUM_OPS = [
   ["gte","on vähintään (≥)"], ["eq","on täsmälleen (=)"], ["between","on välillä (rajat mukaan)"]
 ];
 const SEL_OPS = [["is","on jokin näistä"], ["isnot","ei ole mikään näistä"]];
-function defaultOp(type){ return type === "number" ? "lt" : "is"; }
+const FILL_OPS = [["filled","on täytetty (jokin osa)"], ["empty","ei ole täytetty"]];
+function defaultOp(type){ return type === "number" ? "lt" : (type === "select" ? "is" : "filled"); }
 
 /* Kentät, joiden arvon perusteella ohjeita voi ehdollistaa: numero- ja pudotusvalikkokentät */
 function collectSources(){
@@ -589,7 +590,8 @@ function buildCondRow(h, c, ci, sources){
   row.appendChild(line1);
   if (!src) return row;
 
-  const ops = src.type === "number" ? NUM_OPS : SEL_OPS;
+  let ops = src.type === "number" ? NUM_OPS : (src.type === "select" ? SEL_OPS : []);
+  if (src.fill) ops = ops.concat(FILL_OPS);   // "täytetty"-ehdot vain näkyvyysehdoissa
   if (!ops.some(o => o[0] === c.op)) c.op = defaultOp(src.type);
 
   const line2 = document.createElement("div");
@@ -606,7 +608,9 @@ function buildCondRow(h, c, ci, sources){
   opSel.addEventListener("change", () => { c.op = opSel.value; renderEditor(); });
   line2.appendChild(opSel);
 
-  if (src.type === "number"){
+  if (c.op === "filled" || c.op === "empty"){
+    row.appendChild(line2);
+  } else if (src.type === "number"){
     line2.appendChild(numInput(c.value, v => { c.value = v; }));
     if (c.op === "between"){
       line2.appendChild(document.createTextNode("–"));
@@ -751,7 +755,7 @@ function buildSectionBlock(sec, secIdx){
   });
 
   block.appendChild(buildHintsEditor(sec, "s:" + sec.id, "💡 Osion ohjeet (näkyvät osion alussa)"));
-  block.appendChild(buildShowIfEditor(sec, "sv:" + sec.id, "👁 Osion näkyvyysehto", collectSourcesBefore(secIdx, null), "osio"));
+  block.appendChild(buildShowIfEditor(sec, "sv:" + sec.id, "👁 Osion näkyvyys (ehdot / painike)", collectSourcesBefore(secIdx, null), "osio"));
   const hintGap = document.createElement("div");
   hintGap.style.height = "10px";
   block.appendChild(hintGap);
@@ -788,12 +792,12 @@ function buildTitleFillEditor(field){
   lab.appendChild(document.createTextNode("Otsikko on täytettävä kohta (täyttäjä kirjoittaa otsikon)"));
   box.appendChild(lab);
   if (field.titleEditable){
-    const ph = textInput(field.titlePlaceholder, v => field.titlePlaceholder = v, "Placeholder, esim. Kirjoita kohteen nimi");
+    const ph = textInput(field.titlePlaceholder, v => field.titlePlaceholder = v, "Placeholder (jos tyhjä, näytetään Kentän teksti, esim. Mp1)");
     ph.style.cssText = "width:100%;margin-top:5px;";
     box.appendChild(ph);
     const note = document.createElement("div");
     note.style.cssText = "font-size:.74rem;color:var(--ink-soft);margin-top:4px;";
-    note.textContent = "Täyttäjä kirjoittaa otsikon lomakkeella. Jos hän jättää sen tyhjäksi, Word-raportissa käytetään Kentän tekstiä.";
+    note.textContent = "Täyttäjä kirjoittaa otsikon lomakkeella. Tyhjässä otsikkokentässä näkyy placeholderina yllä oleva Kentän teksti (tai oma placeholder). Jos otsikko jää tyhjäksi, Word-raportissa käytetään Kentän tekstiä.";
     box.appendChild(note);
   }
   return box;
@@ -801,9 +805,8 @@ function buildTitleFillEditor(field){
 
 function buildFieldBlock(sec, field, fieldIdx){
   const wrap = buildFieldBlockCore(sec, field, fieldIdx);
-  wrap.appendChild(buildTitleFillEditor(field));
   wrap.appendChild(buildHintsEditor(field, "f:" + sec.id + "_" + field.id, "💡 Ohjeet tälle kentälle"));
-  wrap.appendChild(buildShowIfEditor(field, "fv:" + sec.id + "_" + field.id, "👁 Kentän näkyvyysehto", collectSourcesBefore(ed.sections.indexOf(sec), fieldIdx), "kenttä"));
+  wrap.appendChild(buildShowIfEditor(field, "fv:" + sec.id + "_" + field.id, "👁 Kentän näkyvyys (ehdot / painike)", collectSourcesBefore(ed.sections.indexOf(sec), fieldIdx), "kenttä"));
   return wrap;
 }
 
@@ -852,6 +855,8 @@ function buildFieldBlockCore(sec, field, fieldIdx){
   row1.appendChild(dupBtn);
   row1.appendChild(delBtn);
   wrap.appendChild(row1);
+  /* Täytettävä otsikko heti kentän tekstirivin alla, jotta se löytyy kaikilla kenttätyypeillä. */
+  wrap.appendChild(buildTitleFillEditor(field));
 
   const row2 = document.createElement("div");
   row2.className = "editor-row-sub";
@@ -1089,16 +1094,35 @@ function dupButton(title, onClick){
    kohteen tieto tai kenttä, joka on lomakkeessa ENNEN tätä kenttää/osiota. Näin ehdot eivät voi
    muodostaa kehää. */
 function collectSourcesBefore(secIdx, fieldIdx){
-  const allowed = new Set(ed.headerFields.map(h => "h:" + h.id));
-  ed.sections.forEach((sec, si) => sec.fields.forEach((f, fi) => {
-    if (si < secIdx || (si === secIdx && fieldIdx != null && fi < fieldIdx)) allowed.add("f:" + sec.id + "_" + f.id);
+  /* Näkyvyysehdon lähteeksi kelpaa mikä tahansa aiempi kenttä ("on täytetty") tai kokonainen
+     aiempi osio ("jokin osion kenttä on täytetty"). Numero- ja valintakentille ovat lisäksi
+     arvoon perustuvat ehdot. */
+  const kind = t => (t === "number" || t === "select") ? t : "other";
+  const out = [];
+  ed.headerFields.forEach(hf => out.push({
+    key:"h:" + hf.id, label:"Kohteen tiedot › " + (hf.label || "(nimetön)"),
+    type:kind(hf.type), options:hf.options || [], fill:true
   }));
-  return collectSources().filter(x => allowed.has(x.key));
+  ed.sections.forEach((sec, si) => {
+    if (si < secIdx){
+      out.push({ key:"s:" + sec.id, label:"Osio › " + (sec.title || "(osio)") + " (jokin kenttä täytetty)", type:"section", options:[], fill:true });
+    }
+    sec.fields.forEach((f, fi) => {
+      if (si < secIdx || (si === secIdx && fieldIdx != null && fi < fieldIdx)){
+        out.push({
+          key:"f:" + sec.id + "_" + f.id, label:(sec.title || "(osio)") + " › " + (f.label || "(nimetön)"),
+          type:kind(f.type), options:f.options || [], fill:true
+        });
+      }
+    });
+  });
+  return out;
 }
 
 function buildShowIfEditor(target, key, titleText, sources, what){
   const si = target.showIf && Array.isArray(target.showIf.conditions) ? target.showIf : null;
   const n = si ? si.conditions.length : 0;
+  const hasReveal = !!target.reveal;
 
   const details = document.createElement("details");
   details.className = "hints-editor";
@@ -1107,7 +1131,8 @@ function buildShowIfEditor(target, key, titleText, sources, what){
     if (details.open) openHintEditors.add(key); else openHintEditors.delete(key);
   });
   const summary = document.createElement("summary");
-  summary.textContent = titleText + (n ? " (" + n + ")" : "");
+  const count = n + (hasReveal ? 1 : 0);
+  summary.textContent = titleText + (count ? " (" + count + ")" : "");
   details.appendChild(summary);
 
   const box = document.createElement("div");
@@ -1115,9 +1140,14 @@ function buildShowIfEditor(target, key, titleText, sources, what){
 
   const note = document.createElement("div");
   note.className = "hint-note";
-  note.textContent = n
-    ? what + " näytetään lomakkeella vain, kun " + (si.conditions.length > 1 ? "ehdot täyttyvät" : "ehto täyttyy") + ". Piilossa olevan tiedot eivät tule Word-raporttiin."
-    : "Ei ehtoja: " + what + " näkyy aina. Lisää ehto, niin " + what + " tulee näkyviin vasta kun ehto täyttyy. Ehdon voi perustaa vain numero- tai pudotusvalikkokenttään, joka on lomakkeessa ennen tätä.";
+  if (!n && !hasReveal){
+    note.textContent = "Ei ehtoja eikä painiketta: " + what + " näkyy aina. Voit näyttää sen vasta kun ehto täyttyy (esim. edellinen kenttä on täytetty) ja/tai kun täyttäjä painaa painiketta.";
+  } else {
+    let t = what + " näytetään lomakkeella vasta";
+    if (n) t += ", kun " + (n > 1 ? "ehdot täyttyvät" : "ehto täyttyy");
+    if (hasReveal) t += (n ? " ja kun täyttäjä painaa painiketta" : ", kun täyttäjä painaa painiketta");
+    note.textContent = t + ". Piilossa olevan tiedot eivät tule Word-raporttiin.";
+  }
   box.appendChild(note);
 
   if (n > 1){
@@ -1141,7 +1171,7 @@ function buildShowIfEditor(target, key, titleText, sources, what){
   addCond.textContent = "+ Lisää ehto";
   addCond.addEventListener("click", () => {
     if (!sources.length){
-      showToast("Lisää ensin ennen tätä numero- tai pudotusvalikkokenttä (tai kohteen tietoihin numero/valikko), jonka perusteella " + what + " näytetään.");
+      showToast("Ehdon lähteeksi tarvitaan jokin aiempi kenttä tai osio. Lisää ensin ennen tätä jokin kenttä.");
       return;
     }
     if (!target.showIf || !Array.isArray(target.showIf.conditions)) target.showIf = { match:"all", conditions:[] };
@@ -1150,18 +1180,43 @@ function buildShowIfEditor(target, key, titleText, sources, what){
     renderEditor();
   });
   box.appendChild(addCond);
+
+  /* Painike: täyttäjä tuo kentän/osion näkyviin itse. Painikkeen teksti on muokattavissa. */
+  const revLab = document.createElement("label");
+  revLab.style.cssText = "display:flex;align-items:center;gap:4px;font-size:.78rem;color:var(--ink-soft);margin-top:10px;";
+  const revChk = document.createElement("input");
+  revChk.type = "checkbox";
+  revChk.checked = hasReveal;
+  revChk.addEventListener("change", () => {
+    if (revChk.checked) target.reveal = { text:"" }; else delete target.reveal;
+    openHintEditors.add(key);
+    renderEditor();
+  });
+  revLab.appendChild(revChk);
+  revLab.appendChild(document.createTextNode("Näytä painikkeella (täyttäjä painaa painiketta, jolloin " + what + " tulee näkyviin)"));
+  box.appendChild(revLab);
+  if (hasReveal){
+    const txt = textInput(target.reveal.text, v => { target.reveal.text = v; }, "Painikkeen teksti (oletus: Näytä seuraava)");
+    txt.style.cssText = "width:100%;margin-top:5px;";
+    box.appendChild(txt);
+  }
+
   details.appendChild(box);
   return details;
 }
 
-function validateShowIf(target, where, secIdx, fieldIdx, sourceMap){
+function validateShowIf(target, where, secIdx, fieldIdx){
   const si = target.showIf;
   if (!si || !(si.conditions || []).length) return null;
-  const before = new Set(collectSourcesBefore(secIdx, fieldIdx).map(x => x.key));
+  const all = {};
+  collectSourcesBefore(1e9, null).forEach(x => { all[x.key] = x; });
+  const before = {};
+  collectSourcesBefore(secIdx, fieldIdx).forEach(x => { before[x.key] = x; });
   for (const c of si.conditions){
-    const src = sourceMap[c.source];
-    if (!src) return "Näkyvyysehto viittaa kenttään, jota ei ole enää olemassa (" + where + "). Poista ehto tai valitse toinen kenttä.";
-    if (!before.has(c.source)) return "Näkyvyysehdon täytyy perustua kenttään, joka on lomakkeessa ennen tätä (" + where + ").";
+    if (!all[c.source]) return "Näkyvyysehto viittaa kenttään tai osioon, jota ei ole enää olemassa (" + where + "). Poista ehto tai valitse toinen.";
+    const src = before[c.source];
+    if (!src) return "Näkyvyysehdon täytyy perustua kenttään tai osioon, joka on lomakkeessa ennen tätä (" + where + ").";
+    if (c.op === "filled" || c.op === "empty") continue;
     if (src.type === "number"){
       const okA = c.value != null && String(c.value).trim() !== "" && !isNaN(parseFloat(c.value));
       const okB = c.value2 != null && String(c.value2).trim() !== "" && !isNaN(parseFloat(c.value2));
