@@ -96,6 +96,7 @@ async function loadFormsList(){
       '<div class="fr-actions">' +
         '<button type="button" class="fr-btn" data-action="open">Avaa</button>' +
         '<button type="button" class="fr-btn" data-action="edit">Muokkaa</button>' +
+        '<button type="button" class="fr-btn" data-action="copy">Kopioi</button>' +
         '<button type="button" class="fr-btn fr-btn-danger" data-action="delete">Poista</button>' +
       '</div>';
     card.querySelector('[data-action="open"]').addEventListener("click", () => {
@@ -103,6 +104,9 @@ async function loadFormsList(){
     });
     card.querySelector('[data-action="edit"]').addEventListener("click", () => {
       loadFormForEdit(row.id);
+    });
+    card.querySelector('[data-action="copy"]').addEventListener("click", (ev) => {
+      confirmCopyForm(row.id, row.title, ev.currentTarget);
     });
     card.querySelector('[data-action="delete"]').addEventListener("click", () => {
       confirmDeleteForm(row.id, row.title);
@@ -122,6 +126,45 @@ function confirmDeleteForm(id, title){
       loadFormsList();
     }
   );
+}
+
+/* Lomakkeen kopiointi: luodaan uusi rivi, jonka määrittely on täsmälleen sama kuin alkuperäisen.
+   Kopio on riippumaton alkuperäisestä; sen täytetyt lomakkeet ovat erillisiä. Nimeen lisätään
+   "(kopio)", ja kopion voi avata Muokkaa-painikkeella. */
+function confirmCopyForm(id, title, btn){
+  showConfirm(
+    "Kopioi lomake?",
+    'Lomakkeesta "' + (title || "(nimetön)") + '" tehdään uusi kopio, jonka nimi on "' + (title || "(nimetön)") + ' (kopio)". Alkuperäinen ei muutu.',
+    () => copyForm(id, btn)
+  );
+}
+
+async function copyForm(id, btn){
+  if (btn) btn.disabled = true;
+  const { data, error } = await supabaseClient.from("forms").select("*").eq("id", id).single();
+  if (error || !data){
+    if (btn) btn.disabled = false;
+    showToast("Lomakkeen kopiointi epäonnistui: " + ((error && error.message) || "lomaketta ei löytynyt"));
+    return;
+  }
+  const newTitle = (data.title || "(nimetön)") + " (kopio)";
+  const def = JSON.parse(JSON.stringify(data.definition || {}));
+  def.meta = Object.assign({ tag:data.tag || "", desc:data.description || "", icon:data.icon || "📋" }, def.meta || {}, { title:newTitle });
+  const row = {
+    title: newTitle,
+    tag: data.tag || null,
+    description: data.description || null,
+    icon: data.icon || "📋",
+    definition: def
+  };
+  const result = await supabaseClient.from("forms").insert(row).select().single();
+  if (btn) btn.disabled = false;
+  if (result.error){
+    showToast("Lomakkeen kopiointi epäonnistui: " + result.error.message);
+    return;
+  }
+  showToast('Lomake kopioitu: "' + newTitle + '".');
+  loadFormsList();
 }
 
 async function loadFormForEdit(id){
