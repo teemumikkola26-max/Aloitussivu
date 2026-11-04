@@ -25,6 +25,9 @@
    Sekä osiolla että kentällä voi olla showIf (näkyvyysehto): jos se on annettu, osio/kenttä
    näytetään ja viedään Wordiin vain kun ehdot täyttyvät. Ehto voi olla myös op "filled"/"empty"
    (lähde: kenttä "f:", kohteen tieto "h:" tai osio "s:" = jokin osion kenttä täytetty).
+   allowDuplicate?: true kentällä: täyttäjä voi monistaa kentän täytön aikana (esim. toinen tila).
+     Kopiot tallentuvat täyttöön (state.copies = [{ id, sec, of }]) ja ovat tyhjiä kopioita
+     alkuperäisestä kentästä; kopion id on "<kenttäid>~<kopioid>".
    reveal?: { text } osiolla tai kentällä tuo painikkeen: kohde tulee näkyviin vasta, kun täyttäjä
    painaa painiketta (tieto säilyy state.reveals-oliossa). Ehdon lähteenä on aina kohteen tieto
    tai lomakkeessa aiemmin oleva kenttä; piilotetun kentän arvo ei täytä ehtoja.
@@ -38,7 +41,7 @@ let FORM_ID = null;
 let SUBMISSION_ID = null;
 let READ_ONLY = false;   // true, kun toinen käyttäjä täyttää samaa lomaketta
 let DEFAULT_STATUS = "unchecked";
-let state = { header:{}, items:{}, reveals:{} };
+let state = { header:{}, items:{}, reveals:{}, copies:[] };
 let saveTimer = null;
 let db = null;
 const openSections = new Set();
@@ -61,9 +64,45 @@ function fatalError(message){
   document.body.appendChild(banner);
 }
 
+/* ---------- Täyttäjän monistamat kentät ----------
+   Lomakepohjan kenttälistan lisäksi osiolla on täytön aikana tehtyjä kopioita (state.copies).
+   secFields(sec) palauttaa pohjan kentät ja niiden kopiot (kopiot alkuperäisen perässä).
+   Kopio on alkuperäisen kentän tyhjä kopio: sama tyyppi, ohjeet, ehdot ja taulukon sarakkeet. */
+let copyFieldCache = {};
+function copyFieldOf(base, c, n){
+  let f = copyFieldCache[c.id];
+  if (!f || f._base !== base){
+    f = Object.assign({}, base);
+    delete f.reveal;   // kopio on täyttäjän itse tekemä, joten sitä ei tarvitse tuoda näkyviin painikkeella
+    f._copy = true; f._base = base; f._baseId = base.id; f._copyId = c.id;
+    copyFieldCache[c.id] = f;
+  }
+  f.id = base.id + "~" + c.id;
+  f.label = (base.label || "") + " (" + n + ")";
+  return f;
+}
+function secFields(sec){
+  const copies = state && Array.isArray(state.copies) ? state.copies : null;
+  const mine = copies ? copies.filter(c => c.sec === sec.id) : [];
+  if (!mine.length) return sec.fields;
+  const out = [];
+  sec.fields.forEach(f => {
+    out.push(f);
+    let n = 2;
+    mine.filter(c => c.of === f.id).forEach(c => out.push(copyFieldOf(f, c, n++)));
+  });
+  return out;
+}
+function blankItemState(){
+  return { status:DEFAULT_STATUS, note:"", action:"", value:"", title:"", table:{}, photos:[] };
+}
+function ensureCopyItems(){
+  allItemIds().forEach(id => { if (!state.items[id]) state.items[id] = blankItemState(); });
+}
+
 function allItemIds(){
   const ids = [];
-  DEF.sections.forEach(sec => sec.fields.forEach(f => ids.push(sec.id + "_" + f.id)));
+  DEF.sections.forEach(sec => secFields(sec).forEach(f => ids.push(sec.id + "_" + f.id)));
   return ids;
 }
 
@@ -122,7 +161,7 @@ function isFieldDone(field, itemId){
 
 function sectionAndFieldOf(itemId){
   for (const sec of DEF.sections){
-    for (const f of sec.fields){
+    for (const f of secFields(sec)){
       if (sec.id + "_" + f.id === itemId) return { sec, field: f };
     }
   }
@@ -222,6 +261,7 @@ async function doSave(){
   if (READ_ONLY) return;
   await idbPut("meta", { key:"header", value: state.header });
   await idbPut("meta", { key:"reveals", value: state.reveals || {} });
+  await idbPut("meta", { key:"copies", value: state.copies || [] });
   for (const id of Object.keys(state.items)){
     const it = state.items[id];
     await idbPut("items", { id, status: it.status, note: it.note, action: it.action, value: it.value, title: it.title || "", table: it.table });
@@ -259,7 +299,7 @@ async function syncToCloud(){
     });
     await window.SubmissionSync.saveSubmission({
       id: SUBMISSION_ID, formKey: FORM_ID, formLabel: (DEF && DEF.meta && DEF.meta.title) || "Lomake",
-      title: deriveTitle(), inspectorName: deriveInspector(), data: { header: state.header, items: cloudItems, reveals: state.reveals || {} }
+      title: deriveTitle(), inspectorName: deriveInspector(), data: { header: state.header, items: cloudItems, reveals: state.reveals || {}, copies: state.copies || [] }
     });
     setSaveIndicator("Tallennettu pilveen");
   }catch(e){
@@ -276,6 +316,8 @@ async function loadFromStorage(){
     if (sub && sub.data){
       state.header = sub.data.header || {};
       state.reveals = sub.data.reveals || {};
+      state.copies = Array.isArray(sub.data.copies) ? sub.data.copies : [];
+      ensureCopyItems();   // monistettujen kenttien tilat on luotava ennen kuin tiedot ladataan niihin
       const items = sub.data.items || {};
       for (const id of Object.keys(items)){
         if (!state.items[id]) continue;
@@ -303,6 +345,9 @@ async function loadFromStorage(){
     if (headerRow) state.header = headerRow.value || {};
     const revealsRow = metaRows.find(r => r.key === "reveals");
     state.reveals = (revealsRow && revealsRow.value) || {};
+    const copiesRow = metaRows.find(r => r.key === "copies");
+    state.copies = (copiesRow && Array.isArray(copiesRow.value)) ? copiesRow.value : [];
+    ensureCopyItems();
 
     const itemRows = await idbGetAll("items");
     itemRows.forEach(row => {
@@ -595,6 +640,49 @@ function withDictation(input){
   return wrap;
 }
 
+/* Kentän monistus täytön aikana: luodaan tyhjä kopio alkuperäisen kentän perään. */
+function duplicateItem(sec, field){
+  const baseId = field._copy ? field._baseId : field.id;
+  const cid = "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  if (!Array.isArray(state.copies)) state.copies = [];
+  state.copies.push({ id: cid, sec: sec.id, of: baseId });
+  const newItemId = sec.id + "_" + baseId + "~" + cid;
+  state.items[newItemId] = blankItemState();
+  openSections.add(sec.id);
+  renderSections();
+  saveDebounced();
+  const el = document.querySelector('[data-item-id="' + newItemId + '"]');
+  if (el){
+    try{ el.scrollIntoView({ behavior:"smooth", block:"nearest" }); }catch(e){}
+    const first = el.querySelector("input,textarea,select");
+    if (first) first.focus({ preventScroll:true });
+  }
+}
+
+function removeCopy(sec, field){
+  const itemId = sec.id + "_" + field.id;
+  const doRemove = () => {
+    const it = state.items[itemId];
+    if (it){
+      it.photos.forEach(p => {
+        try{ URL.revokeObjectURL(p.url); }catch(e){}
+        if (db) idbDelete("photos", p.id);
+        if (p.path) window.SubmissionSync.deletePhotoFile(p.path).catch(()=>{});
+      });
+    }
+    delete state.items[itemId];
+    if (db) idbDelete("items", itemId);
+    state.copies = (state.copies || []).filter(c => c.id !== field._copyId);
+    renderSections();
+    saveDebounced();
+  };
+  if (itemHasAnyInput(itemId)){
+    showConfirm("Poista kopio?", 'Kopio "' + field.label + '" ja sen tiedot poistetaan. Tätä ei voi perua.', doRemove);
+  } else {
+    doRemove();
+  }
+}
+
 function removePhoto(itemId, photoId){
   const arr = state.items[itemId].photos;
   const idx = arr.findIndex(p => p.id === photoId);
@@ -688,7 +776,7 @@ function sourceFilledState(src){
   if (src.indexOf("s:") === 0){
     const sec = DEF.sections.find(x => x.id === src.slice(2));
     if (!sec || hiddenSecs.has(sec.id)) return null;
-    return sec.fields.some(f => !hiddenItems.has(sec.id + "_" + f.id) && itemHasAnyInput(sec.id + "_" + f.id));
+    return secFields(sec).some(f => !hiddenItems.has(sec.id + "_" + f.id) && itemHasAnyInput(sec.id + "_" + f.id));
   }
   return null;
 }
@@ -750,7 +838,7 @@ function computeVisibility(){
     const secHidden = !condsOk || needReveal;
     if (secHidden) hiddenSecs.add(sec.id);
     if (condsOk && needReveal) pendingSecs.add(sec.id);
-    sec.fields.forEach(f => {
+    secFields(sec).forEach(f => {
       const id = sec.id + "_" + f.id;
       if (secHidden){ hiddenItems.add(id); return; }
       const fOk = showIfMet(f);
@@ -832,7 +920,7 @@ function refreshHints(){
 function fieldCounts(sec){
   let done = 0, notes = 0;
   let total = 0;
-  sec.fields.forEach(f => {
+  secFields(sec).forEach(f => {
     const itemId = sec.id + "_" + f.id;
     if (hiddenItems.has(itemId)) return;
     total++;
@@ -1047,12 +1135,13 @@ function renderSections(){
     itemsWrap.appendChild(secHintHolder);
     hintHolders.push({ el: secHintHolder, hints: sec.hints || [], sec });
 
-    sec.fields.forEach((field) => {
+    secFields(sec).forEach((field) => {
       const itemId = sec.id + "_" + field.id;
       const itState = state.items[itemId];
       const itemDiv = document.createElement("div");
       itemDiv.className = "item";
       if (hiddenItems.has(itemId)) itemDiv.style.display = "none";
+      itemDiv.dataset.itemId = itemId;
       const itemView = { id: itemId, el: itemDiv, rev: null };
       itemViews.push(itemView);
 
@@ -1285,6 +1374,27 @@ function renderSections(){
         }
       }
 
+      if (field.allowDuplicate || field._copy){
+        const dupRow = document.createElement("div");
+        dupRow.className = "item-dup-row";
+        if (field.allowDuplicate){
+          const dupBtn = document.createElement("button");
+          dupBtn.type = "button";
+          dupBtn.className = "item-dup-btn";
+          dupBtn.textContent = "⧉ Monista kenttä";
+          dupBtn.addEventListener("click", () => duplicateItem(sec, field));
+          dupRow.appendChild(dupBtn);
+        }
+        if (field._copy){
+          const rmBtn = document.createElement("button");
+          rmBtn.type = "button";
+          rmBtn.className = "item-dup-btn item-dup-remove";
+          rmBtn.textContent = "Poista kopio";
+          rmBtn.addEventListener("click", () => removeCopy(sec, field));
+          dupRow.appendChild(rmBtn);
+        }
+        itemDiv.appendChild(dupRow);
+      }
       if (field.reveal){
         itemView.rev = makeRevealBlock(field.reveal, "f:" + itemId, pendingItems.has(itemId), () => itemDiv);
         itemsWrap.appendChild(itemView.rev);
@@ -1422,7 +1532,8 @@ document.getElementById("btnNew").addEventListener("click", () => {
 });
 
 function resetState(){
-  state = { header:{}, items:{}, reveals:{} };
+  state = { header:{}, items:{}, reveals:{}, copies:[] };
+  copyFieldCache = {};
   allItemIds().forEach(id => state.items[id] = { status:DEFAULT_STATUS, note:"", action:"", value:"", title:"", table:{}, photos:[] });
 }
 
@@ -1500,7 +1611,7 @@ async function buildDocx(){
       bodyParts.push(engine.paraXml(sec.title, { bold:true, sz:engine.pt2hp(s.fonts.headingSize), font:s.fonts.heading, color:s.colors.heading, pStyle:"Heading1", before:260, after:120 }));
     }
 
-    sec.fields.forEach((field) => {
+    secFields(sec).forEach((field) => {
       const itemId = sec.id + "_" + field.id;
       if (hiddenItems.has(itemId)) return;
       const it = state.items[itemId];

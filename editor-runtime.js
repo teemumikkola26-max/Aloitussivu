@@ -820,6 +820,19 @@ function buildSectionBlock(sec, secIdx){
   return block;
 }
 
+/* Kentän monistus täytön aikana: täyttäjä voi tehdä kentästä tyhjän kopion (esim. toinen tila). */
+function buildDuplicateOption(field){
+  const lab = document.createElement("label");
+  lab.style.cssText = "display:flex;align-items:center;gap:4px;font-size:.74rem;color:var(--ink-soft);margin-top:6px;";
+  const chk = document.createElement("input");
+  chk.type = "checkbox";
+  chk.checked = !!field.allowDuplicate;
+  chk.addEventListener("change", () => { if (chk.checked) field.allowDuplicate = true; else delete field.allowDuplicate; });
+  lab.appendChild(chk);
+  lab.appendChild(document.createTextNode("Täyttäjä voi monistaa tämän kentän lomaketta täyttäessään (tyhjä kopio, esim. toinen tila)"));
+  return lab;
+}
+
 /* Otsikko täytettävänä kohtana: täyttäjä kirjoittaa kentän otsikon itse (esim. "Seinä 1").
    Placeholder näkyy tyhjässä otsikkokentässä. Jos otsikko jää tyhjäksi, käytetään Kentän teksti -arvoa. */
 function buildTitleFillEditor(field){
@@ -900,6 +913,7 @@ function buildFieldBlockCore(sec, field, fieldIdx){
   wrap.appendChild(row1);
   /* Täytettävä otsikko heti kentän tekstirivin alla, jotta se löytyy kaikilla kenttätyypeillä. */
   wrap.appendChild(buildTitleFillEditor(field));
+  wrap.appendChild(buildDuplicateOption(field));
 
   const row2 = document.createElement("div");
   row2.className = "editor-row-sub";
