@@ -797,6 +797,15 @@ function buildSectionBlock(sec, secIdx){
     const o = document.createElement("option"); o.value = g; dl.appendChild(o);
   });
 
+  const secDupLab = document.createElement("label");
+  secDupLab.style.cssText = "display:flex;align-items:center;gap:4px;font-size:.74rem;color:var(--ink-soft);margin:6px 0;";
+  const secDupChk = document.createElement("input");
+  secDupChk.type = "checkbox";
+  secDupChk.checked = !!sec.allowDuplicate;
+  secDupChk.addEventListener("change", () => { if (secDupChk.checked) sec.allowDuplicate = true; else delete sec.allowDuplicate; });
+  secDupLab.appendChild(secDupChk);
+  secDupLab.appendChild(document.createTextNode("Täyttäjä voi monistaa tämän osion lomaketta täyttäessään (tyhjä kopio kaikista osion kentistä)"));
+  block.appendChild(secDupLab);
   block.appendChild(buildHintsEditor(sec, "s:" + sec.id, "💡 Osion ohjeet (näkyvät osion alussa)"));
   block.appendChild(buildShowIfEditor(sec, "sv:" + sec.id, "👁 Osion näkyvyys (ehdot / painike)", collectSourcesBefore(secIdx, null), "osio"));
   const hintGap = document.createElement("div");

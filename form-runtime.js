@@ -28,6 +28,8 @@
    allowDuplicate?: true kentällä: täyttäjä voi monistaa kentän täytön aikana (esim. toinen tila).
      Kopiot tallentuvat täyttöön (state.copies = [{ id, sec, of }]) ja ovat tyhjiä kopioita
      alkuperäisestä kentästä; kopion id on "<kenttäid>~<kopioid>".
+   allowDuplicate?: true osiolla: täyttäjä voi monistaa osion täytön aikana (tyhjä kopio kaikista
+     osion kentistä). Kopiot: state.secCopies = [{ id, of }]; kopion osio-id on "<osioid>~<kopioid>".
    reveal?: { text } osiolla tai kentällä tuo painikkeen: kohde tulee näkyviin vasta, kun täyttäjä
    painaa painiketta (tieto säilyy state.reveals-oliossa). Ehdon lähteenä on aina kohteen tieto
    tai lomakkeessa aiemmin oleva kenttä; piilotetun kentän arvo ei täytä ehtoja.
@@ -41,7 +43,7 @@ let FORM_ID = null;
 let SUBMISSION_ID = null;
 let READ_ONLY = false;   // true, kun toinen käyttäjä täyttää samaa lomaketta
 let DEFAULT_STATUS = "unchecked";
-let state = { header:{}, items:{}, reveals:{}, copies:[] };
+let state = { header:{}, items:{}, reveals:{}, copies:[], secCopies:[] };
 let saveTimer = null;
 let db = null;
 const openSections = new Set();
@@ -68,6 +70,44 @@ function fatalError(message){
    Lomakepohjan kenttälistan lisäksi osiolla on täytön aikana tehtyjä kopioita (state.copies).
    secFields(sec) palauttaa pohjan kentät ja niiden kopiot (kopiot alkuperäisen perässä).
    Kopio on alkuperäisen kentän tyhjä kopio: sama tyyppi, ohjeet, ehdot ja taulukon sarakkeet. */
+let secCopyCache = {};
+function copySectionOf(base, c, n){
+  let sec = secCopyCache[c.id];
+  if (!sec || sec._base !== base){
+    const newId = base.id + "~" + c.id;
+    /* Kopion sisäiset ehdot ("tämän osion aiempi kenttä") ohjataan osoittamaan kopion omiin kenttiin. */
+    const mapSrc = src => (typeof src === "string" && src.indexOf("f:" + base.id + "_") === 0)
+      ? "f:" + newId + "_" + src.slice(("f:" + base.id + "_").length) : src;
+    const remapOne = h => Object.assign({}, h, { conditions: (h.conditions || []).map(cd => Object.assign({}, cd, { source: mapSrc(cd.source) })) });
+    sec = Object.assign({}, base, { id:newId });
+    delete sec.reveal;   // täyttäjä teki kopion itse, joten sitä ei tuoda näkyviin painikkeella
+    sec._copy = true; sec._base = base; sec._baseId = base.id; sec._copyId = c.id;
+    sec.hints = (base.hints || []).map(remapOne);
+    if (base.showIf) sec.showIf = remapOne(base.showIf);
+    sec.fields = (base.fields || []).map(f => {
+      const g = Object.assign({}, f);
+      g.hints = (f.hints || []).map(remapOne);
+      if (f.showIf) g.showIf = remapOne(f.showIf);
+      return g;
+    });
+    secCopyCache[c.id] = sec;
+  }
+  sec.title = (base.title || "") + " (" + n + ")";
+  return sec;
+}
+/* Lomakepohjan osiot + täyttäjän tekemät osiokopiot (kunkin alkuperäisen osion perässä). */
+function effSections(){
+  const copies = state && Array.isArray(state.secCopies) ? state.secCopies : null;
+  if (!copies || !copies.length) return DEF.sections;
+  const out = [];
+  DEF.sections.forEach(sec => {
+    out.push(sec);
+    let n = 2;
+    copies.filter(c => c.of === sec.id).forEach(c => out.push(copySectionOf(sec, c, n++)));
+  });
+  return out;
+}
+
 let copyFieldCache = {};
 function copyFieldOf(base, c, n){
   let f = copyFieldCache[c.id];
@@ -102,7 +142,7 @@ function ensureCopyItems(){
 
 function allItemIds(){
   const ids = [];
-  DEF.sections.forEach(sec => secFields(sec).forEach(f => ids.push(sec.id + "_" + f.id)));
+  effSections().forEach(sec => secFields(sec).forEach(f => ids.push(sec.id + "_" + f.id)));
   return ids;
 }
 
@@ -160,7 +200,7 @@ function isFieldDone(field, itemId){
 }
 
 function sectionAndFieldOf(itemId){
-  for (const sec of DEF.sections){
+  for (const sec of effSections()){
     for (const f of secFields(sec)){
       if (sec.id + "_" + f.id === itemId) return { sec, field: f };
     }
@@ -262,6 +302,7 @@ async function doSave(){
   await idbPut("meta", { key:"header", value: state.header });
   await idbPut("meta", { key:"reveals", value: state.reveals || {} });
   await idbPut("meta", { key:"copies", value: state.copies || [] });
+  await idbPut("meta", { key:"secCopies", value: state.secCopies || [] });
   for (const id of Object.keys(state.items)){
     const it = state.items[id];
     await idbPut("items", { id, status: it.status, note: it.note, action: it.action, value: it.value, title: it.title || "", table: it.table });
@@ -299,7 +340,7 @@ async function syncToCloud(){
     });
     await window.SubmissionSync.saveSubmission({
       id: SUBMISSION_ID, formKey: FORM_ID, formLabel: (DEF && DEF.meta && DEF.meta.title) || "Lomake",
-      title: deriveTitle(), inspectorName: deriveInspector(), data: { header: state.header, items: cloudItems, reveals: state.reveals || {}, copies: state.copies || [] }
+      title: deriveTitle(), inspectorName: deriveInspector(), data: { header: state.header, items: cloudItems, reveals: state.reveals || {}, copies: state.copies || [], secCopies: state.secCopies || [] }
     });
     setSaveIndicator("Tallennettu pilveen");
   }catch(e){
@@ -316,6 +357,7 @@ async function loadFromStorage(){
     if (sub && sub.data){
       state.header = sub.data.header || {};
       state.reveals = sub.data.reveals || {};
+      state.secCopies = Array.isArray(sub.data.secCopies) ? sub.data.secCopies : [];
       state.copies = Array.isArray(sub.data.copies) ? sub.data.copies : [];
       ensureCopyItems();   // monistettujen kenttien tilat on luotava ennen kuin tiedot ladataan niihin
       const items = sub.data.items || {};
@@ -346,6 +388,8 @@ async function loadFromStorage(){
     const revealsRow = metaRows.find(r => r.key === "reveals");
     state.reveals = (revealsRow && revealsRow.value) || {};
     const copiesRow = metaRows.find(r => r.key === "copies");
+    const secCopiesRow = metaRows.find(r => r.key === "secCopies");
+    state.secCopies = (secCopiesRow && Array.isArray(secCopiesRow.value)) ? secCopiesRow.value : [];
     state.copies = (copiesRow && Array.isArray(copiesRow.value)) ? copiesRow.value : [];
     ensureCopyItems();
 
@@ -659,6 +703,57 @@ function duplicateItem(sec, field){
   }
 }
 
+/* Osion monistus täytön aikana: tyhjä kopio osiosta kaikkine kenttineen alkuperäisen osion perään. */
+function duplicateSectionFill(sec){
+  const baseId = sec._copy ? sec._baseId : sec.id;
+  const cid = "c" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  if (!Array.isArray(state.secCopies)) state.secCopies = [];
+  state.secCopies.push({ id: cid, of: baseId });
+  const newSecId = baseId + "~" + cid;
+  ensureCopyItems();
+  openSections.add(newSecId);
+  renderSections();
+  saveDebounced();
+  const el = document.getElementById("sec_" + newSecId);
+  if (el){
+    try{ el.scrollIntoView({ behavior:"smooth", block:"start" }); }catch(e){}
+  }
+}
+
+function purgeItem(id){
+  const it = state.items[id];
+  if (it){
+    it.photos.forEach(p => {
+      try{ URL.revokeObjectURL(p.url); }catch(e){}
+      if (db) idbDelete("photos", p.id);
+      if (p.path) window.SubmissionSync.deletePhotoFile(p.path).catch(()=>{});
+    });
+  }
+  delete state.items[id];
+  if (db) idbDelete("items", id);
+}
+
+function removeSectionCopy(sec){
+  const prefix = sec.id + "_";
+  const ids = Object.keys(state.items).filter(id => id.indexOf(prefix) === 0);
+  const doRemove = () => {
+    ids.forEach(purgeItem);
+    state.copies = (state.copies || []).filter(c => c.sec !== sec.id);
+    state.secCopies = (state.secCopies || []).filter(c => c.id !== sec._copyId);
+    Object.keys(state.reveals || {}).forEach(k => {
+      if (k === "s:" + sec.id || k.indexOf("f:" + prefix) === 0) delete state.reveals[k];
+    });
+    openSections.delete(sec.id);
+    renderSections();
+    saveDebounced();
+  };
+  if (ids.some(itemHasAnyInput)){
+    showConfirm("Poista osion kopio?", 'Osion "' + sec.title + '" kopio ja kaikki sen tiedot ja kuvat poistetaan. Tätä ei voi perua.', doRemove);
+  } else {
+    doRemove();
+  }
+}
+
 function removeCopy(sec, field){
   const itemId = sec.id + "_" + field.id;
   const doRemove = () => {
@@ -774,7 +869,7 @@ function sourceFilledState(src){
     return itemHasAnyInput(id);
   }
   if (src.indexOf("s:") === 0){
-    const sec = DEF.sections.find(x => x.id === src.slice(2));
+    const sec = effSections().find(x => x.id === src.slice(2));
     if (!sec || hiddenSecs.has(sec.id)) return null;
     return secFields(sec).some(f => !hiddenItems.has(sec.id + "_" + f.id) && itemHasAnyInput(sec.id + "_" + f.id));
   }
@@ -830,7 +925,7 @@ function computeVisibility(){
   pendingItems = new Set();
   if (!DEF) return;
   const revealed = (state && state.reveals) || {};
-  DEF.sections.forEach(sec => {
+  effSections().forEach(sec => {
     /* Kohde piilotetaan, jos ehdot eivät täyty TAI jos se näytetään painikkeella eikä painiketta
        ole vielä painettu. Painike näytetään vain, kun ehdot täyttyvät. */
     const condsOk = showIfMet(sec);
@@ -854,7 +949,7 @@ function refreshVisibility(){
   computeVisibility();
   const nums = computeSectionNumbering();
   secViews.forEach(v => {
-    const nm = nums[DEF.sections.indexOf(v.sec)];
+    const nm = nums[effSections().indexOf(v.sec)];
     if (!nm) return;
     v.div.style.display = nm.hidden ? "none" : "";
     if (v.rev) v.rev.style.display = pendingSecs.has(v.sec.id) ? "" : "none";
@@ -947,7 +1042,7 @@ function colorWithAlpha(hex, alpha){
  */
 function computeSectionNumbering(){
   let top = 0, sub = 0, lastGroup = null;
-  return DEF.sections.map(sec => {
+  return effSections().map(sec => {
     const g = String(sec.group || "").trim();
     if (hiddenSecs.has(sec.id)) return { group:g, groupStart:false, groupNum:0, label:"", hidden:true };
     if (g){
@@ -1094,7 +1189,7 @@ function renderSections(){
   itemViews = [];
   computeVisibility();
   const secNums = computeSectionNumbering();
-  DEF.sections.forEach((sec, secIdx) => {
+  effSections().forEach((sec, secIdx) => {
     const { done, total, notes } = fieldCounts(sec);
     /* Ryhmäotsikko tehdään jokaiselle ryhmälliselle osiolle; näkyviin jää vain ryhmän ensimmäinen
        näkyvä osio. Näin ryhmän otsikko seuraa osioiden näkyvyysehtoja. */
@@ -1402,6 +1497,25 @@ function renderSections(){
       itemsWrap.appendChild(itemDiv);
     });
 
+    if (sec.allowDuplicate || sec._copy){
+      const secDupRow = document.createElement("div");
+      secDupRow.className = "item-dup-row sec-dup-row";
+      if (sec.allowDuplicate){
+        const b = document.createElement("button");
+        b.type = "button"; b.className = "item-dup-btn";
+        b.textContent = "⧉ Monista osio";
+        b.addEventListener("click", () => duplicateSectionFill(sec));
+        secDupRow.appendChild(b);
+      }
+      if (sec._copy){
+        const b = document.createElement("button");
+        b.type = "button"; b.className = "item-dup-btn item-dup-remove";
+        b.textContent = "Poista osion kopio";
+        b.addEventListener("click", () => removeSectionCopy(sec));
+        secDupRow.appendChild(b);
+      }
+      itemsWrap.appendChild(secDupRow);
+    }
     secDiv.appendChild(itemsWrap);
     if (sec.reveal){
       const secView = secViews[secViews.length - 1];
@@ -1424,7 +1538,7 @@ function renderQuickNav(){
   if (!wrap) return;
   wrap.innerHTML = "";
   const secNums = computeSectionNumbering();
-  DEF.sections.forEach((sec, i) => {
+  effSections().forEach((sec, i) => {
     if (hiddenSecs.has(sec.id)) return;
     const { done, total, notes } = fieldCounts(sec);
     const chip = document.createElement("button");
@@ -1532,8 +1646,9 @@ document.getElementById("btnNew").addEventListener("click", () => {
 });
 
 function resetState(){
-  state = { header:{}, items:{}, reveals:{}, copies:[] };
+  state = { header:{}, items:{}, reveals:{}, copies:[], secCopies:[] };
   copyFieldCache = {};
+  secCopyCache = {};
   allItemIds().forEach(id => state.items[id] = { status:DEFAULT_STATUS, note:"", action:"", value:"", title:"", table:{}, photos:[] });
 }
 
@@ -1598,7 +1713,7 @@ async function buildDocx(){
   computeVisibility();   // ehdolla piilotettujen osioiden ja kenttien tietoja ei viedä raporttiin
   const secNums = computeSectionNumbering();
   const fieldsAsHeadings = !(s.headingNumbering && s.headingNumbering.fieldHeadings === false);
-  DEF.sections.forEach((sec, secIdx) => {
+  effSections().forEach((sec, secIdx) => {
     if (hiddenSecs.has(sec.id)) return;
     const nm = secNums[secIdx];
     if (nm.groupStart){
