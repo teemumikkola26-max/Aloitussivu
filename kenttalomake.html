@@ -1798,6 +1798,8 @@ function createPortableState(){
 
   return {
     project,
+    entrySyncSig,
+    projectDirty,
     deletedEntryIds,
     entryOrderDirty,
     entries:entries.map(e=>({
@@ -1834,6 +1836,10 @@ function createIndexedDbState(){
 
   return {
     project,
+    /* KORJAUS: synkronointitiedot talteen, jotta seuraavalla avauksella
+       tiedetään, mitkä paikalliset muutokset puuttuvat vielä pilvestä. */
+    entrySyncSig,
+    projectDirty,
     entries,
     deletedEntryIds,
     entryOrderDirty,
@@ -1887,6 +1893,17 @@ async function autosave(skipCloud){
 
     localSaved=true;
     indexedDbSaved=true;
+
+    /* KORJAUS: lomake näkyy aloitussivulla myös ilman verkkoa. */
+    if(window.SubmissionSync && window.SubmissionSync.rememberLocalDraft){
+      window.SubmissionSync.rememberLocalDraft({
+        id:SUBMISSION_ID,
+        formKey:FORM_KEY,
+        formLabel:FORM_LABEL,
+        title:deriveTitle(),
+        pending:hasUnsyncedLocalChanges()
+      }).catch(()=>{});
+    }
 
   }catch(err){
 
@@ -2649,6 +2666,210 @@ async function syncToCloud(){
 
 
 /* ============================================================
+   KORJAUS: laitteen kopion luku ja käyttöönotto erillisinä
+   funktioina, jotta laitteen kopio voidaan yhdistää pilviversioon.
+   ============================================================ */
+async function readLocalState(){
+  let value=null;
+    try{
+
+      value=
+        await idbGet(
+          "kenttalomake_state"
+        ) || null;
+
+    }catch(err){
+
+      console.warn(
+        "IndexedDB-lataus epäonnistui",
+        err
+      );
+    }
+
+
+    /*
+     * window.storage.
+     */
+    if(!value && window.storage){
+
+      try{
+
+        const r=
+          await window.storage.get(
+            portableStateKey()
+          );
+
+        value=
+          r && r.value
+            ? JSON.parse(r.value)
+            : null;
+
+      }catch(err){
+
+        console.warn(
+          "window.storage-lataus epäonnistui",
+          err
+        );
+      }
+    }
+
+
+    /*
+     * localStorage.
+     */
+    if(!value){
+
+      try{
+
+        const raw=
+          localStorage.getItem(
+            portableStateKey()
+          );
+
+        if(raw){
+
+          value=JSON.parse(raw);
+        }
+
+      }catch(err){
+
+        console.warn(
+          "localStorage-lataus epäonnistui",
+          err
+        );
+      }
+    }
+
+
+  return value;
+}
+
+async function applyLocalState(value){
+
+
+      if(value.project){
+
+        project=Object.assign(
+          project,
+          value.project
+        );
+      }
+
+
+      /*
+       * IndexedDB-tilassa photos sisältää Blobit.
+       *
+       * JSON-varmistustilassa kuvilta puuttuu Blob,
+       * jolloin niiden paikallinen alkuperä ei ole enää
+       * saatavilla. Pilveen ladatut kuvat voidaan kuitenkin
+       * ladata myöhemmin.
+       */
+      entries=Array.isArray(value.entries)
+        ? value.entries
+        : [];
+
+      deletedEntryIds=
+        Array.isArray(value.deletedEntryIds)
+          ?value.deletedEntryIds.slice()
+          :[];
+
+      entryOrderDirty=!!value.entryOrderDirty;
+
+
+      for(const e of entries){
+
+        if(!Array.isArray(e.photos)){
+          e.photos=[];
+        }
+
+
+        for(const p of e.photos){
+
+          if(p.blob instanceof Blob){
+
+            if(!p.url){
+              p.url=URL.createObjectURL(p.blob);
+            }
+
+          }else if(p.path && window.SubmissionSync){
+
+            try{
+
+              const blob=
+                await window.SubmissionSync.downloadPhoto(
+                  p.path
+                );
+
+              p.blob=blob;
+              p.url=URL.createObjectURL(blob);
+
+            }catch(err){
+
+              console.warn(
+                "Paikallisen kuvan palautus epäonnistui",
+                p.path
+              );
+            }
+          }
+        }
+      }
+
+
+      if(value.view){
+        view=value.view;
+      }
+
+      if("editingEntry" in value){
+
+        editingEntry=value.editingEntry;
+
+        /*
+         * Varmistetaan, että editingEntry viittaa
+         * entries-taulukon oikeaan objektiin.
+         */
+        if(editingEntry){
+
+          const realEntry=
+            entries.find(
+              e=>e.id===editingEntry.id
+            );
+
+          if(realEntry){
+
+            editingEntry=realEntry;
+          }
+        }
+      }
+
+      if("editingIsNew" in value){
+
+        editingIsNew=value.editingIsNew;
+      }
+
+
+
+  entrySyncSig=
+    (value.entrySyncSig && typeof value.entrySyncSig==="object")
+      ? Object.assign({},value.entrySyncSig)
+      : {};
+  projectDirty=
+    (value.projectDirty && typeof value.projectDirty==="object")
+      ? Object.assign({},value.projectDirty)
+      : {};
+}
+
+/* Onko laitteen kopiossa muutoksia, joita pilvessä ei vielä ole? */
+function hasUnsyncedLocalChanges(){
+  if(Object.keys(projectDirty).some(k=>projectDirty[k]))return true;
+  if(entryOrderDirty)return true;
+  return entries.some(e=>
+    entrySyncSig[e.id]===undefined ||
+    entrySyncSig[e.id]!==entrySig(e)
+  );
+}
+
+
+/* ============================================================
    TILAN LATAUS
    ============================================================ */
 
@@ -2661,8 +2882,20 @@ async function loadState(){
     SUBMISSION_ID.replace(/-/g,"")+
     "_db";
 
-  let value=null;
   let loadedFromCloud=false;
+
+  /*
+   * KORJAUS: laitteen kopio luetaan aina ensin. Aiemmin pilviversio
+   * korvasi sen kokonaan, jolloin esim. ilman verkkoa tallennetut
+   * merkinnät katosivat, kun lomake avattiin uudelleen verkossa.
+   */
+  const value=await readLocalState();
+  const localHasContent=!!(value && (
+    (Array.isArray(value.entries) && value.entries.length) ||
+    (Array.isArray(value.deletedEntryIds) && value.deletedEntryIds.length) ||
+    (value.project && Object.keys(value.project).some(k=>value.project[k]))
+  ));
+  let mergedWithLocal=false;
 
 
   /*
@@ -2684,7 +2917,20 @@ async function loadState(){
         "loadSubmission"
       );
 
-    if(sub && sub.data){
+    if(sub && sub.data && localHasContent){
+
+      /* Laitteen kopio pohjaksi, pilven muutokset yhdistetään sen päälle
+         samoilla säännöillä kuin käytön aikaisessa synkronoinnissa:
+         pilveen viemättömät omat muutokset säilyvät. */
+      await applyLocalState(value);
+      await loadFloorPlan();
+      await mergeRemote(sub);
+      lastRemoteUpdatedAt=sub.updated_at||null;
+      await loadResearchPlanLocal();
+      loadedFromCloud=true;
+      mergedWithLocal=true;
+
+    }else if(sub && sub.data){
 
       if(sub.data.project){
 
@@ -2852,197 +3098,21 @@ async function loadState(){
 
   /*
    * Jos pilvestä ei saatu tietoja,
-   * käytetään IndexedDB:tä.
+   * käytetään laitteen kopiota.
    */
   if(!loadedFromCloud){
-
-    try{
-
-      value=
-        await idbGet(
-          "kenttalomake_state"
-        ) || null;
-
-    }catch(err){
-
-      console.warn(
-        "IndexedDB-lataus epäonnistui",
-        err
-      );
-    }
-
-
-    /*
-     * window.storage.
-     */
-    if(!value && window.storage){
-
-      try{
-
-        const r=
-          await window.storage.get(
-            portableStateKey()
-          );
-
-        value=
-          r && r.value
-            ? JSON.parse(r.value)
-            : null;
-
-      }catch(err){
-
-        console.warn(
-          "window.storage-lataus epäonnistui",
-          err
-        );
-      }
-    }
-
-
-    /*
-     * localStorage.
-     */
-    if(!value){
-
-      try{
-
-        const raw=
-          localStorage.getItem(
-            portableStateKey()
-          );
-
-        if(raw){
-
-          value=JSON.parse(raw);
-        }
-
-      }catch(err){
-
-        console.warn(
-          "localStorage-lataus epäonnistui",
-          err
-        );
-      }
-    }
-
-
     if(value){
-
-      if(value.project){
-
-        project=Object.assign(
-          project,
-          value.project
-        );
-      }
-
-
-      /*
-       * IndexedDB-tilassa photos sisältää Blobit.
-       *
-       * JSON-varmistustilassa kuvilta puuttuu Blob,
-       * jolloin niiden paikallinen alkuperä ei ole enää
-       * saatavilla. Pilveen ladatut kuvat voidaan kuitenkin
-       * ladata myöhemmin.
-       */
-      entries=Array.isArray(value.entries)
-        ? value.entries
-        : [];
-
-      deletedEntryIds=
-        Array.isArray(value.deletedEntryIds)
-          ?value.deletedEntryIds.slice()
-          :[];
-
-      entryOrderDirty=!!value.entryOrderDirty;
-
-
-      for(const e of entries){
-
-        if(!Array.isArray(e.photos)){
-          e.photos=[];
-        }
-
-
-        for(const p of e.photos){
-
-          if(p.blob instanceof Blob){
-
-            if(!p.url){
-              p.url=URL.createObjectURL(p.blob);
-            }
-
-          }else if(p.path && window.SubmissionSync){
-
-            try{
-
-              const blob=
-                await window.SubmissionSync.downloadPhoto(
-                  p.path
-                );
-
-              p.blob=blob;
-              p.url=URL.createObjectURL(blob);
-
-            }catch(err){
-
-              console.warn(
-                "Paikallisen kuvan palautus epäonnistui",
-                p.path
-              );
-            }
-          }
-        }
-      }
-
-
-      if(value.view){
-        view=value.view;
-      }
-
-      if("editingEntry" in value){
-
-        editingEntry=value.editingEntry;
-
-        /*
-         * Varmistetaan, että editingEntry viittaa
-         * entries-taulukon oikeaan objektiin.
-         */
-        if(editingEntry){
-
-          const realEntry=
-            entries.find(
-              e=>e.id===editingEntry.id
-            );
-
-          if(realEntry){
-
-            editingEntry=realEntry;
-          }
-        }
-      }
-
-      if("editingIsNew" in value){
-
-        editingIsNew=value.editingIsNew;
-      }
-
-
+      await applyLocalState(value);
       await loadFloorPlan();
-
       toast(
         "Ei pilviyhteyttä juuri nyt — näytetään laitteelle tallennettu kopio."
       );
-
       setSyncStatus(
         "Offline – paikallinen kopio",
         "warn"
       );
-
     }else{
-
       await loadFloorPlan();
-
       setSyncStatus(
         "Uusi lomake",
         ""
@@ -3072,6 +3142,15 @@ async function loadState(){
 
 
   render();
+
+  if(mergedWithLocal){
+    if(hasUnsyncedLocalChanges()){
+      setSyncStatus("Viedään laitteen muutoksia pilveen…","warn");
+      setTimeout(()=>{autosave(false);},300);
+    }else{
+      setSyncStatus("Ladattu pilvestä","ok");
+    }
+  }
 }
 
 

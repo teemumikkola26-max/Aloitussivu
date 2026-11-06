@@ -26,6 +26,60 @@ window.SubmissionSync = (function(){
     return data.user.id;
   }
 
+  /* ---------- Laitteen oma luettelo keskeneräisistä lomakkeista ----------
+     KORJAUS: aloitussivu hakee keskeneräiset lomakkeet pilvestä, joten ilman
+     verkkoa (tai jos lomake ei ole vielä kertaakaan ehtinyt pilveen) niitä ei
+     löytynyt lainkaan ja tiedot jäivät laitteelle näkymättömiin. Luettelo
+     pidetään käyttäjäkohtaisesti localStoragessa. */
+  const LOCAL_DRAFTS_PREFIX = "local_drafts_v1_";
+
+  async function localDraftsKey(){
+    let uid = "anon";
+    try{
+      const { data } = await client().auth.getSession();
+      if (data && data.session && data.session.user) uid = data.session.user.id;
+    }catch(e){}
+    return LOCAL_DRAFTS_PREFIX + uid;
+  }
+  function readDrafts(key){
+    try{ return JSON.parse(localStorage.getItem(key) || "{}") || {}; }catch(e){ return {}; }
+  }
+  function writeDrafts(key, map){
+    try{ localStorage.setItem(key, JSON.stringify(map)); }catch(e){ console.warn("Paikallisen luettelon tallennus epäonnistui", e); }
+  }
+  /* Kutsutaan aina, kun lomake tallennetaan laitteelle. */
+  async function rememberLocalDraft(info){
+    if (!info || !info.id) return;
+    const key = await localDraftsKey();
+    const map = readDrafts(key);
+    const prev = map[info.id] || {};
+    map[info.id] = {
+      id: info.id,
+      form_key: info.formKey || prev.form_key || "",
+      form_label: info.formLabel || prev.form_label || "",
+      title: (info.title !== undefined ? info.title : prev.title) || "",
+      inspector_name: (info.inspectorName !== undefined ? info.inspectorName : prev.inspector_name) || "",
+      updated_at: new Date().toISOString(),
+      pending: info.pending === undefined ? true : !!info.pending
+    };
+    writeDrafts(key, map);
+  }
+  async function markLocalDraftSynced(id){
+    const key = await localDraftsKey();
+    const map = readDrafts(key);
+    if (map[id]){ map[id].pending = false; writeDrafts(key, map); }
+  }
+  async function forgetLocalDraft(id){
+    const key = await localDraftsKey();
+    const map = readDrafts(key);
+    if (map[id]){ delete map[id]; writeDrafts(key, map); }
+  }
+  async function listLocalDrafts(){
+    const key = await localDraftsKey();
+    const map = readDrafts(key);
+    return Object.keys(map).map(k => map[k]);
+  }
+
   /* ---------- Lomaketäytöt (submissions-taulu) ---------- */
 
   async function loadSubmission(id){
@@ -55,6 +109,9 @@ window.SubmissionSync = (function(){
       res = await client().from("submissions").upsert(row).select().single();
     }
     if (res.error) throw res.error;
+    /* Tallennus aloitettiin ennen mahdollisia uusia muutoksia; lomake itse
+       merkitsee luettelon uudelleen odottavaksi seuraavassa tallennuksessa. */
+    try{ await markLocalDraftSynced(id); }catch(e){}
     return res.data;
   }
 
@@ -72,6 +129,7 @@ window.SubmissionSync = (function(){
     try{ await client().from("submission_locks").delete().eq("submission_id", id); }catch(e){}
     const { error } = await client().from("submissions").delete().eq("id", id);
     if (error) throw error;
+    try{ await forgetLocalDraft(id); }catch(e){}
   }
 
   async function listMySubmissions(formKey){
@@ -152,6 +210,7 @@ window.SubmissionSync = (function(){
   return {
     newId, getUserId, deviceId,
     loadSubmission, saveSubmission, deleteSubmission, listMySubmissions,
+    rememberLocalDraft, markLocalDraftSynced, forgetLocalDraft, listLocalDrafts,
     uploadPhoto, downloadPhoto, deletePhotoFile,
     getLock, touchLock, releaseLock
   };

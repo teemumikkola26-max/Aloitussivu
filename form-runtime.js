@@ -325,6 +325,14 @@ async function doSave(){
     }
   }
   setSaveIndicator("Tallennettu laitteelle…");
+  /* KORJAUS: lomake näkyy aloitussivulla myös ilman verkkoa. */
+  if (window.SubmissionSync && window.SubmissionSync.rememberLocalDraft){
+    window.SubmissionSync.rememberLocalDraft({
+      id: SUBMISSION_ID, formKey: FORM_ID,
+      formLabel: (DEF && DEF.meta && DEF.meta.title) || "Lomake",
+      title: deriveTitle(), inspectorName: deriveInspector(), pending: true
+    }).catch(() => {});
+  }
   syncToCloud();
 }
 

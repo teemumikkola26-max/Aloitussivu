@@ -388,16 +388,42 @@ async function renderDrafts(){
   const wrap = document.getElementById("draftsList");
   const label = document.getElementById("draftsLabel");
   let rows;
+  let cloudError = null;
   try{
     rows = await window.SubmissionSync.listMySubmissions();
   }catch(err){
+    cloudError = err;
+    rows = [];
+  }
+  /* KORJAUS: mukaan myös laitteelle tallennetut lomakkeet, jotka puuttuvat
+     pilvestä (ei verkkoa tai ei vielä synkronoitu). */
+  let localDrafts = [];
+  try{ localDrafts = await window.SubmissionSync.listLocalDrafts(); }catch(e){}
+  const cloudIds = {};
+  rows.forEach(r => { cloudIds[r.id] = r; });
+  localDrafts.forEach(ld => {
+    const inCloud = cloudIds[ld.id];
+    if (inCloud){
+      if (ld.pending) inCloud._localPending = true;
+    }else if (cloudError || ld.pending){
+      rows.push(Object.assign({}, ld, { _localOnly: true }));
+    }
+  });
+  rows.sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")));
+  if (cloudError && rows.length === 0){
     label.style.display = "";
     wrap.innerHTML = '<div class="empty-state">Kesken olevien lomakkeiden haku epäonnistui. ' +
-      friendlyErr(err).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])) +
+      friendlyErr(cloudError).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])) +
       '</div>';
     return;
   }
   wrap.innerHTML = "";
+  if (cloudError){
+    const note = document.createElement("div");
+    note.className = "empty-state";
+    note.textContent = "Ei pilviyhteyttä — näytetään tälle laitteelle tallennetut lomakkeet.";
+    wrap.appendChild(note);
+  }
   if (!rows || rows.length === 0){
     label.style.display = "none";
     return;
@@ -433,7 +459,8 @@ async function renderDrafts(){
     card.innerHTML =
       '<div class="dc-body">' +
         '<div class="dc-title">' + escapeHtmlLite(sub.title || "(nimetön)") + '</div>' +
-        '<div class="dc-meta">' + escapeHtmlLite(sub.form_label || sub.form_key) + ' · päivitetty ' + formatUpdatedAt(sub.updated_at) + '</div>' +
+        '<div class="dc-meta">' + escapeHtmlLite(sub.form_label || sub.form_key) + ' · päivitetty ' + formatUpdatedAt(sub.updated_at) +
+          ((sub._localOnly || sub._localPending) ? ' · <strong>vain tällä laitteella, odottaa synkronointia</strong>' : '') + '</div>' +
       '</div>' +
       '<div class="dc-actions">' +
         '<button type="button" class="dc-btn dc-btn-primary" data-action="resume">Jatka</button>' +
@@ -444,6 +471,10 @@ async function renderDrafts(){
     });
     card.querySelector('[data-action="delete"]').addEventListener("click", async () => {
       if (!confirm('Poistetaanko lomake "' + (sub.title || "(nimetön)") + '" pysyvästi? Kaikki tiedot ja valokuvat häviävät.')) return;
+      if (sub._localOnly){
+        alert("Tämä lomake on vielä vain tällä laitteella. Avaa se verkkoyhteyden ollessa päällä, jotta se synkronoituu, ja poista vasta sitten.");
+        return;
+      }
       try{
         await window.SubmissionSync.deleteSubmission(sub.id);
         renderDrafts();
