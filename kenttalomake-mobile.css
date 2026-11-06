@@ -1,0 +1,133 @@
+/* =========================================================================
+   KENTTALOMAKE-MOBILE.CSS
+   PBM-väriteema ja puhelinkäytön parannukset kenttälomakkeelle.
+   Ladataan kenttalomake.html:n omien tyylien jälkeen, joten nämä säännöt
+   ohittavat vanhat.
+   ========================================================================= */
+:root{
+  --ink:#1c2430;
+  --paper:#f4f2ec;
+  --line:#dcd7cb;
+  --line-strong:#b9b2a0;
+  --red:#ED1C24;            /* logon punainen: korosteet */
+  --safety:#C8102E;         /* painikkeet: tummempi punainen, valkoinen teksti luettava */
+  --safety-dark:#A50D24;
+  --brand:#262626;
+  --muted:#4a5568;
+  --tap:44px;
+}
+
+body{ font-size:16px; line-height:1.45 }
+
+/* ---- Yläpalkki: yksi rivi (takaisin, otsikko, tallennustila) ---- */
+.topbar{
+  background:#fff; color:var(--ink);
+  display:flex; align-items:center; gap:4px;
+  min-height:56px; padding:4px 8px 4px 4px;
+  border-bottom:4px solid var(--red);
+  box-shadow:0 1px 4px rgba(0,0,0,.06);
+}
+.tb-back{
+  flex:0 0 var(--tap); height:var(--tap); border:none; background:none; color:var(--ink);
+  font-size:28px; line-height:1; border-radius:10px; cursor:pointer; padding:0;
+}
+.tb-back:active{ background:#f2f0ea }
+.tb-logo{ flex:0 0 32px; width:32px; height:32px; margin-right:4px }
+.topbar h1{
+  flex:1; min-width:0; margin:0; font-size:17px; font-weight:700; letter-spacing:0;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.sync-status{
+  flex:0 0 auto; border:none; border-radius:99px; padding:6px 10px; min-height:34px;
+  font:inherit; font-size:13px; font-weight:700; cursor:pointer; text-align:center;
+  background:#eceae4; color:#3a3a3a; max-width:46vw; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+.sync-status.ok{ background:#e6f0ea; color:#2f6b3a }
+.sync-status.warn{ background:#fbf1de; color:#8a5a00; box-shadow:inset 0 0 0 1px #e3c27a }
+.sync-status.error{ background:#fdecea; color:#a3271b; box-shadow:inset 0 0 0 1px #f0b4ad }
+.step-back{ display:none !important }
+
+/* ---- Kortit ja tekstit: isompi teksti ulkona luettavaksi ---- */
+.card{ border-radius:12px }
+.card h2{
+  font-family:inherit; font-size:15px; letter-spacing:0; text-transform:none;
+  color:var(--brand); font-weight:700;
+}
+label{ font-size:15px; font-weight:700; margin:14px 0 6px; color:#2a2f38 }
+.hint{ font-size:13.5px; color:var(--muted); margin-top:4px }
+input[type=text],input[type=number],input[type=date],select,textarea{
+  min-height:48px; padding:11px 12px; border-radius:10px; border-color:var(--line-strong);
+}
+textarea{ min-height:96px }
+.badge{ background:var(--safety); font-family:inherit; font-size:12px; border-radius:99px; padding:2px 8px }
+
+/* ---- Painikkeet: vähintään 44 px kosketusalue ---- */
+.btn{ min-height:48px; border-radius:10px; font-size:16px }
+.btn-sm{ min-height:44px; padding:8px 14px; font-size:15px; border-radius:10px }
+.btn-ghost{ color:var(--safety) }
+.btn-danger{ color:var(--safety); border-color:#e3b3ab }
+.field-hint-btn{ width:36px; height:36px; top:-8px; font-size:.95rem }
+.field-hint-btn-inline{ width:36px; height:36px }
+.field-guide-btn{ min-height:40px; padding:6px 14px; font-size:14px; margin-top:4px }
+.chip{ min-height:48px; font-size:15px }
+.chip[aria-checked=true]{ background:var(--safety); border-color:var(--safety) }
+.method-tile{ min-height:72px; font-size:15px; border-radius:12px }
+.method-tile .num{ font-family:inherit; font-size:12px; font-weight:700 }
+
+/* ---- Sanelu: mikrofoni kentän sisällä ---- */
+.has-dictate>label{ padding-right:44px }
+.dictate-wrap{ position:relative }
+.dictate-wrap>input,.dictate-wrap>textarea{ padding-right:54px }
+.dictate-wrap>.dictate-btn,
+.cap-input-wrap .dictate-btn{
+  position:absolute; top:4px; right:4px; margin:0;
+  width:var(--tap); height:var(--tap); border:none; background:none; font-size:20px;
+}
+.dictate-btn.rec{ background:var(--error); color:#fff; border-radius:50% }
+
+/* ---- Kohteen tiedot tiivistettynä ---- */
+.kohde-summary{ display:flex; gap:10px; align-items:flex-start }
+.kohde-summary .txt{ flex:1; min-width:0 }
+.kohde-summary .txt div{ font-size:14px; color:var(--muted); overflow-wrap:anywhere }
+.kohde-summary .ok{ display:inline-block; background:#e6f0ea; color:#2f6b3a; border-radius:6px; padding:0 8px; font-size:13px; margin-left:6px }
+.linkbtn{ border:none; background:none; color:#1d4ed8; font:inherit; font-weight:700; font-size:15px; min-height:var(--tap); padding:0 6px; cursor:pointer }
+
+/* ---- Liitteet yhdessä avattavassa kortissa ---- */
+details.att{ padding:0 }
+details.att>summary{ list-style:none; cursor:pointer; padding:14px; min-height:52px; display:flex; align-items:center; gap:8px; font-weight:700; color:var(--brand) }
+details.att>summary::-webkit-details-marker{ display:none }
+details.att>summary::after{ content:"▾"; margin-left:auto; color:var(--muted) }
+details.att[open]>summary::after{ content:"▴" }
+details.att>summary .att-chips{ font-weight:400; font-size:13px; color:var(--muted); display:flex; gap:6px; flex-wrap:wrap }
+details.att .att-body{ padding:0 14px 6px }
+details.att .att-body>.card{ border:none; padding:0; border-top:1px solid var(--line); border-radius:0; padding-top:12px }
+
+/* ---- Kirjauslista: koko kortti avaa, toiminnot ⋯-valikossa ---- */
+.entry-card{ display:flex; align-items:center; gap:6px; padding:0; border-left:5px solid var(--safety); border-radius:12px; background:#fff }
+.entry-card .entry-main{ flex:1; min-width:0; padding:12px 4px 12px 12px }
+.entry-title{ font-size:16px; color:var(--brand) }
+.entry-sub{ font-family:inherit; font-size:14px }
+.entry-more{ flex:0 0 var(--tap); height:var(--tap); margin-right:6px; border:none; background:none; font-size:22px; color:var(--muted); border-radius:10px; cursor:pointer }
+.entry-more:active{ background:#eee }
+.entry-actions{ display:none }
+
+/* ---- Valokuvat: yksi lista (kuva + kuvateksti) ---- */
+.photo-list .photo-cap-row .cap-thumb{ flex:0 0 64px; width:64px; height:64px }
+.photo-add-row{ display:flex; gap:8px; margin-top:8px }
+.photo-add-row .btn{ flex:1 }
+
+/* ---- Alapalkki: piiloon kun näppäimistö on auki ---- */
+.footerbar{ transition:transform .15s ease }
+body.kb-open .footerbar{ transform:translateY(110%) }
+body.kb-open .toast,body.kb-open .snack{ bottom:16px }
+.footer-row .btn.cam{ flex:0 0 64px; font-size:22px; padding:0 }
+.footerbar:empty{ display:none }
+.btn .spin{ width:16px; height:16px; border:2px solid #ccc; border-top-color:var(--ink); border-radius:50%; animation:klspin .8s linear infinite }
+@keyframes klspin{ to{ transform:rotate(360deg) } }
+
+/* ---- Lisää toimintoja ---- */
+.more-menu summary{ display:flex; align-items:center; justify-content:space-between }
+.more-menu summary::after{ content:"▾"; color:var(--muted) }
+.more-menu[open] summary::after{ content:"▴" }
+
+.net-banner{ font-size:14px }

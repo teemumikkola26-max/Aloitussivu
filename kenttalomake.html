@@ -2,7 +2,11 @@
 <html lang="fi" data-inline-logout>
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
 <style>html{visibility:hidden}</style>
 
 <script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("sw.js").catch(function(){});});}</script>
@@ -12,6 +16,9 @@
 <script src="submission-sync.js" defer></script>
 <script src="users.js" defer></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="ui-kit.js"></script>
+<script src="report-template-engine.js"></script>
+<script src="report-templates.js" defer></script>
 <script src="docx-style-engine.js" defer></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
@@ -957,19 +964,18 @@ input:focus,select:focus,textarea:focus{
 .pdfv-msg{color:#ddd;padding:24px;text-align:center;font-size:14px}
 .pdfv-ind{position:absolute;left:50%;transform:translateX(-50%);bottom:calc(14px + env(safe-area-inset-bottom));background:rgba(0,0,0,.7);color:#fff;font-size:12px;padding:4px 10px;border-radius:999px;pointer-events:none}
 </style>
+<link rel="stylesheet" href="kenttalomake-mobile.css">
 </head>
 
 <body>
 
-<div id="bootSplash" style="visibility:visible;position:fixed;inset:0;z-index:99990;background:#233043;color:#f2efe6;display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:15px;">Ladataan lomaketta…</div>
+<div id="bootSplash" style="visibility:visible;position:fixed;inset:0;z-index:99990;background:#fff;color:#262626;border-top:4px solid #ED1C24;display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:15px;">Ladataan lomaketta…</div>
 
 <div class="topbar">
-  <div class="toprow">
-    <a href="index.html">← Omat lomakkeet</a>
-    <div class="sync-status" id="syncStatus" role="status" aria-live="polite">Käynnistetään...</div>
-  </div>
-  <div class="eyebrow">Rakennustutkimus · kenttälomake</div>
+  <button type="button" class="tb-back" id="tbBack" aria-label="Takaisin etusivulle">‹</button>
+  <img class="tb-logo" id="tbLogo" src="pbm-logo.png" alt="PBM">
   <h1 id="topTitle">Kohteen tiedot</h1>
+  <button type="button" class="sync-status" id="syncStatus" aria-live="polite">Käynnistetään</button>
 </div>
 <div class="net-banner" id="netBanner" role="status">Ei verkkoyhteyttä – tiedot tallentuvat laitteelle ja siirtyvät pilveen kun yhteys palaa.</div>
 <div class="wrap" id="app"><div class="loading">Ladataan lomaketta...</div></div>
@@ -1444,6 +1450,8 @@ let project={
   nimi:"",
   osoite:"",
   tilaaja:"",
+  yhteyshenkilo:"",
+  projektinumero:"",
   tutkija:"",
   pvm:""
 };
@@ -1808,9 +1816,25 @@ function setSyncStatus(text,state=""){
 
   if(!elStatus)return;
 
-  elStatus.textContent=text;
+  /* Yläpalkissa lyhyt tila, koko teksti napauttamalla (ja ruudunlukijalle). */
+  const pend=pendingPhotoCount();
+  let short;
+  const t=String(text||"");
+  if(state==="ok")short="✓ Tallennettu";
+  else if(state==="error")short="⚠ Virhe";
+  else if(/viedään|synkronoidaan|tallennetaan|ladataan|käynnistetään/i.test(t))short="⟳ Tallentaa";
+  else if(state==="warn")short=pend?("⚠ "+pend+" kuvaa odottaa"):(navigator.onLine?"⚠ Laitteella":"⚠ Ei verkkoa");
+  else short=t.length>18?t.slice(0,16)+"…":t;
+  elStatus.textContent=short;
+  elStatus.title=text;
+  elStatus.setAttribute("aria-label","Tallennuksen tila: "+text);
+  elStatus.dataset.full=text;
   elStatus.className="sync-status "+state;
 }
+document.addEventListener("click",e=>{
+  const s=e.target.closest&&e.target.closest("#syncStatus");
+  if(s&&s.dataset.full)toast(s.dataset.full);
+});
 
 
 /*
@@ -3209,7 +3233,7 @@ window.addEventListener(
    LOMAKKEEN TYHJENNYS
    ============================================================ */
 
-function confirmClearForm(){
+async function confirmClearForm(){
 
   if(
     !project.nimi &&
@@ -3233,15 +3257,17 @@ function confirmClearForm(){
   }
 
 
-  /* KORJAUS: peruuttamaton toiminto vaatii kirjoitetun vahvistuksen. */
-  const answer=prompt(
-    "Tyhjennetäänkö koko lomake?\n\n"+
-    "Kaikki kohteen tiedot, menetelmät, valokuvat, pohjakuva ja tutkimussuunnitelma "+
-    "poistetaan pysyvästi — myös pilvestä. Tätä ei voi perua.\n\n"+
-    "Vahvista kirjoittamalla sana TYHJENNÄ:"
-  );
-  if(answer===null)return;
-  if(String(answer).trim().toUpperCase()!=="TYHJENNÄ"){
+  /* Peruuttamaton toiminto: kaksi erillistä vahvistusta, turvallinen valinta korostettuna. */
+  if(!(await window.AppUI.confirm({
+    title:"Tyhjennetäänkö koko lomake?",
+    text:"Kaikki kohteen tiedot, kirjaukset, valokuvat, pohjakuva ja tutkimussuunnitelma poistetaan pysyvästi – myös pilvestä.",
+    ok:"Jatka tyhjennystä…",cancel:"Säilytä tiedot",danger:true
+  })))return;
+  if(!(await window.AppUI.confirm({
+    title:"Viimeinen vahvistus",
+    text:"Tyhjennystä ei voi perua. Poistetaanko "+entries.length+" kirjausta ja kaikki kuvat?",
+    ok:"Tyhjennä lomake",cancel:"Säilytä tiedot",danger:true
+  }))){
     toast("Lomaketta ei tyhjennetty");
     return;
   }
@@ -3538,15 +3564,29 @@ async function openPhotoViewer(entry,photo,onChange){
     objUrl=URL.createObjectURL(photo.blob);
     srcUrl=objUrl;
   }
+  /* Kuvaa ei saada näkyviin (esim. pilvihaku epäonnistui): tarjotaan silti poisto. */
+  const offerDelete=async(msg)=>{
+    if(!canEditEntry(entry)){toast(msg);return;}
+    const ok=await window.AppUI.confirm({title:msg,text:"Voit poistaa kuvan kirjauksesta.",ok:"Poista kuva",cancel:"Säilytä",danger:true});
+    if(!ok)return;
+    const i=entry.photos.indexOf(photo);
+    if(i>=0)entry.photos.splice(i,1);
+    if(photo.path && window.SubmissionSync){
+      try{await window.SubmissionSync.deletePhotoFile(photo.path);}catch(err){console.warn(err);}
+    }
+    autosave();
+    if(onChange)onChange();
+    toast("Kuva poistettu");
+  };
   if(!srcUrl){
-    toast("Kuva ei ole saatavilla");
+    offerDelete("Kuva ei ole saatavilla");
     return;
   }
   const img=new Image();
   img.src=srcUrl;
   try{await img.decode();}catch(err){
-    toast("Kuvan avaaminen epäonnistui");
     if(objUrl)URL.revokeObjectURL(objUrl);
+    offerDelete("Kuvan avaaminen epäonnistui");
     return;
   }
   const NW=img.naturalWidth,NH=img.naturalHeight;
@@ -3718,8 +3758,8 @@ async function openPhotoViewer(entry,photo,onChange){
     if(objUrl)URL.revokeObjectURL(objUrl);
     overlay.remove();
   }
-  overlay.querySelector('[data-a="close"]').onclick=()=>{
-    if(shapes.length && !confirm("Hylätäänkö tallentamattomat merkinnät?"))return;
+  overlay.querySelector('[data-a="close"]').onclick=async()=>{
+    if(shapes.length && !(await window.AppUI.confirm({title:"Hylätäänkö piirretyt merkinnät?",text:"Merkintöjä ei ole tallennettu kuvaan.",ok:"Hylkää merkinnät",cancel:"Jatka piirtämistä",danger:true})))return;
     closeViewer();
   };
   overlay.querySelector('[data-a="save"]').onclick=async()=>{
@@ -3729,7 +3769,7 @@ async function openPhotoViewer(entry,photo,onChange){
     if(res==="download")toast("Kuva ladattu laitteelle");
   };
   overlay.querySelector('[data-a="del"]').onclick=async()=>{
-    if(!confirm("Poistetaanko kuva?"))return;
+    if(!(await window.AppUI.confirm({title:"Poistetaanko kuva?",text:"Kuva ja sen kuvateksti poistetaan kirjauksesta.",ok:"Poista kuva",cancel:"Säilytä kuva",danger:true})))return;
     const i=entry.photos.indexOf(photo);
     if(i>=0)entry.photos.splice(i,1);
     if(photo.path && window.SubmissionSync){
@@ -3968,7 +4008,16 @@ function attachDictation(host,input){
   if(!SpeechRec)return;
   const btn=el(`<button type="button" class="dictate-btn" aria-label="Sanele" title="Sanele">🎤</button>`);
   host.classList.add("has-dictate");
-  host.appendChild(btn);
+  /* Mikrofoni kentän sisälle oikeaan reunaan (ei otsikon viereen). */
+  if(input && input.parentNode===host && !host.classList.contains("cap-input-wrap")){
+    const wrap=document.createElement("div");
+    wrap.className="dictate-wrap";
+    host.insertBefore(wrap,input);
+    wrap.appendChild(input);
+    wrap.appendChild(btn);
+  }else{
+    host.appendChild(btn);
+  }
   window.AppDictation.bind(btn,input,{toast});
 }
 
@@ -3976,10 +4025,73 @@ let guardPushed=false;
 let refreshPhotoCard=()=>{};
 let programmaticBack=false;
 
+let topBack=null;
 function render(){
+  topBack=null;
   _renderView();
   syncHistory();
   updateFooterHeight();
+  updateTopBar();
+  saveMethodsSnapshot();
+}
+
+/* Yläpalkin takaisin-nuoli: etusivulla etusivulle, muualla edelliseen näkymään. */
+function updateTopBar(){
+  const b=document.getElementById("tbBack");
+  const logo=document.getElementById("tbLogo");
+  if(!b)return;
+  if(view==="project"){
+    b.setAttribute("aria-label","Takaisin etusivulle");
+    if(logo)logo.style.display="";
+  }else{
+    b.setAttribute("aria-label",(topBack&&topBack.label)||"Takaisin");
+    if(logo)logo.style.display="none";
+  }
+}
+document.addEventListener("DOMContentLoaded",()=>{
+  const b=document.getElementById("tbBack");
+  if(b)b.onclick=async()=>{
+    if(window.AppUI&&window.AppUI.isOpen())return;
+    if(view==="project"){
+      try{await autosave(true);}catch(err){}
+      window.location.href="index.html";
+      return;
+    }
+    if(guardPushed)history.back();
+    else if(topBack)topBack.fn();
+  };
+});
+
+/* Alapalkki piiloon, kun kenttään kirjoitetaan (näppäimistö auki). */
+const KB_INPUT_SEL='input[type=text],input[type=number],input[type=date],input:not([type]),textarea,select';
+document.addEventListener("focusin",e=>{
+  if(e.target.matches&&e.target.matches(KB_INPUT_SEL)&&e.target.closest("#app"))document.body.classList.add("kb-open");
+});
+if(window.visualViewport){
+  /* Android: näppäimistön sulkeminen ei aina poista kohdistusta kentästä. */
+  window.visualViewport.addEventListener("resize",()=>{
+    const open=window.innerHeight-window.visualViewport.height>150;
+    if(!open)document.body.classList.remove("kb-open");
+    else{
+      const a=document.activeElement;
+      if(a&&a.matches&&a.matches(KB_INPUT_SEL)&&a.closest("#app"))document.body.classList.add("kb-open");
+    }
+  });
+}
+document.addEventListener("focusout",()=>{
+  setTimeout(()=>{
+    const a=document.activeElement;
+    if(!(a&&a.matches&&a.matches(KB_INPUT_SEL)&&a.closest("#app")))document.body.classList.remove("kb-open");
+  },60);
+});
+
+/* Raporttipohjien hallintasivu käyttää tätä kopiota menetelmistä pohjien tarkistukseen. */
+let _methodsSnap="";
+function saveMethodsSnapshot(){
+  try{
+    const s=JSON.stringify(METHODS.map(m=>({id:m.id,name:m.name,fields:(m.fields||[]).map(f=>({id:f.id,label:f.label,type:f.type}))}))); 
+    if(s!==_methodsSnap){localStorage.setItem("kenttalomake_methods_snapshot_v1",s);_methodsSnap=s;}
+  }catch(err){}
 }
 
 function syncHistory(){
@@ -4004,7 +4116,7 @@ function entryHasData(e){
   return has || (e.photos||[]).length>0 || !!e.marker;
 }
 
-function leaveEntryForm(){
+async function leaveEntryForm(){
   if(editingIsNew && entryHasData(editingEntry)){
     /*
      * KORJAUS: uutta menetelmää ei enää hylätä yhdellä painalluksella.
@@ -4017,24 +4129,28 @@ function leaveEntryForm(){
     if(m && !missing.length){
       saveEntryForm();
       if(view!=="entryForm"){
-        toast("Menetelmä tallennettiin automaattisesti");
+        toast("Kirjaus tallennettiin automaattisesti");
         return true;
       }
       return false;
     }
-    if(confirm(
-      "Menetelmää ei ole vielä tallennettu, koska siitä puuttuu pakollisia tietoja"+
-      (missing.length?" ("+missing.length+")":"")+".\n\n"+
-      "Paina OK palataksesi täydentämään tietoja.\n"+
-      "Paina Peruuta vain, jos haluat hylätä menetelmän."
-    )){
+    const choice=await window.AppUI.choose({
+      title:"Kirjausta ei ole tallennettu",
+      text:"Kirjauksesta puuttuu "+missing.length+" pakollinen tieto. Täydennä tiedot tai hylkää kirjaus.",
+      actions:[
+        {label:"Jatka täyttämistä",value:"fill",kind:"safe"},
+        {label:"Hylkää kirjaus…",value:"discard",kind:"plain"}
+      ]
+    });
+    if(choice!=="discard"){
       if(missing.length)showFieldErrors(missing.map(f=>[f,"Pakollinen tieto puuttuu"]));
       return false;
     }
-    if(!confirm(
-      "Hylätäänkö menetelmä varmasti?\n\n"+
-      "Syötetyt tiedot ja kuvat poistetaan, eikä niitä voi palauttaa."
-    )){
+    if(!(await window.AppUI.confirm({
+      title:"Hylätäänkö kirjaus?",
+      text:"Syötetyt tiedot ja kuvat poistetaan, eikä niitä voi palauttaa.",
+      ok:"Hylkää kirjaus",cancel:"Palaa kirjaukseen",danger:true
+    }))){
       return false;
     }
     (editingEntry.photos||[]).forEach(p=>{
@@ -4050,7 +4166,7 @@ function leaveEntryForm(){
   return true;
 }
 
-function navBack(){
+async function navBack(){
   if(view==="methodSelect"){
     view="project";
   }else if(view==="methodsManage"){
@@ -4061,11 +4177,11 @@ function navBack(){
       const orig=METHODS.find(x=>x.id===editingMethod.id);
       const dirty=editingMethodIsNew ||
         !orig || JSON.stringify(orig)!==JSON.stringify(editingMethod);
-      if(dirty && !confirm(
-        "Menetelmän muutoksia ei ole tallennettu.\n\n"+
-        "Paina OK hylätäksesi muutokset.\n"+
-        "Paina Peruuta jatkaaksesi muokkausta."
-      )){
+      if(dirty && !(await window.AppUI.confirm({
+        title:"Hylätäänkö menetelmän muutokset?",
+        text:"Menetelmän muutoksia ei ole tallennettu.",
+        ok:"Hylkää muutokset",cancel:"Jatka muokkausta",danger:true
+      }))){
         syncHistory();
         return;
       }
@@ -4075,7 +4191,7 @@ function navBack(){
     editingMethodIsNew=false;
     view="methodsManage";
   }else if(view==="entryForm"){
-    if(!leaveEntryForm()){
+    if(!(await leaveEntryForm())){
       syncHistory();
       return;
     }
@@ -4093,6 +4209,11 @@ window.addEventListener("popstate",()=>{
     return;
   }
   if(!guardPushed)return;
+  /* Oma valikko tai vahvistus auki: pysytään sivulla (selaimen confirm esti tämän ennen). */
+  if(window.AppUI && window.AppUI.isOpen()){
+    history.pushState({kl:1},"");
+    return;
+  }
   guardPushed=false;
   navBack();
 });
@@ -4244,17 +4365,14 @@ function _renderView(){
 
   if(view==="project"){
 
-    title.textContent="Kohteen tiedot";
+    title.textContent=(project.nimi||"").trim()||"Kohteen tiedot";
 
     app.appendChild(
       renderProjectCard()
     );
 
     app.appendChild(
-      renderResearchPlanCard()
-    );
-    app.appendChild(
-      renderFloorPlanCard()
+      renderAttachmentsCard()
     );
 
     app.appendChild(
@@ -4265,10 +4383,10 @@ function _renderView(){
     footer.innerHTML=
       entries.length
         ?'<div class="footer-row">'+
-          '<button class="btn btn-primary" id="btnAddMethod">+ Lisää menetelmä</button>'+
-          '<button class="btn btn-outline" id="btnExport">Word-muistiinpano</button>'+
+          '<button class="btn btn-primary" id="btnAddMethod">+ Uusi kirjaus</button>'+
+          '<button class="btn btn-outline" id="btnExport">⬇ Word</button>'+
           '</div>'
-        :'<button class="btn btn-primary btn-block" id="btnAddMethod">+ Lisää menetelmä</button>';
+        :'<button class="btn btn-primary btn-block" id="btnAddMethod">+ Uusi kirjaus</button>';
     document
       .getElementById("btnAddMethod")
       .onclick=()=>{
@@ -4300,17 +4418,7 @@ function _renderView(){
       planBtnMS
     );
 
-    footer.innerHTML=
-      '<button class="btn btn-ghost btn-block" id="btnManageMethods">'+
-      '⚙ Muokkaa menetelmiä'+
-      '</button>';
-
-    document
-      .getElementById("btnManageMethods")
-      .onclick=()=>{
-        view="methodsManage";
-        render();
-      };
+    /* "Muokkaa menetelmiä" on Lisää toimintoja -valikossa, ettei sitä paineta vahingossa kentällä. */
   }
 
 
@@ -4355,14 +4463,13 @@ function _renderView(){
       .getElementById("btnResetMethods")
       .onclick=async ()=>{
         if(
-          confirm(
-            "Palautetaanko oletusmenetelmät?\n\n"+
-            "Kaikki omat ja muokatut menetelmät korvataan "+
-            "sovelluksen alkuperäisillä menetelmillä. Jo tallennettuja "+
-            "kirjattuja menetelmätuloksia tämä ei poista, mutta jos "+
-            "poistettu menetelmä oli niiden pohjana, ne eivät enää "+
-            "löydy uudelleenmuokattavaksi."
-          )
+          await window.AppUI.confirm({
+            title:"Palautetaanko oletusmenetelmät?",
+            text:"Kaikki omat ja muokatut menetelmät korvataan sovelluksen alkuperäisillä menetelmillä. "+
+              "Jo tehtyjä kirjauksia tämä ei poista, mutta jos poistettu menetelmä oli niiden pohjana, "+
+              "niitä ei voi enää avata muokattavaksi.",
+            ok:"Palauta oletukset",cancel:"Peruuta",danger:true
+          })
         ){
           const oldGuides=[].concat(...METHODS.map(methodGuides));
           METHODS=cloneMethods(DEFAULT_METHODS);
@@ -4437,12 +4544,10 @@ function _renderView(){
 
     app.appendChild(
       renderBack(
-        ()=>{
-          if(leaveEntryForm())render();
+        async()=>{
+          if(await leaveEntryForm())render();
         },
-        editingIsNew
-          ?"Vaihda menetelmä"
-          :"Takaisin"
+        "Takaisin kirjauksiin"
       )
     );
 
@@ -4452,48 +4557,50 @@ function _renderView(){
     );
 
 
+    const canEdit=editingIsNew||canEditEntry(editingEntry);
     footer.innerHTML=
-      '<button class="btn btn-primary btn-block" id="btnSaveEntry">'+
-      (editingIsNew?'Tallenna menetelmä':(canEditEntry(editingEntry)?'Valmis':'Sulje'))+
-      '</button>'+
-      (editingIsNew
-        ?''
-        :(canEditEntry(editingEntry)
-          ?'<div class="hint" style="text-align:center;margin-top:6px;">Muutokset tallentuvat automaattisesti</div>'
-          :''));
+      '<div class="footer-row">'+
+      (canEdit
+        ?'<label class="btn btn-outline cam" aria-label="Ota kuva kameralla" title="Ota kuva kameralla">📷'+
+          '<input type="file" accept="image/*" capture="environment" style="display:none;"></label>'
+        :'')+
+      '<button class="btn btn-primary" id="btnSaveEntry">'+
+      (editingIsNew?'Tallenna kirjaus':(canEditEntry(editingEntry)?'Valmis':'Sulje'))+
+      '</button></div>';
     document
       .getElementById("btnSaveEntry")
       .onclick=saveEntryForm;
+    const camIn=footer.querySelector(".cam input");
+    if(camIn){
+      camIn.onchange=e=>{
+        const fs=[...(e.target.files||[])];
+        e.target.value="";
+        if(fs.length)addPhotos(fs,true);
+      };
+      if(window.AppPerm)window.AppPerm.guardFileInput(camIn,"camera");
+    }
   }
 }
 
 
 function renderBack(fn,label){
-  const d=
-    el(
-      `<button type="button" class="step-back">
-        ‹ ${escapeHtml(label||"Takaisin")}
-      </button>`
-    );
-  d.onclick=()=>{
-    if(guardPushed){
-      history.back();
-    }else{
-      fn();
-    }
-  };
-  return d;
+  /* Takaisin-toiminto on yläpalkin nuolessa (ei erillistä painiketta sisällössä). */
+  topBack={fn,label:label||"Takaisin"};
+  return document.createComment("takaisin");
 }
 
 function renderMoreMenu(){
   const d=el(`
     <details class="card more-menu">
-      <summary>⋯ Lisää toimintoja</summary>
+      <summary>Lisää toimintoja</summary>
       <div class="more-body">
         <label class="setting-row"><input type="checkbox" id="chkDeviceSave"> Tallenna kamerakuvat myös laitteelle</label>
-        <button type="button" class="btn btn-outline btn-block" id="btnStyle">🎨 Muokkaa Word-ulkoasua</button>
+        <button type="button" class="btn btn-outline btn-block" id="btnSaveAllPhotos" style="display:none;">⬇ Tallenna kaikki kuvat laitteelle</button>
+        <button type="button" class="btn btn-outline btn-block" id="btnManageMethods">⚙ Muokkaa menetelmiä</button>
+        <button type="button" class="btn btn-outline btn-block" id="btnTemplates">📄 Raporttipohjat (Word)</button>
+        <button type="button" class="btn btn-outline btn-block" id="btnStyle">🎨 Kenttämuistiinpanon ulkoasu</button>
         <button type="button" class="btn btn-outline btn-block" id="btnLogout">Kirjaudu ulos</button>
-        <button type="button" class="btn btn-danger btn-block" id="btnClearForm" style="margin-top:10px;">Tyhjennä koko lomake</button>
+        <button type="button" class="btn btn-danger btn-block" id="btnClearForm" style="margin-top:10px;">Tyhjennä koko lomake…</button>
       </div>
     </details>
   `);
@@ -4506,8 +4613,29 @@ function renderMoreMenu(){
       "&back="+
       encodeURIComponent("kenttalomake.html");
   };
+  d.querySelector("#btnManageMethods").onclick=()=>{
+    view="methodsManage";
+    render();
+  };
+  d.querySelector("#btnTemplates").onclick=async()=>{
+    try{await autosave(true);}catch(err){}
+    window.location.href="raporttipohjat.html";
+  };
+  const totalSavable=entries.reduce(
+    (n,e)=>n+(e.photos||[]).filter(p=>p.blob instanceof Blob).length,0
+  );
+  const saveAllBtn=d.querySelector("#btnSaveAllPhotos");
+  if(totalSavable>0){
+    saveAllBtn.style.display="";
+    saveAllBtn.textContent="⬇ Tallenna kaikki kuvat laitteelle ("+totalSavable+")";
+    saveAllBtn.onclick=()=>saveEntryPhotosToDevice(entries.slice(),saveAllBtn);
+  }
   d.querySelector("#btnLogout").onclick=async()=>{
-    if(!confirm(window.__logoutConfirmText?window.__logoutConfirmText():"Kirjaudutaanko ulos?"))return;
+    if(!(await window.AppUI.confirm({
+      title:"Kirjaudutaanko ulos?",
+      text:window.__logoutConfirmText?window.__logoutConfirmText():"",
+      ok:"Kirjaudu ulos",cancel:"Peruuta"
+    })))return;
     try{await autosave(true);}catch(err){}
     try{await window.__supabaseClient.auth.signOut();}catch(err){toast("Uloskirjautuminen epäonnistui");}
   };
@@ -4563,7 +4691,30 @@ window.addEventListener("appusers:changed",()=>{
   if(sel)fillTutkijaSelect(sel);
 });
 
+let kohdeOpen=null;
 function renderProjectCard(){
+
+  const ready=!!((project.nimi||"").trim() && (project.tutkija||"").trim());
+  /* Oletus: tiivistetty, kun nimi ja tutkija on täytetty. Kun käyttäjä alkaa
+     muokata kenttiä tai painaa Muokkaa/Valmis, tila on hänen valintansa,
+     ettei lomake sulkeudu kesken täytön. */
+  const open=kohdeOpen===null?!ready:kohdeOpen;
+  if(ready && !open){
+    const pv=project.pvm?project.pvm.split("-").reverse().map(x=>String(+x)).join("."):"";
+    const s=el(`
+      <div class="card kohde-summary">
+        <div class="txt">
+          <h2 style="margin:0 0 2px;justify-content:flex-start;">Kohde <span class="ok">✓</span></h2>
+          ${project.osoite?`<div>${escapeHtml(project.osoite)}</div>`:""}
+          ${project.tilaaja?`<div>${escapeHtml(project.tilaaja)}</div>`:""}
+          <div>${escapeHtml(project.tutkija)}${pv?" · "+escapeHtml(pv):""}${project.projektinumero?" · "+escapeHtml(project.projektinumero):""}</div>
+        </div>
+        <button type="button" class="linkbtn">Muokkaa</button>
+      </div>
+    `);
+    s.querySelector(".linkbtn").onclick=()=>{kohdeOpen=true;render();};
+    return s;
+  }
 
   const c=
     el(`
@@ -4582,6 +4733,15 @@ function renderProjectCard(){
           placeholder="esim. Asunto Oy Kotikuja 3"
         >
 
+        <label for="p_osoite">Osoite</label>
+
+        <input
+          type="text"
+          id="p_osoite"
+          autocomplete="off"
+          placeholder="Katuosoite, postinumero ja kunta"
+        >
+
         <label for="p_tilaaja">Tilaaja</label>
 
         <input
@@ -4589,6 +4749,24 @@ function renderProjectCard(){
           id="p_tilaaja"
           autocomplete="off"
           placeholder="Tilaajan nimi"
+        >
+
+        <label for="p_yhteys">Tilaajan yhteyshenkilö</label>
+
+        <input
+          type="text"
+          id="p_yhteys"
+          autocomplete="off"
+          placeholder="Nimi, titteli, puhelin"
+        >
+
+        <label for="p_projnro">Projektinumero</label>
+
+        <input
+          type="text"
+          id="p_projnro"
+          autocomplete="off"
+          placeholder="esim. 26XXXX"
         >
 
         <label class="req" for="p_tutkija">
@@ -4605,13 +4783,27 @@ function renderProjectCard(){
           autocomplete="off"
         >
 
+        <button type="button" class="btn btn-outline btn-block" id="p_done" style="margin-top:14px;">Valmis</button>
+
       </div>
     `);
+  const doneBtn=c.querySelector("#p_done");
+  if(doneBtn)doneBtn.onclick=()=>{
+    if(!(project.nimi||"").trim()||!(project.tutkija||"").trim()){
+      toast("Täytä kohteen nimi ja tutkija");
+      return;
+    }
+    kohdeOpen=false;
+    render();
+  };
 
 
   [
     ["p_nimi","nimi"],
+    ["p_osoite","osoite"],
     ["p_tilaaja","tilaaja"],
+    ["p_yhteys","yhteyshenkilo"],
+    ["p_projnro","projektinumero"],
     ["p_tutkija","tutkija"],
     ["p_pvm","pvm"]
   ].forEach(([id,k])=>{
@@ -4638,6 +4830,8 @@ function renderProjectCard(){
 
     input.oninput=e=>{
 
+      if(kohdeOpen===null)kohdeOpen=true;
+
       project[k]=e.target.value;
 
       projectDirty[k]=true;
@@ -4660,6 +4854,30 @@ function renderProjectCard(){
 }
 
 
+/* Tutkimussuunnitelma ja pohjakuva yhdessä kortissa, joka on suljettuna,
+   kun molemmat on jo lisätty (vie muuten paljon tilaa puhelimessa). */
+let attachOpen=null;
+function renderAttachmentsCard(){
+  const both=!!(researchPlanBlob && floorPlanBlob);
+  const open=attachOpen===null?!both:attachOpen;
+  const marked=entries.filter(e=>e.marker).length;
+  const chips=[
+    researchPlanBlob?"📄 Tutkimussuunnitelma ✓":"📄 Ei tutkimussuunnitelmaa",
+    floorPlanBlob?("🗺 Pohjakuva ✓ ("+marked+"/"+entries.length+" merkitty)"):"🗺 Ei pohjakuvaa"
+  ];
+  const d=el(`
+    <details class="card att"${open?" open":""}>
+      <summary><span>Liitteet<span class="att-chips">${chips.map(c=>"<span>"+escapeHtml(c)+"</span>").join("")}</span></span></summary>
+      <div class="att-body"></div>
+    </details>
+  `);
+  d.addEventListener("toggle",()=>{if(d.open!==open)attachOpen=d.open;});
+  const body=d.querySelector(".att-body");
+  body.appendChild(renderResearchPlanCard());
+  body.appendChild(renderFloorPlanCard());
+  return d;
+}
+
 /* ============================================================
    MENETELMÄT
    ============================================================ */
@@ -4669,7 +4887,7 @@ function renderEntriesCard(){
     el(`
       <div class="card">
         <h2>
-          Tehdyt menetelmät
+          Tehdyt kirjaukset
           <span class="badge">${entries.length}</span>
         </h2>
       </div>
@@ -4678,8 +4896,8 @@ function renderEntriesCard(){
     c.appendChild(
       el(`
         <div class="empty">
-          Ei vielä lisättyjä menetelmiä.<br>
-          Aloita painamalla "+ Lisää menetelmä" alta.
+          Ei vielä kirjauksia.<br>
+          Aloita painamalla "+ Uusi kirjaus" alta.
         </div>
       `)
     );
@@ -4698,22 +4916,15 @@ function renderEntriesCard(){
     ].filter(Boolean).join("  ·  ");
     const card=
       el(`
-        <div class="entry-card tappable" role="button" tabindex="0"
-             aria-label="${canEditEntry(entry)?"Muokkaa":"Avaa"}: ${escapeAttribute(m.name)}">
-          <div class="entry-top">
-            <div>
-              <div class="entry-title">${idx+1}. ${escapeHtml(m.name)}</div>
-              <div class="entry-sub">${escapeHtml(entry.values?.paikka||"Ei paikkaa merkitty")}</div>
-              ${meta?`<div class="entry-meta">${escapeHtml(meta)}</div>`:""}
-              ${missing.length?`<span class="entry-warn">⚠ ${missing.length} pakollista puuttuu</span>`:""}
-            </div>
+        <div class="entry-card">
+          <div class="entry-main tappable" role="button" tabindex="0"
+               aria-label="${canEditEntry(entry)?"Muokkaa":"Avaa"}: ${escapeAttribute(m.name)}">
+            <div class="entry-title">${idx+1}. ${escapeHtml(m.name)}</div>
+            <div class="entry-sub">${escapeHtml(entry.values?.paikka||"Ei paikkaa merkitty")}</div>
+            ${meta?`<div class="entry-meta">${escapeHtml(meta)}</div>`:""}
+            ${missing.length?`<span class="entry-warn">⚠ ${missing.length} pakollista puuttuu</span>`:""}
           </div>
-          <div class="entry-actions">
-            <button type="button" class="btn btn-outline btn-sm" data-act="up" aria-label="Siirrä menetelmää ylöspäin" ${idx===0?"disabled":""}>↑ Ylös</button>
-            <button type="button" class="btn btn-outline btn-sm" data-act="down" aria-label="Siirrä menetelmää alaspäin" ${idx===entries.length-1?"disabled":""}>↓ Alas</button>
-            <button type="button" class="btn btn-outline btn-sm" data-act="edit">${canEditEntry(entry)?"Muokkaa":"Avaa"}</button>
-            <button type="button" class="btn btn-outline btn-sm" data-act="copy">Kopioi</button>
-          </div>
+          <button type="button" class="entry-more" aria-label="Kirjauksen toiminnot">⋯</button>
         </div>
       `);
     // Aloitussivun menetelmäkortissa ei näytetä valokuvien pikkukuvia.
@@ -4723,20 +4934,13 @@ function renderEntriesCard(){
       view="entryForm";
       render();
     };
-    card.onclick=edit;
-    card.onkeydown=e=>{
-      if((e.key==="Enter"||e.key===" ") && e.target===card){
+    const main=card.querySelector(".entry-main");
+    main.onclick=edit;
+    main.onkeydown=e=>{
+      if((e.key==="Enter"||e.key===" ") && e.target===main){
         e.preventDefault();
         edit();
       }
-    };
-    card.querySelector('[data-act="edit"]').onclick=e=>{
-      e.stopPropagation();
-      edit();
-    };
-    card.querySelector('[data-act="copy"]').onclick=e=>{
-      e.stopPropagation();
-      duplicateEntry(entry);
     };
     const moveEntry=(delta)=>{
       const from=entries.indexOf(entry);
@@ -4749,30 +4953,25 @@ function renderEntriesCard(){
       entryOrderDirty=true;
       scheduleAutosave();
       render();
-      toast("Menetelmien järjestys päivitetty");
+      toast("Kirjausten järjestys päivitetty");
     };
-    card.querySelector('[data-act="up"]').onclick=e=>{
+    card.querySelector(".entry-more").onclick=e=>{
       e.stopPropagation();
-      moveEntry(-1);
-    };
-    card.querySelector('[data-act="down"]').onclick=e=>{
-      e.stopPropagation();
-      moveEntry(1);
+      const editable=canEditEntry(entry);
+      window.AppUI.sheet((idx+1)+". "+m.name+(entry.values?.paikka?" – "+entry.values.paikka:""),[
+        {label:editable?"Muokkaa":"Avaa",icon:"✏",onSelect:edit},
+        {label:"Kopioi kirjaus",icon:"⧉",onSelect:()=>duplicateEntry(entry)},
+        {label:"Siirrä ylös",icon:"↑",disabled:idx===0,onSelect:()=>moveEntry(-1)},
+        {label:"Siirrä alas",icon:"↓",disabled:idx===entries.length-1,onSelect:()=>moveEntry(1)},
+        editable&&{label:"Poista kirjaus…",icon:"🗑",danger:true,onSelect:()=>{
+          editingEntry=entry;
+          editingIsNew=false;
+          deleteCurrentEntry(true);
+        }}
+      ]);
     };
     c.appendChild(card);
   });
-  const totalSavable=entries.reduce(
-    (n,e)=>n+(e.photos||[]).filter(p=>p.blob instanceof Blob).length,0
-  );
-  if(totalSavable>0){
-    const saveAllBtn=el(`
-      <button type="button" class="btn btn-outline btn-block" style="margin-top:10px;">
-        ⬇ Tallenna kaikki kuvat laitteelle (${totalSavable})
-      </button>
-    `);
-    saveAllBtn.onclick=()=>saveEntryPhotosToDevice(entries.slice(),saveAllBtn);
-    c.appendChild(saveAllBtn);
-  }
   return c;
 }
 
@@ -5137,8 +5336,8 @@ function renderFieldGuideEditor(body,f){
         '<button type="button" class="btn btn-sm btn-danger">Poista ohje</button>'
       );
       bDel.disabled=busy;
-      bDel.onclick=()=>{
-        if(!confirm("Poistetaanko ohje tästä kentästä?"))return;
+      bDel.onclick=async()=>{
+        if(!(await window.AppUI.confirm({title:"Poistetaanko ohje tästä kentästä?",ok:"Poista ohje",cancel:"Peruuta",danger:true})))return;
         dropGuideIfUnsaved(g);
         delete f.guide;
         draw();
@@ -5690,10 +5889,11 @@ function renderMethodsManageCard(){
             "mutta niiden data säilyy taustalla.\n\n")
           :"";
       if(
-        confirm(
-          warn+
-          'Poistetaanko menetelmä "'+m.name+'" pysyvästi?'
-        )
+        await window.AppUI.confirm({
+          title:'Poistetaanko menetelmä "'+m.name+'"?',
+          text:warn+"Poistoa ei voi perua.",
+          ok:"Poista menetelmä",cancel:"Säilytä",danger:true
+        })
       ){
         METHODS.splice(idx,1);
         await persistMethods();
@@ -7118,247 +7318,78 @@ function renderEntryForm(){
     `);
 
 
-  const thumbs=
-    el('<div class="thumbs"></div>');
-
-
-  editingEntry.photos.forEach((p,i)=>{
-
-    const t=
-      el(`
-        <div class="photo-card-item">
-
-          <div class="thumb" role="button" tabindex="0" aria-label="Avaa kuva"></div>
-          <button
-            type="button"
-            class="rm"
-            aria-label="Poista kuva"
-            title="Poista kuva"
-          >×</button>
-
-        </div>
-      `);
-
-
-    const thumb=
-      t.querySelector(".thumb");
-
-    const rm=
-      t.querySelector(".rm");
-
-
-    appendPhotoToThumb(
-      thumb,
-      p
-    );
-    thumb.onclick=()=>openPhotoViewer(editingEntry,p,afterPhotoChange);
-    thumb.onkeydown=ev=>{
-      if(ev.key==="Enter"||ev.key===" "){
-        ev.preventDefault();
-        openPhotoViewer(editingEntry,p,afterPhotoChange);
-      }
-    };
-
-
-    rm.onclick=async()=>{
-      if(!confirm("Poistetaanko kuva?"))return;
-
-      const removed=
-        editingEntry.photos.splice(
-          i,
-          1
-        )[0];
-
-
-      if(
-        removed &&
-        removed.path &&
-        window.SubmissionSync
-      ){
-
-        try{
-
-          await window.SubmissionSync.deletePhotoFile(
-            removed.path
-          );
-
-        }catch(err){
-
-          console.warn(
-            "Pilvikuvan poisto epäonnistui",
-            err
-          );
-        }
-      }
-
-
-      if(
-        removed &&
-        removed.url
-      ){
-
-        try{
-
-          URL.revokeObjectURL(
-            removed.url
-          );
-
-        }catch(err){}
-      }
-
-
-      autosave();
-      refreshPhotoCard();
-    };
-
-
-    thumbs.appendChild(t);
-  });
-
-
   /*
-   * Kuvien lisääminen.
-   *
-   * Kaksi erillistä painiketta:
-   *  - 📷 avaa puhelimen kameran suoraan (`capture="environment"`,
-   *    yksi kuva kerrallaan)
-   *  - 🖼 avaa gallerian / tiedostovalitsimen monivalinnalla
-   * `capture` ja `multiple` eivät toimi luotettavasti samassa
-   * input-elementissä, siksi ne on eroteltu.
-   */
-  const addCam=
-    el(`
-      <label
-        class="photo-add"
-        title="Ota kuva kameralla" aria-label="Ota kuva kameralla"
-      >
-        📷
-        <input
-          type="file"
-          accept="image/*"
-          capture="environment"
-          style="display:none;"
-        >
-      </label>
-    `);
-
-  const addGal=
-    el(`
-      <label
-        class="photo-add"
-        title="Valitse kuvia galleriasta" aria-label="Valitse kuvia galleriasta"
-      >
-        🖼
-        <input
-          type="file"
-          accept="image/*"
-          multiple
-          style="display:none;"
-        >
-      </label>
-    `);
-
-  [addCam,addGal].forEach(lbl=>{
-
-    const inp=lbl.querySelector("input");
-
-    inp.onchange=
-      async e=>{
-
-        const fs=[
-          ...(e.target.files||[])
-        ];
-
-        /* Nollataan, jotta sama kuva/kamera voidaan valita uudelleen. */
-        e.target.value="";
-
-        if(!fs.length)return;
-
-        addPhotos(fs,inp.hasAttribute("capture"));
-      };
-  });
-
-  thumbs.appendChild(addCam);
-  thumbs.appendChild(addGal);
-
-  /* Kameran käyttö estetty -> kerrotaan miksi kuvaa ei voi ottaa. */
-  if(window.AppPerm){
-    window.AppPerm.guardFileInput(addCam.querySelector("input"),"camera");
-  }
-
-  pc.appendChild(thumbs);
-
-  /*
-   * Kuvatekstit: yksi rivi per kuva (pienoiskuva + teksti + sanelu).
+   * Kuvat yhtenä listana: pienoiskuva + kuvateksti + sanelu. Kuvan avaaminen
+   * (napautus) näyttää sen isona; poisto ja piirto tehdään katselunäkymässä.
    * Teksti tulee Word-raporttiin muodossa "Kuva N. teksti".
    */
-  if(editingEntry.photos.length){
-
-    const caps=
+  const list=el('<div class="photo-list"></div>');
+  editingEntry.photos.forEach((p,i)=>{
+    const row=
       el(`
-        <div class="photo-caps">
-          <div class="photo-caps-title">Kuvatekstit</div>
+        <div class="photo-cap-row">
+          <div class="thumb cap-thumb" role="button" tabindex="0" aria-label="Avaa kuva ${i+1}"></div>
+          <div class="cap-input-wrap">
+            <input
+              type="text"
+              class="photo-caption"
+              placeholder="Kuvateksti"
+              aria-label="Kuvateksti, kuva ${i+1}"
+              autocomplete="off"
+            >
+          </div>
         </div>
       `);
+    const capThumb=row.querySelector(".cap-thumb");
+    appendPhotoToThumb(capThumb,p);
+    const open=()=>openPhotoViewer(editingEntry,p,afterPhotoChange);
+    capThumb.onclick=open;
+    capThumb.onkeydown=ev=>{
+      if(ev.key==="Enter"||ev.key===" "){
+        ev.preventDefault();
+        open();
+      }
+    };
+    const capInput=row.querySelector(".photo-caption");
+    capInput.value=p.caption||"";
+    capInput.oninput=e=>{
+      p.caption=e.target.value;
+      scheduleAutosave();
+    };
+    attachDictation(row.querySelector(".cap-input-wrap"),capInput);
+    list.appendChild(row);
+  });
+  pc.appendChild(list);
 
-    editingEntry.photos.forEach((p,i)=>{
-
-      const row=
-        el(`
-          <div class="photo-cap-row">
-            <div class="thumb cap-thumb" role="button" tabindex="0" aria-label="Avaa kuva ${i+1}"></div>
-            <div class="cap-input-wrap">
-              <input
-                type="text"
-                class="photo-caption"
-                placeholder="Kuvateksti"
-                aria-label="Kuvateksti, kuva ${i+1}"
-                autocomplete="off"
-              >
-            </div>
-          </div>
-        `);
-
-      const capThumb=
-        row.querySelector(".cap-thumb");
-
-      appendPhotoToThumb(
-        capThumb,
-        p
-      );
-
-      capThumb.onclick=()=>openPhotoViewer(editingEntry,p,afterPhotoChange);
-      capThumb.onkeydown=ev=>{
-        if(ev.key==="Enter"||ev.key===" "){
-          ev.preventDefault();
-          openPhotoViewer(editingEntry,p,afterPhotoChange);
-        }
-      };
-
-      const capInput=
-        row.querySelector(".photo-caption");
-
-      capInput.value=
-        p.caption||"";
-
-      capInput.oninput=e=>{
-
-        p.caption=
-          e.target.value;
-
-        scheduleAutosave();
-      };
-
-      attachDictation(
-        row.querySelector(".cap-input-wrap"),
-        capInput
-      );
-
-      caps.appendChild(row);
-    });
-
-    pc.appendChild(caps);
+  /*
+   * Kuvien lisääminen. Kamera ja galleria ovat erillisiä, koska `capture`
+   * ja `multiple` eivät toimi luotettavasti samassa input-elementissä.
+   * Kamerapainike on myös alapalkissa.
+   */
+  const addRow=el(`
+    <div class="photo-add-row">
+      <label class="btn btn-outline" aria-label="Ota kuva kameralla">📷 Kamera
+        <input type="file" accept="image/*" capture="environment" style="display:none;">
+      </label>
+      <label class="btn btn-outline" aria-label="Valitse kuvia galleriasta">🖼 Galleria
+        <input type="file" accept="image/*" multiple style="display:none;">
+      </label>
+    </div>
+  `);
+  addRow.querySelectorAll("input").forEach(inp=>{
+    inp.onchange=async e=>{
+      const fs=[...(e.target.files||[])];
+      /* Nollataan, jotta sama kuva/kamera voidaan valita uudelleen. */
+      e.target.value="";
+      if(!fs.length)return;
+      addPhotos(fs,inp.hasAttribute("capture"));
+    };
+  });
+  if(window.AppPerm){
+    window.AppPerm.guardFileInput(addRow.querySelector("input[capture]"),"camera");
   }
+  pc.appendChild(addRow);
+
   const nSavable=editingEntry.photos.filter(p=>p.blob instanceof Blob).length;
   if(nSavable>0){
     const saveAll=el(`
@@ -7374,9 +7405,8 @@ function renderEntryForm(){
   pc.appendChild(
     el(`
       <div class="hint">
-        Kuvat liitetään suoraan kenttämuistiinpanoon.
-        Suuret puhelinkuvat pienennetään automaattisesti
-        tallennusta ja Word-vientiä varten.
+        Napauta kuvaa avataksesi, piirtääksesi tai poistaaksesi sen.
+        Suuret kuvat pienennetään automaattisesti Word-raporttia varten.
       </div>
     `)
   );
@@ -7475,11 +7505,11 @@ function renderEntryForm(){
   if(!editingIsNew){
     const del=el(`
       <div class="card">
-        <button type="button" class="btn btn-danger btn-block">Poista tämä menetelmä</button>
+        <button type="button" class="btn btn-danger btn-block">Poista kirjaus…</button>
       </div>
     `);
     del.querySelector("button").onclick=()=>{
-      deleteCurrentEntry();
+      deleteCurrentEntry(false);
     };
     container.appendChild(del);
   }
@@ -7728,10 +7758,12 @@ function renderTableField(f,values){
     f.hints.length>0;
 
 
+  /* Puhelimessa (kapea näyttö) oletusnäkymä on kortit, ettei taulukkoa
+     tarvitse vierittää sivuttain. Menetelmään erikseen valittu näkymä säilyy. */
   const layout=
     (f.layout==="sticky"||f.layout==="cards")
       ?f.layout
-      :"scroll";
+      :(window.innerWidth<600?"cards":"scroll");
 
   const wrap=
     el(`
@@ -8132,31 +8164,38 @@ function saveEntryForm(){
 }
 
 
-function deleteCurrentEntry(){
+async function deleteCurrentEntry(fromList){
 
   if(!editingEntry)return;
+  /* Kirjaus otetaan talteen: vahvistuksen aikana editingEntry voi vaihtua
+     (takaisin-painike, pilvisynkronointi). */
+  const entry=editingEntry;
 
-  if(!canEditEntry(editingEntry)){
+  if(!canEditEntry(entry)){
 
-    toast("Vain merkinnän tekijä ("+editingEntry.author+") voi poistaa sen");
+    toast("Vain merkinnän tekijä ("+entry.author+") voi poistaa sen");
 
     return;
   }
 
 
+  const nPh=(entry.photos||[]).length;
   if(
-    !confirm(
-      "Poistetaanko tämä menetelmä ja siihen liittyvät valokuvat?"
-    )
+    !(await window.AppUI.confirm({
+      title:"Poistetaanko kirjaus?",
+      text:(entry.values&&entry.values.paikka?entry.values.paikka+"\n":"")+
+        "Kirjauksen tiedot"+(nPh?" ja "+nPh+" valokuvaa":"")+" poistetaan.",
+      ok:"Poista kirjaus",cancel:"Säilytä kirjaus",danger:true
+    }))
   ){
-
+    if(fromList&&editingEntry===entry){editingEntry=null;}
     return;
   }
 
 
   const target=
     entries.find(
-      e=>e.id===editingEntry.id
+      e=>e.id===entry.id
     );
 
 
@@ -8196,12 +8235,11 @@ function deleteCurrentEntry(){
 
   entries=
     entries.filter(
-      e=>e.id!==editingEntry.id
+      e=>e.id!==entry.id
     );
 
 
-  editingEntry=null;
-  editingIsNew=false;
+  if(editingEntry===entry){editingEntry=null;editingIsNew=false;}
   view="project";
 
 
@@ -8210,7 +8248,7 @@ function deleteCurrentEntry(){
   render();
 
   toast(
-    "Menetelmä poistettu"
+    "Kirjaus poistettu"
   );
 }
 
@@ -8670,7 +8708,154 @@ async function fetchDocxAttachments(s){
 }
 
 
+/* ============================================================
+   WORD-RAPORTTI YRITYKSEN RAPORTTIPOHJAAN
+   Käyttäjä valitsee pohjan (Asetukset → Raporttipohjat). Pohjan merkinnät
+   {{...}} täytetään report-template-engine.js:llä; pohjan oma muotoilu,
+   kansilehti ja ylä-/alatunnisteet säilyvät. Vanha vienti (sovelluksen
+   oma muotoilu) on yhä valittavissa listan lopussa.
+   ============================================================ */
+function setExportBusy(busy){
+  const b=document.getElementById("btnExport");
+  if(!b)return;
+  b.disabled=!!busy;
+  b.innerHTML=busy?'<span class="spin" aria-hidden="true"></span> Muodostetaan…':"⬇ Word";
+}
+
 async function exportWord(){
+  if(!project.nimi || !project.tutkija){
+    view="project";
+    kohdeOpen=true;
+    render();
+    toast("Täytä kohteen nimi ja tutkijan nimi ennen vientiä");
+    return;
+  }
+  const btn=document.getElementById("btnExport");
+  if(btn && btn.disabled)return;
+
+  let list=[],offline=false,missingTable=false;
+  if(window.ReportTemplates){
+    setExportBusy(true);
+    try{
+      const cached=()=>{try{return JSON.parse(localStorage.getItem("aloitussivu.reportTemplates.v1")||"[]");}catch(e){return [];}};
+      const r=await Promise.race([
+        window.ReportTemplates.list(),
+        new Promise(res=>setTimeout(()=>res({list:cached(),offline:true,missingTable:false}),6000))
+      ]);
+      list=r.list||[]; offline=r.offline; missingTable=r.missingTable;
+    }finally{
+      setExportBusy(false);
+    }
+  }
+  const last=window.ReportTemplates?window.ReportTemplates.getLastUsed(FORM_KEY):"";
+  const ordered=list.slice().sort((a,b)=>
+    (b.id===last)-(a.id===last) || (b.is_default?1:0)-(a.is_default?1:0) || String(a.name).localeCompare(String(b.name),"fi"));
+  const items=ordered.map(t=>({
+    icon:"📄",
+    label:t.name+(t.id===last?" (viimeksi käytetty)":(t.is_default?" (oletus)":"")),
+    onSelect:()=>exportWithTemplate(t)
+  }));
+  items.push({icon:"📝",label:"Kenttämuistiinpano (ilman raporttipohjaa)",onSelect:exportWordLegacy});
+  if(!list.length){
+    items.push({icon:"⚙",label:missingTable?"Raporttipohjia ei ole otettu käyttöön – ohje":"Lisää raporttipohja…",
+      onSelect:async()=>{try{await autosave(true);}catch(err){} window.location.href="raporttipohjat.html";}});
+  }
+  window.AppUI.sheet("Valitse raporttipohja"+(offline&&list.length?" (laitteelle tallennetut)":""),items);
+}
+
+/* Kuva Word-raporttiin: pidempi sivu enintään 1600 px, JPEG. */
+async function photoForReport(p){
+  let src=null;
+  if(p.blob instanceof Blob){
+    src=await blobToDataUrl(p.blob);
+  }else if(p.url){
+    src=p.url;
+  }else if(p.path && window.SubmissionSync && navigator.onLine){
+    try{
+      const b=await window.SubmissionSync.downloadPhoto(p.path);
+      src=await blobToDataUrl(b);
+    }catch(err){
+      console.warn("Kuvan haku pilvestä epäonnistui",p.path,err);
+    }
+  }
+  if(!src)return null;
+  const n=await normalizeImageOrientation(src,1600,.82);
+  if(!n||!n.dataUrl||!/^data:image\//.test(n.dataUrl)||!(n.width>1&&n.height>1))return null;
+  const bytes=new Uint8Array(await dataUrlToBlob(n.dataUrl).arrayBuffer());
+  if(!bytes.length)return null;
+  return {bytes,width:n.width,height:n.height,caption:p.caption||""};
+}
+
+async function exportWithTemplate(tpl){
+  if(!window.ReportTemplateEngine||!window.JSZip){
+    toast("Raporttimoottoria ei saatu ladattua. Tarkista verkkoyhteys ja yritä uudelleen.");
+    return;
+  }
+  setExportBusy(true);
+  try{
+    let bytes;
+    try{
+      bytes=await window.ReportTemplates.getBytes(tpl);
+    }catch(err){
+      toast(navigator.onLine?"Raporttipohjan haku epäonnistui":"Pohjaa ei ole tallennettu tälle laitteelle. Yhdistä verkkoon ja yritä uudelleen.");
+      return;
+    }
+    let missingPhotos=0;
+    const out=[];
+    for(let i=0;i<entries.length;i++){
+      const e=entries[i];
+      const m=METHODS.find(x=>x.id===e.methodId);
+      if(!m)continue;
+      const vis=computeFieldVisibility(m.fields,e.values||{});
+      const hidden={};
+      m.fields.forEach(f=>{if(vis[f.id]===false)hidden[f.id]=true;});
+      const photos=[];
+      for(const p of (e.photos||[])){
+        const ph=await photoForReport(p);
+        if(ph)photos.push(ph);else missingPhotos++;
+      }
+      const label=e.marker&&e.marker.label&&String(e.marker.label).trim()
+        ?String(e.marker.label).trim()
+        :String(i+1);
+      out.push({
+        methodId:e.methodId,
+        values:Object.assign({},e.values||{}),
+        hidden,
+        marker:!!e.marker,
+        markerLabel:label,
+        photos
+      });
+    }
+    const res=await window.ReportTemplateEngine.fill(bytes,{
+      project:Object.assign({},project),
+      entries:out,
+      methods:METHODS,
+      reportDate:localDateISO()
+    });
+    const safe=(project.nimi||"kohde").replace(/[^a-z0-9äöå]+/gi,"_").slice(0,40);
+    const tplSafe=String(tpl.name||"Raportti").replace(/[^a-z0-9äöå]+/gi,"_").slice(0,30);
+    const name=tplSafe+"_"+safe+"_"+(project.pvm||localDateISO())+".docx";
+    const url=URL.createObjectURL(res.output);
+    const a=document.createElement("a");
+    a.href=url; a.download=name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),4000);
+    window.ReportTemplates.setLastUsed(FORM_KEY,tpl.id);
+    const notes=[];
+    if(missingPhotos)notes.push(missingPhotos+" kuvaa puuttui");
+    if(res.warnings.length)notes.push("pohjassa "+res.warnings.length+" tuntematonta merkintää");
+    toast("Raportti ladattu"+(notes.length?" – "+notes.join(", "):""));
+    if(res.warnings.length)console.warn("Raporttipohjan varoitukset",res.warnings);
+  }catch(err){
+    console.error(err);
+    toast("Raportin muodostus epäonnistui: "+(err.message||"tuntematon virhe"));
+  }finally{
+    setExportBusy(false);
+  }
+}
+
+/* Vanha vienti: sovelluksen oma "Kenttämuistiinpano"-muotoilu (tyylieditori). */
+async function exportWordLegacy(){
 
   if(
     !project.nimi ||
@@ -9271,13 +9456,11 @@ async function saveFloorPlan(blob){
   if(
     hadMarkers &&
     floorPlanBlob &&
-    !confirm(
-      "Pohjakuva vaihdetaan.\n\n"+
-      "Nykyiseen pohjakuvaan tehdyt sijaintimerkinnät "+
-      "poistetaan, koska niiden koordinaatit eivät välttämättä "+
-      "vastaa uutta pohjakuvaa.\n\n"+
-      "Jatketaanko?"
-    )
+    !(await window.AppUI.confirm({
+      title:"Vaihdetaanko pohjakuva?",
+      text:"Nykyiseen pohjakuvaan tehdyt sijaintimerkinnät poistetaan, koska niiden koordinaatit eivät välttämättä vastaa uutta pohjakuvaa.",
+      ok:"Vaihda pohjakuva",cancel:"Peruuta",danger:true
+    }))
   ){
 
     /*
@@ -10032,12 +10215,14 @@ function renderFloorPlanCard(){
       `);
 
 
-    rmBtn.onclick=()=>{
+    rmBtn.onclick=async()=>{
 
       if(
-        confirm(
-          "Poistetaanko pohjakuva? Kaikki sijaintimerkinnät häviävät."
-        )
+        await window.AppUI.confirm({
+          title:"Poistetaanko pohjakuva?",
+          text:"Kaikki sijaintimerkinnät häviävät.",
+          ok:"Poista pohjakuva",cancel:"Säilytä",danger:true
+        })
       ){
 
         removeFloorPlanFile()
@@ -10403,7 +10588,7 @@ function renderResearchPlanCard(){
     lbl.querySelector("input").onchange=onPick;
     const rm=el('<button type="button" class="btn btn-danger" style="flex:0 0 auto;">Poista</button>');
     rm.onclick=async()=>{
-      if(!confirm("Poistetaanko tutkimussuunnitelma?"))return;
+      if(!(await window.AppUI.confirm({title:"Poistetaanko tutkimussuunnitelma?",ok:"Poista",cancel:"Säilytä",danger:true})))return;
       await removeResearchPlan();
       render();
       toast("Tutkimussuunnitelma poistettu");
@@ -12372,6 +12557,9 @@ function waitForSupabaseClient(
     await syncCustomMethodsFromCloud();
 
     prefetchGuides().catch(()=>{});
+    if(window.ReportTemplates && navigator.onLine){
+      window.ReportTemplates.prefetch().catch(()=>{});
+    }
 
     await loadState();
 

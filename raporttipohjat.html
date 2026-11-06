@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>html{visibility:hidden}</style>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.4"></script>
+<script src="auth-gate.js" defer></script>
+<script src="submission-sync.js"></script>
+<script src="users.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="report-template-engine.js"></script>
+<script src="report-templates.js"></script>
+<script src="ui-kit.js"></script>
+<title>Raporttipohjat</title>
+<style>
+  :root{
+    --ink:#1c2430; --ink-soft:#4a5568; --paper:#f4f2ec; --card:#fff;
+    --line:#dcd7cb; --line-strong:#b9b2a0;
+    --red:#ED1C24; --accent:#C8102E; --accent-dark:#A50D24; --brand:#262626;
+    --ok:#2f6b3a; --ok-bg:#e6f0ea; --warn:#8a5a00; --warn-bg:#fbf1de; --error:#a3271b;
+    --radius:12px; --tap:44px;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0}
+  body{background:var(--paper);color:var(--ink);font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding-bottom:40px}
+  button,input,textarea{font:inherit;color:inherit}
+  :focus-visible{outline:3px solid #1d4ed8;outline-offset:2px}
+  .topbar{position:sticky;top:0;z-index:20;background:#fff;display:flex;align-items:center;gap:4px;min-height:56px;padding:4px 8px 4px 4px;border-bottom:4px solid var(--red);box-shadow:0 1px 4px rgba(0,0,0,.06)}
+  .topbar a.back{flex:0 0 var(--tap);height:var(--tap);display:flex;align-items:center;justify-content:center;color:var(--ink);font-size:28px;text-decoration:none;border-radius:10px}
+  .topbar h1{flex:1;min-width:0;margin:0;font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  main{max-width:640px;margin:0 auto;padding:12px}
+  .section{font-size:13px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-soft);margin:16px 4px 8px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:14px;margin-bottom:12px}
+  .row{display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);margin-bottom:10px}
+  .row .main{flex:1;min-width:0;padding:12px 4px 12px 14px}
+  .row .t{font-weight:700;color:var(--brand)}
+  .row .s{font-size:14px;color:var(--ink-soft);margin-top:2px}
+  .row .m{font-size:13px;color:var(--ink-soft);margin-top:4px}
+  .more{flex:0 0 var(--tap);height:var(--tap);margin-right:6px;border:none;background:none;font-size:22px;border-radius:10px;cursor:pointer;color:var(--ink-soft)}
+  .tag{display:inline-block;border-radius:6px;padding:1px 8px;font-size:12.5px;font-weight:700;margin-left:4px;vertical-align:1px}
+  .tag.ok{background:var(--ok-bg);color:var(--ok)}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:48px;padding:10px 16px;border-radius:10px;border:1.5px solid transparent;font-size:16px;font-weight:700;cursor:pointer}
+  .btn-primary{background:var(--accent);color:#fff}
+  .btn-primary:active{background:var(--accent-dark)}
+  .btn-outline{background:#fff;border-color:var(--line-strong)}
+  .btn-block{width:100%}
+  .btn:disabled{opacity:.6}
+  label.l{display:block;font-size:15px;font-weight:700;margin:12px 0 6px}
+  input[type=text],textarea{width:100%;font-size:16px;padding:11px 12px;border:1.5px solid var(--line-strong);border-radius:10px;background:#fff;min-height:48px}
+  textarea{min-height:72px;resize:vertical}
+  .hint{font-size:14px;color:var(--ink-soft);margin-top:6px}
+  .check{margin-top:12px;padding:10px 12px;border-radius:10px;font-size:14px}
+  .check.ok{background:var(--ok-bg);color:var(--ok)}
+  .check.warn{background:var(--warn-bg);color:var(--warn);border:1px solid #e3c27a}
+  .check code{font-size:13px}
+  .msg{padding:10px 12px;border-radius:10px;background:var(--warn-bg);color:var(--warn);font-size:14px;margin-bottom:12px}
+  .empty{text-align:center;color:var(--ink-soft);padding:24px 10px;font-size:15px}
+  details.guide summary{list-style:none;cursor:pointer;font-weight:700;min-height:44px;display:flex;align-items:center;justify-content:space-between}
+  details.guide summary::-webkit-details-marker{display:none}
+  details.guide summary::after{content:"▾";color:var(--ink-soft)}
+  details.guide[open] summary::after{content:"▴"}
+  .tags{width:100%;border-collapse:collapse;font-size:14px;margin:8px 0}
+  .tags td{border-top:1px solid var(--line);padding:6px 4px;vertical-align:top}
+  .tags td:first-child{white-space:nowrap;font-family:SFMono-Regular,Consolas,Menlo,monospace;font-size:13px;padding-right:10px}
+  .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:24px;background:#1c2430;color:#fff;padding:10px 16px;border-radius:20px;font-size:14px;z-index:2000;opacity:0;transition:opacity .25s;pointer-events:none;max-width:90%;text-align:center}
+  .toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div id="bootSplash" style="visibility:visible;position:fixed;inset:0;z-index:99990;background:#fff;color:#262626;display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:15px;border-top:4px solid #ED1C24;">Ladataan…</div>
+
+<div class="topbar">
+  <a class="back" id="backLink" href="index.html" aria-label="Takaisin">‹</a>
+  <h1>Raporttipohjat (Word)</h1>
+</div>
+
+<main>
+  <div id="msg"></div>
+  <div class="section">Tallennetut pohjat</div>
+  <div id="list"><div class="empty">Ladataan…</div></div>
+
+  <div class="section">Lisää uusi pohja</div>
+  <div class="card">
+    <label class="l" for="tName">Pohjan nimi</label>
+    <input type="text" id="tName" maxlength="80" placeholder="esim. Katselmusraportti" autocomplete="off">
+    <label class="l" for="tDesc">Kuvaus (näkyy valintalistassa)</label>
+    <textarea id="tDesc" maxlength="200" placeholder="esim. Kevyt raportti: havainnot tiloittain"></textarea>
+    <label class="l" for="tFile">Word-pohja (.docx)</label>
+    <input type="file" id="tFile" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+    <div id="tCheck"></div>
+    <label style="display:flex;gap:10px;align-items:center;min-height:44px;margin-top:8px"><input type="checkbox" id="tDefault" style="width:22px;height:22px"> Oletuspohja</label>
+    <button type="button" class="btn btn-primary btn-block" id="tSave" style="margin-top:8px">Tallenna pohja</button>
+  </div>
+
+  <div class="card">
+    <details class="guide">
+      <summary>Ohje: merkinnät pohjaan</summary>
+      <p class="hint">Kirjoita merkinnät Wordissa tavallisena tekstinä. Lohkomerkinnät kirjoitetaan omaksi kappaleekseen. Pohjan punainen teksti tulkitaan täytettäväksi kohdaksi: kun sovellus täyttää sen, teksti muuttuu mustaksi. Ylä- ja alatunnisteisiin ei kosketa, ellei niihin kirjoiteta merkintöjä.</p>
+      <table class="tags" id="tagTable"></table>
+      <p class="hint">Menetelmien tunnukset (<code>id</code>):</p>
+      <table class="tags" id="methodTable"></table>
+    </details>
+  </div>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let tt; function toast(m){ const t = $("#toast"); t.textContent = m; t.classList.add("show"); clearTimeout(tt); tt = setTimeout(() => t.classList.remove("show"), 2600); }
+const who = () => (window.AppUsers && window.AppUsers.getActive()) || "";
+function errText(e){ return (e && (e.message || e.error_description || e.code)) || "tuntematon virhe"; }
+
+/* Menetelmät pohjan tarkistusta varten: kenttälomakkeen tallentama kopio,
+   muokatut menetelmät tai vähintään oletusmenetelmien tunnukset. */
+const DEFAULT_IDS = [["aisti","Aistinvarainen tarkastelu"],["pintakosteus","Pintakosteuden mittaus"],["rh","Rakenteen suht. kosteus (RH)"],["merkkiaine","Merkkiainekoe"],["nayte","Näyte"],["lampokuvaus","Lämpökuvaus"],["avaus","Rakenneavaus"],["iv","IV / painesuhdemittaus"],["muu","Muu menetelmä"]];
+function methodsForScan(){
+  for (const k of ["kenttalomake_methods_snapshot_v1", "kenttalomake_custom_methods_v1"]){
+    try{ const a = JSON.parse(localStorage.getItem(k) || "null"); if (Array.isArray(a) && a.length) return a; }catch(e){}
+  }
+  return DEFAULT_IDS.map(([id, name]) => ({ id, name, fields:[] }));
+}
+
+const TAGS = [
+  ["{{kohde}}", "Kohteen nimi"], ["{{osoite}}", "Kohteen osoite"], ["{{tilaaja}}", "Tilaaja"],
+  ["{{yhteyshenkilo}}", "Tilaajan yhteyshenkilö"], ["{{tutkija}}", "Tutkijan nimi"],
+  ["{{projektinumero}}", "Projektinumero"], ["{{pvm}}", "Tutkimuspäivä"], ["{{vuosi}}", "Tutkimusvuosi"],
+  ["{{raporttipvm}}", "Raportin luontipäivä"], ["{{lkm:id}}", "Menetelmän kirjausten määrä"],
+  ["{{kirjaukset}}", "Kaikki kirjaukset menetelmittäin kuvineen (oma kappale)"],
+  ["{{kirjaukset tiloittain}}", "Kirjaukset Tunnus/Tila-kentän mukaan ryhmiteltynä"],
+  ["{{menetelmä:id}}", "Yhden menetelmän kirjaukset, otsikko per kirjaus"],
+  ["{{taulukko:id}}", "Menetelmän kirjaukset taulukkona"],
+  ["{{kuvat:id}}", "Menetelmän kirjausten valokuvat kahdessa sarakkeessa"],
+  ["{{menetelmäluettelo}}", "Käytetyt menetelmät luettelona"],
+  ["{{jos:id}} … {{/jos}}", "Väliin jäävä osa poistetaan, jos menetelmää ei käytetty (useita: jos:rh,avaus)"],
+  ["{{toista:id}} … {{/toista}}", "Väliin jäävä osa toistetaan jokaiselle kirjaukselle"],
+  ["{{rivi:id}}", "Taulukon rivi toistetaan jokaiselle kirjaukselle"],
+  ["{{paikka}}, {{kentän id}}", "Kirjauksen tiedot toisto- ja rivipohjissa; lisäksi {{kuvat}}, {{sijainti}} ja RH:lle {{abs}}"]
+];
+
+function renderGuide(){
+  $("#tagTable").innerHTML = TAGS.map(([t, d]) => "<tr><td>" + esc(t) + "</td><td>" + esc(d) + "</td></tr>").join("");
+  $("#methodTable").innerHTML = methodsForScan().map(m => "<tr><td>" + esc(m.id) + "</td><td>" + esc(m.name) +
+    ((m.fields || []).length ? '<div class="hint" style="margin:2px 0 0">Kentät: ' + esc(m.fields.map(f => f.id).join(", ")) + "</div>" : "") + "</td></tr>").join("");
+}
+
+function fmtDate(iso){ try{ return new Date(iso).toLocaleDateString("fi-FI"); }catch(e){ return ""; } }
+
+async function renderList(){
+  const box = $("#list");
+  const res = await window.ReportTemplates.list();
+  $("#msg").innerHTML = "";
+  if (res.missingTable){
+    $("#msg").innerHTML = '<div class="msg">Supabasesta puuttuu taulu <b>report_templates</b>. Aja tiedosto <b>supabase-raporttipohjat.sql</b> Supabasen SQL-editorissa.</div>';
+  } else if (res.offline){
+    $("#msg").innerHTML = '<div class="msg">Ei yhteyttä pilveen. Näytetään laitteelle tallennettu lista, eikä muutoksia voi tehdä.</div>';
+  }
+  if (!res.list.length){ box.innerHTML = '<div class="empty">Ei vielä raporttipohjia. Lisää ensimmäinen alta.</div>'; return; }
+  box.innerHTML = "";
+  res.list.forEach(t => {
+    const r = document.createElement("div");
+    r.className = "row";
+    r.innerHTML = '<div class="main"><div class="t">' + esc(t.name) + (t.is_default ? '<span class="tag ok">Oletus</span>' : "") + "</div>" +
+      (t.description ? '<div class="s">' + esc(t.description) + "</div>" : "") +
+      '<div class="m">' + esc(t.file_name) + " · päivitetty " + fmtDate(t.updated_at) + (t.updated_by ? " (" + esc(t.updated_by) + ")" : "") +
+      ((t.history || []).length ? " · " + t.history.length + " aiempaa versiota" : "") + "</div></div>" +
+      '<button type="button" class="more" aria-label="Pohjan toiminnot">⋯</button>';
+    r.querySelector(".more").onclick = () => actions(t, res.offline, r);
+    box.appendChild(r);
+  });
+}
+
+function pickFile(){
+  return new Promise(resolve => {
+    /* Input lisätään sivulle (iOS ei aina laukaise change-tapahtumaa irralliselle inputille). */
+    const i = document.createElement("input");
+    i.type = "file"; i.accept = ".docx"; i.style.display = "none";
+    document.body.appendChild(i);
+    let done = false;
+    const finish = f => { if (done) return; done = true; i.remove(); resolve(f); };
+    i.onchange = () => finish(i.files && i.files[0] || null);
+    i.addEventListener("cancel", () => finish(null));
+    window.addEventListener("focus", () => setTimeout(() => { if (!i.files || !i.files.length) finish(null); }, 800), { once:true });
+    i.click();
+  });
+}
+
+async function checkTemplate(file){
+  const r = await window.ReportTemplateEngine.scan(await file.arrayBuffer(), methodsForScan());
+  return r;
+}
+function checkHtml(r){
+  if (!r.found.length) return '<div class="check warn">Pohjasta ei löytynyt yhtään merkintää. Raportti syntyy silloin ilman kenttälomakkeen tietoja.</div>';
+  return '<div class="check ' + (r.unknown.length ? "warn" : "ok") + '">Löytyi ' + r.found.length + " merkintää." +
+    (r.unknown.length ? "<br>Tuntemattomat (jäävät raporttiin sellaisinaan): <code>" + r.unknown.map(esc).join("</code>, <code>") + "</code>" : " Kaikki tunnistettiin.") + "</div>";
+}
+
+function download(t){
+  window.ReportTemplates.getBytes(t).then(buf => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([buf], { type:"application/vnd.openxmlformats-officedocument.wordprocessingml.document" }));
+    a.download = t.file_name || "raporttipohja.docx";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  }).catch(e => toast("Lataus epäonnistui: " + errText(e)));
+}
+
+function actions(t, offline, rowEl){
+  const RT = window.ReportTemplates;
+  const run = async (fn, okMsg) => { try{ await fn(); toast(okMsg); await renderList(); }catch(e){ toast("Toiminto epäonnistui: " + errText(e)); } };
+  window.AppUI.sheet(t.name, [
+    { label:"Lataa pohja muokattavaksi", icon:"⬇", onSelect:() => download(t) },
+    !t.is_default && { label:"Aseta oletukseksi", icon:"★", disabled:offline, onSelect:() => run(() => RT.setDefault(t.id), "Oletuspohja vaihdettu") },
+    { label:"Vaihda tiedosto (uusi versio)", icon:"⤴", disabled:offline, onSelect: async () => {
+      const f = await pickFile(); if (!f) return;
+      let r; try{ r = await checkTemplate(f); }catch(e){ toast(errText(e)); return; }
+      const ok = await window.AppUI.confirm({ title:"Vaihdetaanko pohjan tiedosto?",
+        text:"Uusi tiedosto: " + f.name + "\nLöytyi " + r.found.length + " merkintää" + (r.unknown.length ? ", tuntemattomia " + r.unknown.length + ": " + r.unknown.join(", ") : "") + ".\n\nNykyinen versio säilyy ja sen voi palauttaa.",
+        ok:"Vaihda tiedosto", cancel:"Peruuta" });
+      if (ok) run(() => RT.replaceFile(t.id, f, who()), "Pohjan tiedosto vaihdettu");
+    }},
+    (t.history || []).length && { label:"Palauta aiempi versio…", icon:"↶", disabled:offline, onSelect:() => {
+      window.AppUI.sheet("Palauta versio", t.history.map((h, i) => ({
+        label:(h.file_name || "versio") + " · " + fmtDate(h.replaced_at),
+        onSelect: async () => {
+          const ok = await window.AppUI.confirm({ title:"Palautetaanko tämä versio?", text:"Nykyinen versio siirtyy aiempiin versioihin.", ok:"Palauta versio" });
+          if (ok) run(() => RT.restoreVersion(t.id, i, who()), "Versio palautettu");
+        }
+      })));
+    }},
+    { label:"Muokkaa nimeä ja kuvausta", icon:"✏", disabled:offline, onSelect:() => editMeta(t, rowEl) },
+    { label:"Poista pohja…", icon:"🗑", danger:true, disabled:offline, onSelect: async () => {
+      const ok = await window.AppUI.confirm({ title:"Poistetaanko raporttipohja?", text:'"' + t.name + '" ja sen aiemmat versiot poistetaan. Jo luotuihin raportteihin tämä ei vaikuta.', ok:"Poista pohja", cancel:"Säilytä pohja", danger:true });
+      if (ok) run(() => RT.remove(t.id), "Pohja poistettu");
+    }}
+  ]);
+}
+
+function editMeta(t, rowEl){
+  const c = document.createElement("div");
+  c.className = "card";
+  c.innerHTML = '<label class="l">Nimi</label><input type="text" maxlength="80" value="' + esc(t.name) + '">' +
+    '<label class="l">Kuvaus</label><textarea maxlength="200">' + esc(t.description) + "</textarea>" +
+    '<div style="display:flex;gap:8px;margin-top:10px"><button type="button" class="btn btn-outline" style="flex:1">Peruuta</button><button type="button" class="btn btn-primary" style="flex:1">Tallenna</button></div>';
+  (rowEl || $("#list")).after(c);
+  const [inp] = c.querySelectorAll("input"), ta = c.querySelector("textarea");
+  const [cancel, save] = c.querySelectorAll("button");
+  inp.focus();
+  cancel.onclick = () => c.remove();
+  save.onclick = async () => {
+    if (!inp.value.trim()){ toast("Anna pohjalle nimi"); return; }
+    try{ await window.ReportTemplates.updateMeta(t.id, { name:inp.value, description:ta.value }); toast("Tallennettu"); await renderList(); }
+    catch(e){ toast("Tallennus epäonnistui: " + errText(e)); }
+    c.remove();
+  };
+}
+
+let lastCheck = null;
+$("#tFile").addEventListener("change", async () => {
+  const f = $("#tFile").files[0];
+  $("#tCheck").innerHTML = ""; lastCheck = null;
+  if (!f) return;
+  if (!$("#tName").value.trim()) $("#tName").value = f.name.replace(/\.docx$/i, "").replace(/[_]+/g, " ");
+  try{ lastCheck = await checkTemplate(f); $("#tCheck").innerHTML = checkHtml(lastCheck); }
+  catch(e){ $("#tCheck").innerHTML = '<div class="check warn">' + esc(errText(e)) + "</div>"; }
+});
+$("#tSave").addEventListener("click", async () => {
+  const f = $("#tFile").files[0], name = $("#tName").value.trim();
+  if (!name){ toast("Anna pohjalle nimi"); $("#tName").focus(); return; }
+  if (!f){ toast("Valitse Word-tiedosto"); return; }
+  const b = $("#tSave"); b.disabled = true; b.textContent = "Tallennetaan…";
+  try{
+    await window.ReportTemplates.create({ name, description:$("#tDesc").value, file:f, isDefault:$("#tDefault").checked, by:who() });
+    $("#tName").value = ""; $("#tDesc").value = ""; $("#tFile").value = ""; $("#tCheck").innerHTML = ""; $("#tDefault").checked = false;
+    toast("Pohja tallennettu");
+    await renderList();
+  }catch(e){
+    toast(window.ReportTemplates.isMissingTable(e) ? "Aja ensin supabase-raporttipohjat.sql Supabasessa" : "Tallennus epäonnistui: " + errText(e));
+  }finally{ b.disabled = false; b.textContent = "Tallenna pohja"; }
+});
+
+/* Takaisin: kenttälomakkeelta tultaessa palataan lomakkeeseen, muuten etusivulle. */
+document.getElementById("backLink").addEventListener("click", e => {
+  if (/kenttalomake\.html/.test(document.referrer) && history.length > 1){ e.preventDefault(); history.back(); }
+});
+(function wait(n){
+  if (window.__supabaseClient){
+    renderList();
+    /* Jos istunto oli vanhentunut, lista haetaan uudelleen kirjautumisen jälkeen. */
+    try{ window.__supabaseClient.auth.onAuthStateChange((ev, session) => { if (session && ev === "SIGNED_IN") renderList(); }); }catch(e){}
+    return;
+  }
+  if (n <= 0){ renderList(); return; }
+  setTimeout(() => wait(n - 1), 50);
+})(100);
+renderGuide();
+</script>
+</body>
+</html>

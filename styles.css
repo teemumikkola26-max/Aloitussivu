@@ -6,8 +6,8 @@
     --paper-raised:#ffffff;
     --line:#dcd7cb;
     --line-strong:#b9b2a0;
-    --brand:#33455c;
-    --brand-deep:#233043;
+    --brand:#3a3a3a;
+    --brand-deep:#262626;
     --ok:#2f6f4e;
     --ok-bg:#e6f0ea;
     --note:#a15a1e;
@@ -37,6 +37,7 @@
   header.topbar{
     position:sticky;top:0;z-index:30;
     background:var(--brand-deep);
+    border-bottom:4px solid #ED1C24;
     color:#f2efe6;
     padding:12px 14px 10px;
     box-shadow:var(--shadow);
@@ -60,7 +61,7 @@
   }
   .progress-bar{
     height:100%;
-    background:#8fb79c;
+    background:#ED1C24;
     width:0%;
     transition:width .3s ease;
   }
@@ -321,7 +322,7 @@
     cursor:pointer;
     text-align:center;
   }
-  .btn-primary{background:var(--brand-deep);color:#fff;}
+  .btn-primary{background:#C8102E;color:#fff;}
   .btn-secondary{background:#fff;color:var(--ink);border:1px solid var(--line-strong);}
   .btn-danger{background:#fff;color:var(--danger);border:1px solid var(--danger);}
   .btn:disabled{opacity:.5;}

@@ -1,0 +1,55 @@
+# Muutokset 11/2026: puhelinkäyttö ja Word-raportit yrityksen pohjiin
+
+## Käyttöönotto
+
+1. Aja `supabase-raporttipohjat.sql` Supabasen SQL-editorissa (luo taulun `report_templates`).
+   Tiedostot tallentuvat olemassa olevaan `submission-photos`-säiliöön, joten tallennustilan sääntöihin ei tarvita muutoksia.
+2. Vie kaikki tiedostot palvelimelle. Service workerin välimuistin versio on nostettu (`aloitussivu-v17`),
+   joten puhelimet hakevat uudet tiedostot automaattisesti.
+3. Avaa etusivulta **Asetukset ja ylläpito → Raporttipohjat (Word)** ja lisää merkityt pohjat
+   (`PBM_katselmusraportti_POHJA_merkitty.docx`, `PBM_tutkimusseloste_LAAJA_POHJA_merkitty.docx`).
+   Sivu tarkistaa pohjan merkinnät latauksen yhteydessä.
+
+## Uudet tiedostot
+
+| Tiedosto | Tarkoitus |
+|---|---|
+| `report-template-engine.js` | Täyttää Word-pohjan merkinnät `{{...}}` kenttälomakkeen tiedoilla |
+| `report-templates.js` | Pohjien tallennus, versiot, oletuspohja ja laitteelle välimuistitus (toimii ilman verkkoa) |
+| `raporttipohjat.html` | Pohjien hallinta: lisäys, tarkistus, tiedoston vaihto, aiemman version palautus, poisto, merkintäohje |
+| `ui-kit.js` | Yhteiset toimintovalikot ja vahvistusikkunat (korvaa selaimen confirm/prompt-ikkunat) |
+| `kenttalomake-mobile.css` | PBM-väriteema ja puhelinkäytön parannukset kenttälomakkeelle |
+| `manifest.webmanifest`, `icon-192.png`, `icon-512.png`, `pbm-logo.png` | Asennus kotinäytölle ja logo |
+| `supabase-raporttipohjat.sql` | Tietokantataulu ja käyttöoikeussäännöt |
+
+## Kenttälomake (`kenttalomake.html`)
+
+- **Word-vienti:** "⬇ Word" avaa listan raporttipohjista (viimeksi käytetty ensin, sitten oletus).
+  Vanha vienti on listan lopussa nimellä "Kenttämuistiinpano (ilman raporttipohjaa)".
+  Painike näyttää vientiä tehtäessä "Muodostetaan…" eikä reagoi tuplapainallukseen.
+- **Kohteen tiedot:** uudet kentät Osoite, Tilaajan yhteyshenkilö ja Projektinumero. Kun nimi ja tutkija on täytetty, kortti näkyy tiivistettynä ("Muokkaa").
+- **Liitteet:** tutkimussuunnitelma ja pohjakuva ovat yhdessä avattavassa kortissa, joka on suljettuna, kun molemmat on lisätty.
+- **Kirjaukset:** koko kortti avaa kirjauksen; Kopioi, Siirrä ylös/alas ja Poista ovat ⋯-valikossa.
+  Termi "menetelmä" tarkoittaa nyt vain pohjaa (esim. pintakosteusmittaus), tehty merkintä on "kirjaus".
+- **Kirjauslomake:**
+  - Kamera on alapalkissa.
+  - Kuvat ja kuvatekstit ovat yhtenä listana.
+  - Mikrofoni on kentän sisällä.
+  - Taulukkokentät näkyvät puhelimessa kortteina, ellei menetelmään ole valittu muuta näkymää.
+- **Yläpalkki:** yksi rivi: takaisin-nuoli, otsikko ja tallennustila. Tilan koko teksti näkyy napauttamalla.
+  Sisällön omat takaisin-painikkeet on poistettu.
+- **Alapalkki:** piiloutuu, kun kenttään kirjoitetaan (näppäimistö auki).
+- **Vahvistukset:** kaikki vahvistukset ovat omia ikkunoita, joiden painikkeissa lukee, mitä tapahtuu.
+  Peruuttamattomissa toiminnoissa turvallinen valinta on korostettu.
+- **Lisää toimintoja -valikkoon siirrettiin:** Muokkaa menetelmiä, Raporttipohjat ja Tallenna kaikki kuvat laitteelle.
+- **Ulkoasu:** isompi teksti ja vähintään 44 px:n painikkeet.
+
+## Etusivu (`index.html`)
+
+- Kesken olevat lomakkeet ensimmäisenä; koko kortti jatkaa lomaketta, poisto ⋯-valikossa (kaksi vahvistusta).
+- Käyttäjän valinta yläpalkin painikkeesta.
+- Ylläpito (käyttäjät, raporttipohjat, lomake-editori, siirtotyökalu, varmuuskopio, uloskirjautuminen) on suljetussa "Asetukset ja ylläpito" -osiossa.
+
+## Muut
+
+- PBM-väriteema myös omiin lomakkeisiin (`styles.css`, `form.html`) ja kirjautumissivulle (`auth-gate.js`).

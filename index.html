@@ -1,245 +1,143 @@
 <!DOCTYPE html>
-<html lang="fi">
+<html lang="fi" data-inline-logout>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
 <style>html{visibility:hidden}</style>
 <script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("sw.js").catch(function(){});});}</script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.4"></script>
 <script src="auth-gate.js" defer></script>
 <script src="submission-sync.js"></script>
 <script src="users.js"></script>
+<script src="ui-kit.js"></script>
 <title>Kenttälomakkeet</title>
 <style>
   :root{
-    --ink:#1c2430;
-    --ink-soft:#4a5568;
-    --paper:#f7f5f0;
-    --paper-raised:#ffffff;
-    --line:#dcd7cb;
-    --line-strong:#b9b2a0;
-    --brand:#33455c;
-    --brand-deep:#233043;
-    --accent:#8fb79c;
-    --radius:12px;
-    --shadow:0 1px 3px rgba(28,36,48,.08), 0 1px 2px rgba(28,36,48,.06);
+    --ink:#1c2430; --ink-soft:#4a5568; --paper:#f4f2ec; --paper-raised:#fff;
+    --line:#dcd7cb; --line-strong:#b9b2a0;
+    --red:#ED1C24; --accent:#C8102E; --accent-dark:#A50D24; --brand:#262626;
+    --ok:#2f6b3a; --ok-bg:#e6f0ea; --warn:#8a5a00; --warn-bg:#fbf1de;
+    --radius:12px; --tap:44px;
   }
-  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
-  html,body{margin:0;padding:0;}
-  body{
-    background:var(--paper);
-    color:var(--ink);
-    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-    line-height:1.45;
-    min-height:100vh;
-  }
-  h1{font-family:Georgia,"Iowan Old Style","Times New Roman",serif;margin:0;}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0}
+  body{background:var(--paper);color:var(--ink);font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;min-height:100vh;padding-bottom:calc(24px + env(safe-area-inset-bottom))}
+  button,input,select{font:inherit;color:inherit}
+  :focus-visible{outline:3px solid #1d4ed8;outline-offset:2px}
 
-  header.topbar{
-    background:var(--brand-deep);
-    color:#f2efe6;
-    padding:26px 20px 22px;
-  }
-  header.topbar h1{font-size:1.4rem;font-weight:700;letter-spacing:.01em;}
-  header.topbar .sub{font-size:.85rem;color:#c9cfd8;margin-top:6px;max-width:34em;}
+  .topbar{position:sticky;top:0;z-index:20;background:#fff;display:flex;align-items:center;gap:8px;min-height:60px;padding:6px 10px;border-bottom:4px solid var(--red);box-shadow:0 1px 4px rgba(0,0,0,.06)}
+  .topbar img{width:44px;height:44px;flex:0 0 44px}
+  .topbar h1{flex:1;min-width:0;margin:0;font-size:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .userchip{flex:0 1 auto;min-width:0;max-width:45vw;border:1.5px solid var(--line-strong);background:#fff;border-radius:99px;padding:6px 12px;min-height:40px;font-size:14px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
-  main{
-    max-width:640px;
-    margin:0 auto;
-    padding:16px 14px 40px;
-  }
+  .wrap{max-width:640px;margin:0 auto;padding:4px 12px 0}
+  .section-label{font-size:13px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-soft);margin:16px 4px 8px}
+  .group-label{font-size:14px;font-weight:700;color:var(--brand);margin:10px 4px 6px}
+  .group-label .gl-count{font-weight:400;color:var(--ink-soft)}
+  .empty-state{text-align:center;color:var(--ink-soft);font-size:15px;padding:18px 10px}
 
-  .form-card{
-    display:block;
-    background:var(--paper-raised);
-    border:1px solid var(--line);
-    border-radius:var(--radius);
-    box-shadow:var(--shadow);
-    padding:16px 16px 15px;
-    margin-bottom:12px;
-    text-decoration:none;
-    color:inherit;
-    position:relative;
-  }
-  .form-card:active{background:#f4f2ec;}
-  .fc-top{display:flex;align-items:flex-start;gap:12px;}
-  .fc-icon{
-    flex:0 0 auto;
-    width:42px;height:42px;
-    border-radius:9px;
-    background:var(--brand);
-    color:#fff;
-    display:flex;align-items:center;justify-content:center;
-    font-size:1.3rem;
-  }
-  .fc-body{flex:1;min-width:0;}
-  .fc-title{font-size:1.02rem;font-weight:700;color:var(--brand-deep);margin-bottom:2px;}
-  .fc-tag{
-    display:inline-block;
-    font-size:.76rem;
-    color:var(--ink-soft);
-    background:#eeece5;
-    border-radius:99px;
-    padding:2px 8px;
-    margin-bottom:6px;
-  }
-  .fc-desc{font-size:.86rem;color:var(--ink-soft);}
-  .fc-arrow{
-    flex:0 0 auto;
-    width:9px;height:9px;
-    border-right:2px solid var(--line-strong);
-    border-bottom:2px solid var(--line-strong);
-    transform:rotate(-45deg);
-    margin-top:16px;
-  }
-  .fc-external{
-    font-size:.76rem;
-    color:var(--ink-soft);
-    margin-top:8px;
-    display:flex;
-    align-items:center;
-    gap:4px;
-  }
+  /* Lomake- ja luonnoskortit: koko kortti napautettava, toiminnot ⋯-valikossa */
+  .form-card{display:flex;align-items:center;gap:12px;background:var(--paper-raised);border:1px solid var(--line);border-radius:var(--radius);padding:12px 14px;margin-bottom:10px;text-decoration:none;color:inherit;min-height:64px}
+  .form-card:active{background:#f6f3ec}
+  .fc-icon{flex:0 0 42px;height:42px;border-radius:9px;background:#fdeaea;box-shadow:inset 0 0 0 1.5px #f6b9bc;display:flex;align-items:center;justify-content:center;font-size:20px}
+  .fc-body{flex:1;min-width:0}
+  .fc-title{font-size:16px;font-weight:700;color:var(--brand)}
+  .fc-tag{font-size:13px;color:var(--ink-soft)}
+  .fc-desc{display:none}
+  .fc-arrow{flex:0 0 auto;width:10px;height:10px;border-right:2px solid var(--line-strong);border-bottom:2px solid var(--line-strong);transform:rotate(-45deg);margin-right:6px}
+  .fc-external{font-size:13px;color:var(--ink-soft)}
 
-  .empty-state{
-    text-align:center;
-    color:var(--ink-soft);
-    font-size:.88rem;
-    padding:40px 20px;
-  }
+  .draft-card{display:flex;align-items:center;gap:6px;background:var(--paper-raised);border:1px solid var(--line);border-radius:var(--radius);margin-bottom:10px}
+  .dc-main{flex:1;min-width:0;text-align:left;border:none;background:none;padding:12px 4px 12px 14px;cursor:pointer;border-radius:var(--radius)}
+  .dc-main:active{background:#f6f3ec}
+  .dc-title{font-weight:700;color:var(--brand);font-size:16px}
+  .dc-meta{font-size:14px;color:var(--ink-soft);margin-top:2px}
+  .dc-tags{margin-top:4px;display:flex;flex-wrap:wrap;gap:6px}
+  .tag{display:inline-block;border-radius:6px;padding:1px 8px;font-size:13px;font-weight:700}
+  .tag.ok{background:var(--ok-bg);color:var(--ok)}
+  .tag.warn{background:var(--warn-bg);color:var(--warn);border:1px solid #e3c27a}
+  .dc-more{flex:0 0 var(--tap);height:var(--tap);margin-right:6px;border:none;background:none;font-size:22px;color:var(--ink-soft);border-radius:10px;cursor:pointer}
+  .dc-more:active{background:#eee}
 
-  .section-label{
-    padding:10px 18px 4px;
-    font-size:.78rem;
-    font-weight:600;
-    color:var(--ink-soft);
-    text-transform:uppercase;
-    letter-spacing:.04em;
-  }
+  .dc-btn{border:1.5px solid var(--line-strong);background:#fff;color:var(--ink);border-radius:10px;padding:10px 16px;min-height:48px;font-size:16px;font-weight:700;cursor:pointer}
+  .dc-btn-primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .dc-btn-danger{color:var(--accent);border-color:#e3b3ab}
+  .dc-btn-block{width:100%}
 
-  .draft-card{
-    display:flex; align-items:flex-start; gap:10px;
-    background:var(--paper-raised); border:1px solid var(--line);
-    border-radius:var(--radius); box-shadow:var(--shadow);
-    margin:0 14px 10px; padding:13px 14px;
-  }
-  .dc-body{ flex:1; min-width:0; }
-  .dc-title{ font-weight:700; color:var(--brand-deep); font-size:.95rem; }
-  .dc-meta{ font-size:.82rem; color:var(--ink-soft); margin-top:2px; }
-  .dc-actions{ display:flex; flex-direction:column; gap:5px; flex:0 0 auto; }
-  .dc-btn{
-    border:1px solid var(--line-strong); background:#fff; color:var(--ink);
-    border-radius:8px; padding:10px 16px; min-height:44px; font-size:.88rem; cursor:pointer; white-space:nowrap;
-  }
-  :focus-visible{ outline:3px solid #1d4ed8; outline-offset:2px; }
-  .dc-btn-primary{ background:var(--brand-deep); color:#fff; border-color:var(--brand-deep); }
-  .dc-btn-danger{ color:#a13030; border-color:#a13030; }
+  details.admin{background:var(--paper-raised);border:1px solid var(--line);border-radius:var(--radius);margin:20px 0 12px}
+  details.admin>summary{list-style:none;padding:14px;font-weight:700;cursor:pointer;min-height:52px;display:flex;align-items:center;justify-content:space-between}
+  details.admin>summary::-webkit-details-marker{display:none}
+  details.admin>summary::after{content:"▾";color:var(--ink-soft)}
+  details.admin[open]>summary::after{content:"▴"}
+  .admin-body{padding:0 14px 14px;display:flex;flex-direction:column;gap:10px}
+  .admin-body h2{font-size:15px;margin:10px 0 0;color:var(--brand)}
+  .admin-body .hint{font-size:14px;color:var(--ink-soft);margin:0}
+  .u-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line)}
+  .u-row:first-of-type{border-top:none}
+  .u-name{flex:1;min-width:0;overflow-wrap:anywhere}
+  .u-add{display:flex;gap:8px}
+  .u-add input{flex:1;min-width:0;min-height:48px;font-size:16px;border:1.5px solid var(--line-strong);border-radius:10px;padding:8px 10px}
+  .u-error{color:#a3271b;font-size:14px}
+  a.dc-btn{display:flex;align-items:center;justify-content:center;text-decoration:none}
 
-  .userbar{
-    max-width:640px; margin:0 auto; padding:12px 14px 0;
-  }
-  .userbar-row{
-    display:flex; align-items:center; gap:8px; flex-wrap:wrap;
-    background:var(--paper-raised); border:1px solid var(--line);
-    border-radius:var(--radius); box-shadow:var(--shadow); padding:10px 12px;
-  }
-  .userbar label{ font-size:.85rem; font-weight:600; color:var(--ink-soft); }
-  .userbar select{
-    flex:1 1 140px; min-width:0; min-height:44px; font-size:1rem;
-    border:1px solid var(--line-strong); border-radius:8px; padding:8px 10px; background:#fff; color:var(--ink);
-  }
-  .userpanel{
-    margin-top:8px; background:var(--paper-raised); border:1px solid var(--line);
-    border-radius:var(--radius); box-shadow:var(--shadow); padding:12px 14px;
-  }
-  .userpanel h2{ font-size:.95rem; margin:0 0 8px; color:var(--brand-deep); }
-  .userpanel .u-hint{ font-size:.8rem; color:var(--ink-soft); margin:0 0 10px; }
-  .u-row{ display:flex; align-items:center; gap:8px; padding:6px 0; border-top:1px solid var(--line); }
-  .u-row:first-of-type{ border-top:none; }
-  .u-name{ flex:1; min-width:0; font-size:.95rem; overflow-wrap:anywhere; }
-  .u-add{ display:flex; gap:8px; margin-top:10px; }
-  .u-add input{
-    flex:1; min-width:0; min-height:44px; font-size:1rem;
-    border:1px solid var(--line-strong); border-radius:8px; padding:8px 10px;
-  }
-  .u-error{ color:#a13030; font-size:.82rem; margin-top:8px; }
-  .group-label{
-    padding:8px 18px 4px; font-size:.88rem; font-weight:700; color:var(--brand-deep);
-  }
-  .group-label .gl-count{ font-weight:400; color:var(--ink-soft); }
-
-  footer.note{
-    max-width:640px;
-    margin:0 auto;
-    padding:4px 18px 28px;
-    font-size:.76rem;
-    color:var(--ink-soft);
-  }
+  footer.note{max-width:640px;margin:0 auto;padding:8px 16px 0;font-size:13px;color:var(--ink-soft);display:flex;align-items:center;justify-content:center;gap:8px}
+  footer.note img{width:28px;height:28px}
 </style>
 </head>
 <body>
-<div id="bootSplash" style="visibility:visible;position:fixed;inset:0;z-index:99990;background:#233043;color:#f2efe6;display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:15px;">Ladataan…</div>
+<div id="bootSplash" style="visibility:visible;position:fixed;inset:0;z-index:99990;background:#fff;color:#262626;border-top:4px solid #ED1C24;display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:15px;">Ladataan…</div>
 
 <header class="topbar">
+  <img src="pbm-logo.png" alt="PBM">
   <h1>Kenttälomakkeet</h1>
-  <div class="sub">Valitse täytettävä lomake. Kaikki lomakkeet toimivat mobiilissa, tallentavat edistymisen laitteelle automaattisesti ja vievät raportin Word-tiedostona (.docx).</div>
+  <button type="button" class="userchip" id="userChip" aria-label="Käyttäjä tällä laitteella">👤 —</button>
 </header>
 
-<div class="userbar">
-  <div class="userbar-row">
-    <label for="activeUserSelect">Käyttäjä tällä laitteella</label>
-    <select id="activeUserSelect"></select>
-    <button type="button" class="dc-btn" id="manageUsersBtn" aria-expanded="false" aria-controls="userPanel">Käyttäjät…</button>
-  </div>
-  <div class="userpanel" id="userPanel" style="display:none;">
-    <h2>Käyttäjät</h2>
-    <p class="u-hint">Samoilla tunnuksilla voi olla useita käyttäjiä. Lomakkeille valitaan suorittaja näistä, ja keskeneräiset lomakkeet ryhmitellään käyttäjittäin.</p>
-    <div id="userList"></div>
-    <div class="u-add">
-      <input type="text" id="newUserName" placeholder="Uuden käyttäjän nimi" autocomplete="off" maxlength="80" aria-label="Uuden käyttäjän nimi">
-      <button type="button" class="dc-btn dc-btn-primary" id="addUserBtn">Lisää</button>
-    </div>
-    <div class="u-error" id="userError" role="alert" style="display:none;"></div>
-  </div>
-</div>
+<div class="wrap">
+  <div class="section-label" id="draftsLabel" role="heading" aria-level="2" style="display:none;">Kesken olevat</div>
+  <div id="draftsList"></div>
 
-<main id="formList"></main>
+  <div class="section-label" role="heading" aria-level="2">Aloita uusi</div>
+  <div id="formList"></div>
+  <div id="customFormsList"></div>
 
-<div class="section-label" id="draftsLabel" role="heading" aria-level="2" style="display:none;">Kesken olevat lomakkeet</div>
-<main id="draftsList"></main>
-
-<div class="section-label">Omat lomakkeet</div>
-<main id="customFormsList"></main>
-<div style="padding:0 14px 6px;">
-  <a href="editor.html" class="form-card" style="border-style:dashed;">
-    <div class="fc-top">
-      <div class="fc-icon">➕</div>
-      <div class="fc-body">
-        <div class="fc-title">Luo uusi lomake</div>
-        <div class="fc-desc">Avaa lomake-editori</div>
+  <details class="admin" id="adminSection">
+    <summary>Asetukset ja ylläpito</summary>
+    <div class="admin-body">
+      <h2 id="usersTitle">Käyttäjät</h2>
+      <p class="hint">Samoilla tunnuksilla voi olla useita käyttäjiä. Lomakkeille valitaan suorittaja näistä, ja keskeneräiset lomakkeet ryhmitellään käyttäjittäin.</p>
+      <div id="userList"></div>
+      <div class="u-add">
+        <input type="text" id="newUserName" placeholder="Uuden käyttäjän nimi" autocomplete="off" maxlength="80" aria-label="Uuden käyttäjän nimi">
+        <button type="button" class="dc-btn dc-btn-primary" id="addUserBtn">Lisää</button>
       </div>
-      <div class="fc-arrow"></div>
-    </div>
-  </a>
-</div>
+      <div class="u-error" id="userError" role="alert" style="display:none;"></div>
 
-<footer class="note" id="footerNote"></footer>
-<div style="text-align:center;margin-top:10px;">
-  <a href="migroi-lomakkeet.html" style="font-size:.75rem;color:var(--ink-soft);">Lomakkeiden siirtotyökalu</a>
-</div>
+      <h2>Raportit ja lomakepohjat</h2>
+      <a class="dc-btn dc-btn-block" href="raporttipohjat.html">📄 Raporttipohjat (Word)</a>
+      <a class="dc-btn dc-btn-block" href="editor.html">➕ Luo uusi lomakepohja</a>
+      <p class="hint">Lomake-editori toimii parhaiten tietokoneella.</p>
+      <a class="dc-btn dc-btn-block" href="migroi-lomakkeet.html">↔ Lomakkeiden siirtotyökalu</a>
 
-<section aria-labelledby="backupTitle" style="max-width:680px;margin:28px auto 24px;padding:0 14px;">
-  <details style="border:1px solid var(--line, #d8dce2);border-radius:12px;padding:12px 14px;background:var(--surface, #fff);">
-    <summary id="backupTitle" style="cursor:pointer;font-weight:600;">Varmuuskopioi lomakepohjat</summary>
-    <p style="font-size:.85rem;color:var(--ink-soft);line-height:1.5;margin:10px 0 12px;">Tallenna omat lomakepohjat tiedostoksi tai palauta ne aiemmin tehdystä varmuuskopiosta. Varmuuskopio sisältää lomakepohjien rakenteet, ei täytettyjä lomakkeita tai valokuvia. Palautus korvaa samannumeroisten lomakkeiden nykyiset versiot.</p>
-    <div style="display:flex;flex-wrap:wrap;gap:8px;">
-      <button type="button" class="dc-btn dc-btn-primary" id="exportFormsBackup">Lataa varmuuskopio</button>
-      <button type="button" class="dc-btn" id="importFormsBackup">Palauta varmuuskopiosta</button>
-      <input type="file" id="formsBackupFile" accept=".json,application/json" style="display:none;">
+      <h2 id="backupTitle">Varmuuskopio</h2>
+      <p class="hint">Tallenna omat lomakepohjat tiedostoksi tai palauta ne aiemmin tehdystä varmuuskopiosta. Varmuuskopio sisältää lomakepohjien rakenteet, ei täytettyjä lomakkeita tai valokuvia. Palautus korvaa samannumeroisten lomakkeiden nykyiset versiot.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;">
+        <button type="button" class="dc-btn dc-btn-primary" id="exportFormsBackup">Lataa varmuuskopio</button>
+        <button type="button" class="dc-btn" id="importFormsBackup">Palauta varmuuskopiosta</button>
+        <input type="file" id="formsBackupFile" accept=".json,application/json" style="display:none;">
+      </div>
+      <div id="backupStatus" role="status" aria-live="polite" style="font-size:14px;"></div>
+
+      <button type="button" class="dc-btn dc-btn-block" id="logoutBtnInline" style="margin-top:8px;">Kirjaudu ulos</button>
     </div>
-    <div id="backupStatus" role="status" aria-live="polite" style="font-size:.85rem;margin-top:10px;"></div>
   </details>
-</section>
+</div>
+
+<footer class="note"><img src="pbm-logo.png" alt=""><span id="footerNote">PBM · Kenttälomakkeet</span></footer>
 
 <script>
 "use strict";
@@ -289,17 +187,17 @@ function createFormCard(form){
   const body = document.createElement("div");
   body.className = "fc-body";
 
-  if (form.tag){
-    const tag = document.createElement("span");
-    tag.className = "fc-tag";
-    tag.textContent = form.tag;
-    body.appendChild(tag);
-  }
-
   const title = document.createElement("div");
   title.className = "fc-title";
   title.textContent = form.title;
   body.appendChild(title);
+
+  if (form.tag){
+    const tag = document.createElement("div");
+    tag.className = "fc-tag";
+    tag.textContent = form.tag;
+    body.appendChild(tag);
+  }
 
   const desc = document.createElement("div");
   desc.className = "fc-desc";
@@ -319,7 +217,8 @@ function createFormCard(form){
   arrow.className = "fc-arrow";
   top.appendChild(arrow);
 
-  a.appendChild(top);
+  while (top.firstChild) a.appendChild(top.firstChild);
+  if (form.desc) a.title = form.desc;
   return a;
 }
 
@@ -351,8 +250,7 @@ function renderCustomForms(rows){
   if (!rows || rows.length === 0){
     const empty = document.createElement("div");
     empty.className = "empty-state";
-    empty.textContent = "Ei vielä omia lomakkeita — luo ensimmäinen alla olevasta painikkeesta.";
-    wrap.appendChild(empty);
+    /* Omat lomakkeet luodaan Asetukset ja ylläpito -osiosta. */
     return;
   }
   rows.forEach(row => {
@@ -456,34 +354,44 @@ async function renderDrafts(){
   groups[key].forEach(sub => {
     const card = document.createElement("div");
     card.className = "draft-card";
+    const local = sub._localOnly || sub._localPending;
     card.innerHTML =
-      '<div class="dc-body">' +
+      '<button type="button" class="dc-main" data-action="resume">' +
         '<div class="dc-title">' + escapeHtmlLite(sub.title || "(nimetön)") + '</div>' +
-        '<div class="dc-meta">' + escapeHtmlLite(sub.form_label || sub.form_key) + ' · päivitetty ' + formatUpdatedAt(sub.updated_at) +
-          ((sub._localOnly || sub._localPending) ? ' · <strong>vain tällä laitteella, odottaa synkronointia</strong>' : '') + '</div>' +
-      '</div>' +
-      '<div class="dc-actions">' +
-        '<button type="button" class="dc-btn dc-btn-primary" data-action="resume">Jatka</button>' +
-        '<button type="button" class="dc-btn dc-btn-danger" data-action="delete">Poista</button>' +
-      '</div>';
-    card.querySelector('[data-action="resume"]').addEventListener("click", () => {
-      window.location.href = resumeUrl(sub);
-    });
-    card.querySelector('[data-action="delete"]').addEventListener("click", async () => {
-      /* KORJAUS: peruuttamaton poisto vaatii kirjoitetun vahvistuksen. */
-      const answer = prompt('Poistetaanko lomake "' + (sub.title || "(nimetön)") + '" pysyvästi?\n\nKaikki tiedot ja valokuvat häviävät, eikä poistoa voi perua.\n\nVahvista kirjoittamalla sana POISTA:');
-      if (answer === null) return;
-      if (String(answer).trim().toUpperCase() !== "POISTA"){ alert("Lomaketta ei poistettu."); return; }
-      if (sub._localOnly){
-        alert("Tämä lomake on vielä vain tällä laitteella. Avaa se verkkoyhteyden ollessa päällä, jotta se synkronoituu, ja poista vasta sitten.");
-        return;
-      }
-      try{
-        await window.SubmissionSync.deleteSubmission(sub.id);
-        renderDrafts();
-      }catch(err){
-        alert("Poisto epäonnistui. " + friendlyErr(err));
-      }
+        '<div class="dc-meta">' + escapeHtmlLite(sub.form_label || sub.form_key) + ' · ' + formatUpdatedAt(sub.updated_at) + '</div>' +
+        '<div class="dc-tags">' + (local
+          ? '<span class="tag warn">⚠ Vain tällä laitteella</span>'
+          : '<span class="tag ok">✓ Pilvessä</span>') + '</div>' +
+      '</button>' +
+      '<button type="button" class="dc-more" data-action="more" aria-label="Lomakkeen toiminnot">⋯</button>';
+    const resume = () => { window.location.href = resumeUrl(sub); };
+    card.querySelector('[data-action="resume"]').addEventListener("click", resume);
+    card.querySelector('[data-action="more"]').addEventListener("click", () => {
+      window.AppUI.sheet(sub.title || "(nimetön)", [
+        { label:"Jatka täyttämistä", icon:"▶", onSelect:resume },
+        { label:"Poista lomake…", icon:"🗑", danger:true, onSelect: async () => {
+          if (sub._localOnly){
+            await window.AppUI.choose({ title:"Lomaketta ei voi vielä poistaa",
+              text:"Lomake on vain tällä laitteella. Avaa se verkkoyhteyden ollessa päällä, jotta se siirtyy pilveen, ja poista vasta sitten.",
+              actions:[{ label:"Selvä", value:true, kind:"safe" }] });
+            return;
+          }
+          /* Peruuttamaton poisto: kaksi vahvistusta, turvallinen valinta korostettuna. */
+          const ok1 = await window.AppUI.confirm({ title:"Poistetaanko lomake pysyvästi?",
+            text:'"' + (sub.title || "(nimetön)") + '" – kaikki kirjaukset ja valokuvat poistuvat, eikä poistoa voi perua.',
+            ok:"Jatka poistoa…", cancel:"Säilytä lomake", danger:true });
+          if (!ok1) return;
+          const ok2 = await window.AppUI.confirm({ title:"Viimeinen vahvistus",
+            text:"Poistetaanko lomake ja sen kuvat lopullisesti?", ok:"Poista pysyvästi", cancel:"Säilytä lomake", danger:true });
+          if (!ok2) return;
+          try{
+            await window.SubmissionSync.deleteSubmission(sub.id);
+            renderDrafts();
+          }catch(err){
+            await window.AppUI.choose({ title:"Poisto epäonnistui", text:friendlyErr(err), actions:[{ label:"Selvä", value:true, kind:"safe" }] });
+          }
+        }}
+      ]);
     });
     wrap.appendChild(card);
   });
@@ -516,18 +424,10 @@ function userErrText(err){
 function renderUserUi(){
   if (!window.AppUsers) return;
   const names = window.AppUsers.names();
-  const sel = document.getElementById("activeUserSelect");
   const active = window.AppUsers.getActive();
-  sel.innerHTML = "";
-  const none = document.createElement("option");
-  none.value = ""; none.textContent = names.length ? "— ei valittu —" : "— lisää käyttäjä —";
-  sel.appendChild(none);
-  names.forEach(n => {
-    const o = document.createElement("option");
-    o.value = n; o.textContent = n;
-    sel.appendChild(o);
-  });
-  sel.value = active;
+  const chip = document.getElementById("userChip");
+  chip.textContent = "👤 " + (active ? active.split(" ")[0] : (names.length ? "Valitse" : "Lisää käyttäjä")) + " ▾";
+  chip.setAttribute("aria-label", "Käyttäjä tällä laitteella: " + (active || "ei valittu"));
 
   const list = document.getElementById("userList");
   list.innerHTML = "";
@@ -540,7 +440,7 @@ function renderUserUi(){
     row.innerHTML = '<div class="u-name">' + escapeHtmlLite(u.name) + '</div>' +
       '<button type="button" class="dc-btn dc-btn-danger" data-id="' + escapeHtmlLite(u.id) + '">Poista</button>';
     row.querySelector("button").addEventListener("click", async () => {
-      if (!confirm('Poistetaanko käyttäjä "' + u.name + '"? Jo tehdyt lomakkeet säilyttävät suorittajan nimen.')) return;
+      if (!(await window.AppUI.confirm({ title:'Poistetaanko käyttäjä "' + u.name + '"?', text:"Jo tehdyt lomakkeet säilyttävät suorittajan nimen.", ok:"Poista käyttäjä", cancel:"Peruuta", danger:true }))) return;
       showUserError("");
       try{ await window.AppUsers.remove(u.id); }
       catch(err){ showUserError(userErrText(err)); }
@@ -552,16 +452,24 @@ function renderUserUi(){
   else if (st.error) showUserError("Käyttäjien haku epäonnistui (" + [st.error.code, st.error.message].filter(Boolean).join(": ") + ")");
 }
 (function initUserUi(){
-  const panel = document.getElementById("userPanel");
-  const toggle = document.getElementById("manageUsersBtn");
-  toggle.addEventListener("click", () => {
-    const open = panel.style.display === "none";
-    panel.style.display = open ? "" : "none";
-    toggle.setAttribute("aria-expanded", open ? "true" : "false");
-    if (open) document.getElementById("newUserName").focus();
+  function openUserAdmin(){
+    const d = document.getElementById("adminSection");
+    d.open = true;
+    document.getElementById("usersTitle").scrollIntoView({ block:"start", behavior:"smooth" });
+    setTimeout(() => document.getElementById("newUserName").focus({ preventScroll:true }), 400);
+  }
+  document.getElementById("userChip").addEventListener("click", () => {
+    const names = window.AppUsers ? window.AppUsers.names() : [];
+    const active = window.AppUsers ? window.AppUsers.getActive() : "";
+    window.AppUI.sheet("Käyttäjä tällä laitteella", names.map(n => ({
+      label:n, icon:n === active ? "✓" : "\u2003", onSelect:() => window.AppUsers.setActive(n)
+    })).concat([{ label:"Hallitse käyttäjiä…", icon:"⚙", onSelect:openUserAdmin }]));
   });
-  document.getElementById("activeUserSelect").addEventListener("change", e => {
-    window.AppUsers.setActive(e.target.value);
+  document.getElementById("logoutBtnInline").addEventListener("click", async () => {
+    const ok = await window.AppUI.confirm({ title:"Kirjaudutaanko ulos?",
+      text:window.__logoutConfirmText ? window.__logoutConfirmText() : "", ok:"Kirjaudu ulos", cancel:"Peruuta" });
+    if (!ok || !window.__supabaseClient) return;
+    try{ await window.__supabaseClient.auth.signOut(); }catch(e){}
   });
   async function addUser(){
     const input = document.getElementById("newUserName");
@@ -690,7 +598,7 @@ backupFileInput.addEventListener("change", async () => {
   }
   const methodCount = Array.isArray(backedUpMethods) ? backedUpMethods.length : 0;
   const restoreMessage = "Palautetaanko " + backup.forms.length + " lomakepohjaa" + (backup.version >= 2 ? " sekä " + methodCount + " kenttälomakkeen menetelmää/kenttärakennetta" : "") + "? Samalla tunnisteella olevat tiedot korvataan varmuuskopion versiolla. Muita lomakkeita ei poisteta.";
-  if (!confirm(restoreMessage)) return;
+  if (!(await window.AppUI.confirm({ title:"Palautetaanko varmuuskopio?", text:restoreMessage, ok:"Palauta", cancel:"Peruuta" }))) return;
 
   restoreButton.disabled = true;
   backupButton.disabled = true;
@@ -733,8 +641,7 @@ backupFileInput.addEventListener("change", async () => {
 });
 
 renderForms();
-document.getElementById("footerNote").textContent =
-  `${FORMS.length} lomake${FORMS.length === 1 ? "" : "tta"} saatavilla.`;
+document.getElementById("footerNote").textContent = "PBM · Kenttälomakkeet";
 </script>
 </body>
 </html>

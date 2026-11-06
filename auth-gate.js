@@ -68,7 +68,7 @@
     overlay.id = "authOverlay";
     overlay.style.cssText =
       "visibility:visible;position:fixed;inset:0;z-index:99999;" +
-      "background:#233043;color:#f2efe6;display:flex;align-items:center;" +
+      "background:#f4f2ec;border-top:6px solid #ED1C24;color:#1c2430;display:flex;align-items:center;" +
       "justify-content:center;padding:20px;" +
       "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;";
     document.body.appendChild(overlay);
@@ -78,10 +78,11 @@
 
   const cardOpen =
     '<div style="width:100%;max-width:320px;background:#fff;color:#1c2430;' +
-    'border-radius:12px;padding:24px 22px;box-shadow:0 8px 30px rgba(0,0,0,.35);">';
+    'border-radius:12px;padding:24px 22px;box-shadow:0 8px 30px rgba(0,0,0,.12);">' +
+    '<img src="pbm-logo.png" alt="PBM" style="display:block;width:72px;height:72px;margin:0 auto 12px;">';
   const titleHtml = (text) =>
     '<div style="font-family:Georgia,\'Iowan Old Style\',\'Times New Roman\',serif;font-size:1.15rem;' +
-    'font-weight:700;margin-bottom:4px;color:#233043;">' + text + '</div>';
+    'font-weight:700;margin-bottom:4px;color:#262626;">' + text + '</div>';
   const subHtml = (text) =>
     '<div style="font-size:.8rem;color:#4a5568;margin-bottom:16px;">' + text + '</div>';
   const labelHtml = (text, forId) =>
@@ -93,7 +94,7 @@
     '<div id="authError" style="display:none;color:#a13030;font-size:.8rem;margin-bottom:10px;"></div>';
   const primaryBtnStyle =
     'width:100%;border:none;border-radius:8px;padding:13px 10px;font-size:1rem;min-height:46px;' +
-    'font-weight:600;background:#233043;color:#fff;cursor:pointer;';
+    'font-weight:600;background:#C8102E;color:#fff;cursor:pointer;';
   const linkBtnStyle =
     'display:block;width:100%;text-align:center;background:none;border:none;' +
     'color:#4a5568;font-size:.88rem;margin-top:8px;padding:12px 0;cursor:pointer;text-decoration:underline;';
