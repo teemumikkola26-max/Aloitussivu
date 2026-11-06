@@ -289,7 +289,8 @@
     window.addEventListener("resize", place);
     if (bar && window.ResizeObserver) new ResizeObserver(place).observe(bar);
     btn.addEventListener("click", async () => {
-      if (!confirm("Kirjaudutaanko ulos?")) return;
+      if (!confirm(logoutConfirmText())) return;
+      try{ if (typeof window.__flushSave === "function") await window.__flushSave(); }catch(e){}
       await supabaseClient.auth.signOut();
     });
     document.body.appendChild(btn);
@@ -300,7 +301,56 @@
     if (sp) sp.remove();
   }
 
+  /* KORJAUS: onko laitteelle tallennettu kirjautumisistunto? Käytetään
+     ilman verkkoa, jotta laitteelle tallennettuihin tietoihin pääsee käsiksi
+     myös silloin, kun istunnon tunniste on ehtinyt vanhentua. */
+  function hasStoredSession(){
+    try{
+      for (let i = 0; i < localStorage.length; i++){
+        const k = localStorage.key(i);
+        if (k && /^sb-.*-auth-token$/.test(k)){
+          const v = JSON.parse(localStorage.getItem(k) || "null");
+          if (v && (v.user || (v.currentSession && v.currentSession.user))) return true;
+        }
+      }
+    }catch(e){}
+    return false;
+  }
+  function offlineAllowed(){
+    return !navigator.onLine && hasStoredSession();
+  }
+
+  /* KORJAUS: pyydetään selainta säilyttämään sovelluksen tallennustila
+     (muuten esim. Safari voi tyhjentää sen, jos sivustoa ei käytetä). */
+  let persistAsked = false;
+  function askPersistentStorage(){
+    if (persistAsked) return;
+    persistAsked = true;
+    try{
+      if (navigator.storage && navigator.storage.persist){
+        navigator.storage.persisted().then(p => { if (!p) navigator.storage.persist(); }).catch(() => {});
+      }
+    }catch(e){}
+  }
+
+  /* Uloskirjautumisen vahvistusteksti tilanteen mukaan. */
+  function logoutConfirmText(){
+    let unsynced = false;
+    try{ unsynced = typeof window.__hasUnsyncedChanges === "function" && window.__hasUnsyncedChanges(); }catch(e){}
+    if (!navigator.onLine){
+      return "Ei verkkoyhteyttä.\n\nJos kirjaudut nyt ulos, pääset takaisin sisään vasta kun yhteys palaa. " +
+        "Tallennetut tiedot säilyvät tällä laitteella.\n\nKirjaudutaanko silti ulos?";
+    }
+    if (unsynced){
+      return "Kaikkia muutoksia ei ole vielä viety pilveen.\n\nNe säilyvät tällä laitteella ja viedään pilveen, " +
+        "kun kirjaudut seuraavan kerran sisään tällä laitteella.\n\nKirjaudutaanko silti ulos?";
+    }
+    return "Kirjaudutaanko ulos?";
+  }
+  window.__logoutConfirmText = logoutConfirmText;
+
   function revealContent(){
+    askPersistentStorage();
     removeSplash();
     document.documentElement.style.visibility = "visible";
     document.body.style.overflow = "";
@@ -310,6 +360,7 @@
   }
 
   function lockContent(){
+    if (offlineAllowed()){ revealContent(); return; }
     removeSplash();
     document.documentElement.style.visibility = "hidden";
     document.body.style.overflow = "hidden";
@@ -338,6 +389,7 @@
 
       supabaseClient.auth.getSession().then(({ data, error }) => {
         if (error){
+          if (offlineAllowed()){ revealContent(); return; }
           showFatalError("Istunnon haku epäonnistui: " + error.message);
           return;
         }
@@ -350,6 +402,7 @@
           lockContent();
         }
       }).catch((err) => {
+        if (offlineAllowed()){ revealContent(); return; }
         showFatalError("Istunnon haku epäonnistui: " + (err && err.message ? err.message : err));
       });
     } catch (err){

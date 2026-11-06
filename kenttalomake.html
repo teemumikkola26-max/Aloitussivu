@@ -1769,14 +1769,38 @@ let autosavePending=false;
 let autosavePendingCloud=false;
 let toastTimer=null;
 
+let saveTimerActive=false;
+
 function scheduleAutosave(){
 
   clearTimeout(saveTimer);
+  saveTimerActive=true;
 
   saveTimer=setTimeout(()=>{
     autosave();
   },350);
 }
+
+/*
+ * KORJAUS: jos laitteelle tallennus on vielä kesken, selain kysyy
+ * ennen sivun sulkemista. Tallennus käynnistetään samalla heti.
+ */
+window.addEventListener("beforeunload",e=>{
+  if(saveTimerActive || autosaveInProgress){
+    autosave(true);
+    e.preventDefault();
+    e.returnValue="";
+  }
+});
+
+/* Muiden skriptien (auth-gate.js) käyttöön: uloskirjautumisen varoitus. */
+window.__hasUnsyncedChanges=()=>{
+  try{
+    return saveTimerActive || autosaveInProgress ||
+      hasUnsyncedLocalChanges() || pendingPhotoCount()>0;
+  }catch(err){return false;}
+};
+window.__flushSave=()=>autosave(true);
 
 function setSyncStatus(text,state=""){
 
@@ -1871,6 +1895,7 @@ async function autosave(skipCloud){
 
   autosaveInProgress=true;
   clearTimeout(saveTimer);
+  saveTimerActive=false;
 
   setSyncStatus("Tallennetaan...");
 
@@ -2892,6 +2917,7 @@ async function loadState(){
   const value=await readLocalState();
   const localHasContent=!!(value && (
     (Array.isArray(value.entries) && value.entries.length) ||
+    !!value.editingEntry ||
     (Array.isArray(value.deletedEntryIds) && value.deletedEntryIds.length) ||
     (value.project && Object.keys(value.project).some(k=>value.project[k]))
   ));
@@ -3207,16 +3233,19 @@ function confirmClearForm(){
   }
 
 
-  if(
-    confirm(
-      "Tyhjennetäänkö koko lomake?\n\n"+
-      "Kaikki kohteen tiedot, menetelmät, valokuvat, pohjakuva ja tutkimussuunnitelma "+
-      "poistetaan pysyvästi — myös pilvestä."
-    )
-  ){
-
-    clearForm();
+  /* KORJAUS: peruuttamaton toiminto vaatii kirjoitetun vahvistuksen. */
+  const answer=prompt(
+    "Tyhjennetäänkö koko lomake?\n\n"+
+    "Kaikki kohteen tiedot, menetelmät, valokuvat, pohjakuva ja tutkimussuunnitelma "+
+    "poistetaan pysyvästi — myös pilvestä. Tätä ei voi perua.\n\n"+
+    "Vahvista kirjoittamalla sana TYHJENNÄ:"
+  );
+  if(answer===null)return;
+  if(String(answer).trim().toUpperCase()!=="TYHJENNÄ"){
+    toast("Lomaketta ei tyhjennetty");
+    return;
   }
+  clearForm();
 }
 
 
@@ -3272,6 +3301,14 @@ async function clearForm(){
    */
   try{
     await idbDeleteDatabase(oldDbName);
+  }catch(err){
+    console.warn(err);
+  }
+  /* Poistetaan myös laitteen lomakeluettelosta. */
+  try{
+    if(window.SubmissionSync && window.SubmissionSync.forgetLocalDraft){
+      await window.SubmissionSync.forgetLocalDraft(oldSubmissionId);
+    }
   }catch(err){
     console.warn(err);
   }
@@ -3969,7 +4006,35 @@ function entryHasData(e){
 
 function leaveEntryForm(){
   if(editingIsNew && entryHasData(editingEntry)){
-    if(!confirm("Hylätäänkö tämä keskeneräinen menetelmä?\n\nSyötetyt tiedot ja kuvat poistetaan.")){
+    /*
+     * KORJAUS: uutta menetelmää ei enää hylätä yhdellä painalluksella.
+     * Jos pakolliset tiedot ovat kunnossa, menetelmä tallennetaan
+     * automaattisesti. Muuten oletusvalinta (OK) palaa täydentämään,
+     * ja hylkääminen vaatii kaksi erillistä vahvistusta.
+     */
+    const m=METHODS.find(x=>x.id===editingEntry.methodId);
+    const missing=m?findMissingRequired(editingEntry,m):[];
+    if(m && !missing.length){
+      saveEntryForm();
+      if(view!=="entryForm"){
+        toast("Menetelmä tallennettiin automaattisesti");
+        return true;
+      }
+      return false;
+    }
+    if(confirm(
+      "Menetelmää ei ole vielä tallennettu, koska siitä puuttuu pakollisia tietoja"+
+      (missing.length?" ("+missing.length+")":"")+".\n\n"+
+      "Paina OK palataksesi täydentämään tietoja.\n"+
+      "Paina Peruuta vain, jos haluat hylätä menetelmän."
+    )){
+      if(missing.length)showFieldErrors(missing.map(f=>[f,"Pakollinen tieto puuttuu"]));
+      return false;
+    }
+    if(!confirm(
+      "Hylätäänkö menetelmä varmasti?\n\n"+
+      "Syötetyt tiedot ja kuvat poistetaan, eikä niitä voi palauttaa."
+    )){
       return false;
     }
     (editingEntry.photos||[]).forEach(p=>{
@@ -3991,6 +4056,20 @@ function navBack(){
   }else if(view==="methodsManage"){
     view="methodSelect";
   }else if(view==="methodEdit"){
+    /* KORJAUS: tallentamattomat rakennemuutokset eivät katoa huomaamatta. */
+    if(editingMethod){
+      const orig=METHODS.find(x=>x.id===editingMethod.id);
+      const dirty=editingMethodIsNew ||
+        !orig || JSON.stringify(orig)!==JSON.stringify(editingMethod);
+      if(dirty && !confirm(
+        "Menetelmän muutoksia ei ole tallennettu.\n\n"+
+        "Paina OK hylätäksesi muutokset.\n"+
+        "Paina Peruuta jatkaaksesi muokkausta."
+      )){
+        syncHistory();
+        return;
+      }
+    }
     discardUnsavedGuides();
     editingMethod=null;
     editingMethodIsNew=false;
@@ -4428,7 +4507,8 @@ function renderMoreMenu(){
       encodeURIComponent("kenttalomake.html");
   };
   d.querySelector("#btnLogout").onclick=async()=>{
-    if(!confirm("Kirjaudutaanko ulos?"))return;
+    if(!confirm(window.__logoutConfirmText?window.__logoutConfirmText():"Kirjaudutaanko ulos?"))return;
+    try{await autosave(true);}catch(err){}
     try{await window.__supabaseClient.auth.signOut();}catch(err){toast("Uloskirjautuminen epäonnistui");}
   };
   const chk=d.querySelector("#chkDeviceSave");

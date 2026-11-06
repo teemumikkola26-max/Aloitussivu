@@ -309,6 +309,7 @@ async function doSave(){
   saveTimer = null;
   /* Merkitään, että laitteella on pilveen viemättömiä muutoksia. Lippu
      poistetaan vasta onnistuneen pilvitallennuksen jälkeen. */
+  cloudPendingMem = true;
   await idbPut("meta", { key:"cloudPending", value: true });
   await idbPut("meta", { key:"header", value: state.header });
   await idbPut("meta", { key:"reveals", value: state.reveals || {} });
@@ -335,6 +336,19 @@ async function doSave(){
   }
   syncToCloud();
 }
+
+/* KORJAUS: selain kysyy ennen sulkemista, jos laitteelle tallennus on kesken. */
+window.addEventListener("beforeunload", (e) => {
+  if (!READ_ONLY && saveTimer){
+    flushSave().catch(() => {});
+    e.preventDefault();
+    e.returnValue = "";
+  }
+});
+let cloudPendingMem = false;
+/* Muiden skriptien (auth-gate.js) käyttöön: uloskirjautumisen varoitus. */
+window.__hasUnsyncedChanges = () => !READ_ONLY && (!!saveTimer || cloudSyncInFlight || cloudPendingMem || localPendingAtLoad);
+window.__flushSave = () => flushSave();
 
 /* Ajaa odottavan tallennuksen heti (esim. ennen sivulta poistumista). */
 function flushSave(){
@@ -383,6 +397,8 @@ async function syncToCloud(){
     const unsentPhotos = Object.keys(state.items).some(id => state.items[id].photos.some(p => !p.path && p.blob));
     if (changeSeq === seqAtSnapshot && !saveTimer && !unsentPhotos){
       await idbPut("meta", { key:"cloudPending", value: false });
+      cloudPendingMem = false;
+      localPendingAtLoad = false;
     }
     setSaveIndicator("Tallennettu pilveen");
   }catch(e){

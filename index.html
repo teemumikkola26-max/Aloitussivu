@@ -470,7 +470,10 @@ async function renderDrafts(){
       window.location.href = resumeUrl(sub);
     });
     card.querySelector('[data-action="delete"]').addEventListener("click", async () => {
-      if (!confirm('Poistetaanko lomake "' + (sub.title || "(nimetön)") + '" pysyvästi? Kaikki tiedot ja valokuvat häviävät.')) return;
+      /* KORJAUS: peruuttamaton poisto vaatii kirjoitetun vahvistuksen. */
+      const answer = prompt('Poistetaanko lomake "' + (sub.title || "(nimetön)") + '" pysyvästi?\n\nKaikki tiedot ja valokuvat häviävät, eikä poistoa voi perua.\n\nVahvista kirjoittamalla sana POISTA:');
+      if (answer === null) return;
+      if (String(answer).trim().toUpperCase() !== "POISTA"){ alert("Lomaketta ei poistettu."); return; }
       if (sub._localOnly){
         alert("Tämä lomake on vielä vain tällä laitteella. Avaa se verkkoyhteyden ollessa päällä, jotta se synkronoituu, ja poista vasta sitten.");
         return;
