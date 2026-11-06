@@ -53,3 +53,25 @@
 ## Muut
 
 - PBM-väriteema myös omiin lomakkeisiin (`styles.css`, `form.html`) ja kirjautumissivulle (`auth-gate.js`).
+
+## Pohjakuvan merkinnät (`plan-markup.js`)
+
+Pohjakuvalla on kohteen yhteinen merkintäkerros. Sen avaa pohjakuvakortin painikkeesta **✏ Piirrä ja merkitse pohjakuvaan**.
+
+- **Työkalut:**
+  - Piirto ja muodot: kynä, korostus, viiva, nuoli, murtoviiva, suorakulmio, ellipsi, monikulmio ja pilvi.
+  - Tekstit: tekstilaatikko ja selite nuolella.
+  - Symbolit numeroituvat automaattisesti: MP, RA, N, MAK, VM, LK ja numeroitu merkki.
+  - Valmiit alueet: kosteusvaurioalue, mikrobivaurioepäily, tutkimaton alue, ilmavuoto ja halkeama.
+  - Selitelaatikko listaa sivulla käytetyt symbolit ja alueet automaattisesti.
+- **Muotoilu:** viivan ja täytön väri (myös oma väri), viivan paksuus, viivatyyli (yhtenäinen, katko, piste), läpinäkyvyys, täytön peittävyys, tekstin koko ja väri sekä nuolenkärjet viivan kumpaankin päähän.
+- **Muokkaus:**
+  - Merkinnän voi valita, siirtää ja muotoilla kahvoista.
+  - Merkinnän voi monistaa, tuoda päällimmäiseksi ja poistaa.
+  - Kumoa ja tee uudelleen.
+  - Nipistys- ja painikezoomaus.
+  - Useampisivuiset PDF:t.
+  - Kirjausten sijaintimerkinnät näkyvät taustalla himmennettyinä.
+- **Vienti:** "Vie pohjakuva merkinnöin (PDF)" lisää piirrokset oikeina PDF-kommentteina (Ink, Line, PolyLine, Square, Circle, Polygon/pilvi, FreeText, Stamp). Niitä voi jatkaa muokkaamaan esim. PDF-XChangessa. Merkinnät osuvat oikein myös kierretyille sivuille.
+- **Tallennus:** merkinnät tallentuvat laitteelle ja pilveen lomakkeen mukana. Usean käyttäjän muutokset yhdistetään merkinnöittäin, jolloin uusin muokkaus voittaa ja poistot säilyvät.
+- **Pohjakuvan vaihto tai poisto** poistaa myös piirrokset, ja tästä varoitetaan ennen vaihtoa.

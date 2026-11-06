@@ -18,6 +18,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="ui-kit.js"></script>
 <script src="report-template-engine.js"></script>
+<script src="plan-markup.js"></script>
 <script src="report-templates.js" defer></script>
 <script src="docx-style-engine.js" defer></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -1458,6 +1459,12 @@ let project={
 
 let entries=[];
 
+/* Pohjakuvan yhteinen merkintäkerros (plan-markup.js): muodot ja poistettujen tunnisteet. */
+let planMarkup={shapes:[],deleted:[]};
+let markupSyncedSig="";
+function markupSig(){
+  return planMarkup.shapes.map(s=>s.id+"@"+(s.updatedAt||"")).join("|")+"#"+planMarkup.deleted.length;
+}
 /*
  * Usean käyttäjän yhteiskäyttö: poistetut merkinnät (poistomerkinnät),
  * viimeksi nähty pilviversio ja paikalliset projektikenttien muutokset.
@@ -1846,6 +1853,8 @@ function createPortableState(){
 
   return {
     project,
+    planMarkup,
+    markupSyncedSig,
     entrySyncSig,
     projectDirty,
     deletedEntryIds,
@@ -1884,6 +1893,8 @@ function createIndexedDbState(){
 
   return {
     project,
+    planMarkup,
+    markupSyncedSig,
     /* KORJAUS: synkronointitiedot talteen, jotta seuraavalla avauksella
        tiedetään, mitkä paikalliset muutokset puuttuvat vielä pilvestä. */
     entrySyncSig,
@@ -2344,6 +2355,18 @@ async function mergeRemote(remote){
     }
   });
 
+  /* Pohjakuvan merkinnät: yhdistetään muodoittain, uusin muokkaus voittaa. */
+  if(d.planMarkup && Array.isArray(d.planMarkup.shapes) && window.PlanMarkup){
+    const rDel=Array.isArray(d.planMarkup.deleted)?d.planMarkup.deleted:[];
+    const before=markupSig();
+    const merged=window.PlanMarkup.merge(planMarkup.shapes,d.planMarkup.shapes,planMarkup.deleted,rDel);
+    const delSet={};planMarkup.deleted.concat(rDel).forEach(id=>{delSet[id]=1;});
+    planMarkup={shapes:merged,deleted:Object.keys(delSet)};
+    if(markupSig()!==before)out.changed=true;
+    const remoteIds={};d.planMarkup.shapes.forEach(s=>{remoteIds[s.id+"@"+(s.updatedAt||"")]=1;});
+    if(merged.some(s=>!remoteIds[s.id+"@"+(s.updatedAt||"")]))out.needsPush=true;
+  }
+
   /* Pohjakuva: otetaan pilven versio, ellei paikallinen ole vielä lähettämättä */
   const localPending=!!(floorPlanBlob && !floorPlanPath);
 
@@ -2635,6 +2658,7 @@ async function syncToCloud(){
     }));
 
 
+    const pushedMarkupSig=markupSig();
     const savedRow=await window.SubmissionSync.saveSubmission({
 
       id:SUBMISSION_ID,
@@ -2651,6 +2675,7 @@ async function syncToCloud(){
         project:pushedProject,
         entries:cloudEntries,
         deletedEntryIds,
+        planMarkup:{shapes:planMarkup.shapes,deleted:planMarkup.deleted.slice(-500)},
         floorPlanPath:floorPlanPath||null,
         researchPlan:researchPlanPath
           ? {path:researchPlanPath,name:researchPlanName||"tutkimussuunnitelma.pdf"}
@@ -2665,7 +2690,7 @@ async function syncToCloud(){
       if(project[k]===pushedProject[k])delete projectDirty[k];
     });
     researchPlanCleared=false;
-
+    markupSyncedSig=pushedMarkupSig;
     if(entries.map(e=>e.id).join(",")===orderSnapshot){
       entryOrderDirty=false;
     }
@@ -2897,6 +2922,13 @@ async function applyLocalState(value){
 
 
 
+  if(value.planMarkup && Array.isArray(value.planMarkup.shapes)){
+    planMarkup={
+      shapes:value.planMarkup.shapes,
+      deleted:Array.isArray(value.planMarkup.deleted)?value.planMarkup.deleted:[]
+    };
+  }
+  markupSyncedSig=typeof value.markupSyncedSig==="string"?value.markupSyncedSig:"";
   entrySyncSig=
     (value.entrySyncSig && typeof value.entrySyncSig==="object")
       ? Object.assign({},value.entrySyncSig)
@@ -2910,6 +2942,7 @@ async function applyLocalState(value){
 /* Onko laitteen kopiossa muutoksia, joita pilvessä ei vielä ole? */
 function hasUnsyncedLocalChanges(){
   if(Object.keys(projectDirty).some(k=>projectDirty[k]))return true;
+  if(markupSig()!==markupSyncedSig)return true;
   if(entryOrderDirty)return true;
   return entries.some(e=>
     entrySyncSig[e.id]===undefined ||
@@ -3442,6 +3475,8 @@ async function clearForm(){
   lastRemoteUpdatedAt=null;
   projectDirty={};
   entrySyncSig={};
+  planMarkup={shapes:[],deleted:[]};
+  markupSyncedSig="";
 
   editingEntry=null;
   editingIsNew=false;
@@ -9453,12 +9488,13 @@ async function saveFloorPlan(blob){
   }
 
 
+  const hadDrawings=planMarkup.shapes.length>0;
   if(
-    hadMarkers &&
+    (hadMarkers||hadDrawings) &&
     floorPlanBlob &&
     !(await window.AppUI.confirm({
       title:"Vaihdetaanko pohjakuva?",
-      text:"Nykyiseen pohjakuvaan tehdyt sijaintimerkinnät poistetaan, koska niiden koordinaatit eivät välttämättä vastaa uutta pohjakuvaa.",
+      text:"Nykyiseen pohjakuvaan tehdyt sijaintimerkinnät"+(hadDrawings?" ja piirrokset ("+planMarkup.shapes.length+")":"")+" poistetaan, koska niiden koordinaatit eivät välttämättä vastaa uutta pohjakuvaa.",
       ok:"Vaihda pohjakuva",cancel:"Peruuta",danger:true
     }))
   ){
@@ -9499,13 +9535,13 @@ async function saveFloorPlan(blob){
 
 
   if(hadMarkers){
-
     entries.forEach(
       e=>{
         delete e.marker;
       }
     );
   }
+  clearPlanMarkup();
 
 
   /*
@@ -9557,6 +9593,55 @@ async function loadFloorPlan(){
 }
 
 
+function clearPlanMarkup(){
+  if(!planMarkup.shapes.length)return;
+  planMarkup={shapes:[],deleted:planMarkup.deleted.concat(planMarkup.shapes.map(s=>s.id))};
+}
+
+/* Pohjakuvan merkintäeditori (piirto, muodot, tekstit, symbolit). */
+async function openPlanMarkup(){
+  if(!floorPlanBlob||!window.PlanMarkup){toast("Pohjakuvaa ei ole ladattu");return;}
+  let doc;
+  try{doc=await getPdfDocument(floorPlanBlob);}catch(err){toast("Pohjakuvaa ei saatu avattua");return;}
+  const markers=[];
+  entries.forEach((e,i)=>{
+    if(!e.marker)return;
+    markers.push({page:e.marker.page||1,x:e.marker.x,y:e.marker.y,color:e.marker.color,label:(e.marker.label||"").trim()||String(i+1)});
+  });
+  await window.PlanMarkup.open({
+    getPage:n=>doc.getPage(n),
+    pageCount:doc.numPages,
+    startPage:floorPlanPreviewPage||1,
+    shapes:planMarkup.shapes,
+    markers,
+    author:currentUserName(),
+    onSave:(shapes,deleted)=>{
+      const del={};planMarkup.deleted.concat(deleted||[]).forEach(id=>{del[id]=1;});
+      planMarkup={shapes,deleted:Object.keys(del)};
+      autosave();
+      render();
+      toast("Pohjakuvan merkinnät tallennettu");
+    }
+  });
+}
+
+/* Piirrokset pohjakuvan esikatselun päälle. */
+async function overlayPlanMarkup(host,pageNo){
+  if(!window.PlanMarkup||!planMarkup.shapes.some(s=>s.page===pageNo))return;
+  try{
+    const doc=await getPdfDocument(floorPlanBlob);
+    const vp=(await doc.getPage(pageNo)).getViewport({scale:1});
+    const svg=window.PlanMarkup.svgForPage(planMarkup.shapes,pageNo,vp.width,vp.height);
+    if(!svg)return;
+    const holder=document.createElement("div");
+    holder.style.cssText="position:absolute;inset:0;pointer-events:none;";
+    holder.innerHTML=svg;
+    const s=holder.firstChild;
+    s.style.width="100%";s.style.height="100%";s.style.display="block";
+    host.appendChild(holder);
+  }catch(err){console.warn("Merkintöjen esikatselu",err);}
+}
+
 async function removeFloorPlanFile(){
 
   const oldPath=
@@ -9587,10 +9672,9 @@ async function removeFloorPlanFile(){
   floorPlanPath=null;
   floorPlanPreviewPage=1;
   pendingOldFloorPlanPath=null;
-
-
   _pdfDocCache=null;
   _pdfDocCacheBlob=null;
+  clearPlanMarkup();
 
 
   /*
@@ -9988,9 +10072,12 @@ function renderFloorPlanCard(){
     canvas.style.maxWidth="100%";
     canvas.style.display="block";
 
-
+    /* Piirrokset näytetään esikatselun päällä samassa mittakaavassa. */
+    const canvasHost=document.createElement("div");
+    canvasHost.style.position="relative";
+    canvasHost.appendChild(canvas);
     previewWrap.appendChild(
-      canvas
+      canvasHost
     );
 
 
@@ -10008,6 +10095,14 @@ function renderFloorPlanCard(){
     );
 
 
+    const drawBtn=el(`
+      <button type="button" class="btn btn-primary btn-block" style="margin:4px 0 8px;">
+        ✏ Piirrä ja merkitse pohjakuvaan${planMarkup.shapes.length?" ("+planMarkup.shapes.length+")":""}
+      </button>
+    `);
+    drawBtn.onclick=openPlanMarkup;
+    c.appendChild(drawBtn);
+
     renderPdfPageToCanvas(
       floorPlanBlob,
       canvas,
@@ -10016,6 +10111,7 @@ function renderFloorPlanCard(){
       floorPlanPreviewPage
     )
       .then(res=>{
+        overlayPlanMarkup(canvasHost,res&&res.pageNum?res.pageNum:floorPlanPreviewPage);
 
         if(res.numPages>1){
 
@@ -10250,7 +10346,7 @@ function renderFloorPlanCard(){
     c.appendChild(row);
 
 
-    if(markedCount>0){
+    if(markedCount>0||planMarkup.shapes.length>0){
 
       const expBtn=
         el(`
@@ -12350,6 +12446,12 @@ async function exportFloorPlanPdf(){
         );
       }
     );
+    /* Yhteisen merkintäkerroksen piirrokset muokattavina PDF-merkintöinä. */
+    if(window.PlanMarkup && planMarkup.shapes.length){
+      const fontR=await pdfDoc.embedFont(StandardFonts.Helvetica);
+      window.PlanMarkup.addToPdf(PDFLib,pdfDoc,planMarkup.shapes,fontR);
+    }
+
     const outBytes=
       await pdfDoc.save();
 
