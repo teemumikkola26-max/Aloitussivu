@@ -1323,8 +1323,29 @@ function loadCustomMethods(){
  * — esim. ennen tätä päivitystä tehtyjä — viedään ne pilveen kertaalleen,
  * jotta ne eivät katoa ja tulevat käyttöön myös muilla laitteilla.
  */
+/* KORJAUS: merkki siitä, että menetelmämuutos jäi viemättä pilveen. */
+const METHODS_PUSH_PENDING_KEY=METHODS_STORAGE_KEY+"_push_pending";
+function setMethodsPushPending(v){
+  try{
+    if(v)localStorage.setItem(METHODS_PUSH_PENDING_KEY,"1");
+    else localStorage.removeItem(METHODS_PUSH_PENDING_KEY);
+  }catch(err){}
+}
+
 async function syncCustomMethodsFromCloud(){
   if(!window.__supabaseClient)return;
+
+  /*
+   * KORJAUS: jos edellinen menetelmämuutos jäi viemättä pilveen
+   * (esim. ei verkkoa), pilviversio ei saa ylikirjoittaa sitä.
+   * Viedään paikallinen versio ensin.
+   */
+  let pushPending=false;
+  try{pushPending=localStorage.getItem(METHODS_PUSH_PENDING_KEY)==="1";}catch(err){}
+  if(pushPending){
+    if(await pushMethodsToCloud())setMethodsPushPending(false);
+    return;
+  }
 
   try{
     const {data,error}=
@@ -1400,7 +1421,8 @@ async function persistMethods(){
     toast("Menetelmien tallennus epäonnistui laitteelle.");
   }
 
-  await pushMethodsToCloud();
+  setMethodsPushPending(true);
+  if(await pushMethodsToCloud())setMethodsPushPending(false);
 }
 
 const COMMON_FIELDS=[
@@ -1742,6 +1764,9 @@ let lastSaveFailed=false;
 let cloudSyncInFlight=false;
 let cloudSyncQueued=false;
 let autosaveInProgress=false;
+/* KORJAUS: jos tallennusta pyydetään edellisen ollessa kesken, se ajetaan heti perään eikä ohiteta. */
+let autosavePending=false;
+let autosavePendingCloud=false;
 let toastTimer=null;
 
 function scheduleAutosave(){
@@ -1832,7 +1857,11 @@ function hasUnsyncedLocalOnlyPhotos(){
 
 async function autosave(skipCloud){
 
-  if(autosaveInProgress)return;
+  if(autosaveInProgress){
+    autosavePending=true;
+    if(!skipCloud)autosavePendingCloud=true;
+    return;
+  }
 
   autosaveInProgress=true;
   clearTimeout(saveTimer);
@@ -1941,6 +1970,14 @@ async function autosave(skipCloud){
   }
 
   autosaveInProgress=false;
+
+  if(autosavePending){
+    const rerunCloud=autosavePendingCloud || !skipCloud;
+    autosavePending=false;
+    autosavePendingCloud=false;
+    setTimeout(()=>{autosave(!rerunCloud);},0);
+    return;
+  }
 
   /*
    * Pilvisynkronointi käynnistetään erillisenä jonona.
@@ -2154,6 +2191,14 @@ async function mergeRemote(remote){
       entrySig(local)===entrySyncSig[local.id];
 
     if(canEditEntry(local) && !unmodified)continue;
+
+    /*
+     * KORJAUS: lomakkeessa auki olevaa omaa merkintää ei korvata
+     * uudella oliolla. Lomakkeen kenttien käsittelijät kirjoittavat
+     * alkuperäiseen values-olioon, joten korvaamisen jälkeen kaikki
+     * syötteet menivät irralliseen olioon eivätkä koskaan tallentuneet.
+     */
+    if(view==="entryForm" && editingEntry===local && canEditEntry(local))continue;
 
     const remoteSig=JSON.stringify([
       ce.methodId,
@@ -2492,6 +2537,16 @@ async function syncToCloud(){
 
     const orderSnapshot=entries.map(e=>e.id).join(",");
 
+    /*
+     * KORJAUS: otetaan tilannekuva lähetettävästä tilasta. Aiemmin
+     * lähetyksen aikana kirjoitetut muutokset merkittiin virheellisesti
+     * synkronoiduiksi, jolloin seuraava yhdistäminen korvasi ne pilven
+     * vanhemmalla versiolla.
+     */
+    const pushedSigs={};
+    entries.forEach(e=>{pushedSigs[e.id]=entrySig(e);});
+    const pushedProject=JSON.parse(JSON.stringify(project));
+
     const cloudEntries=entries.map(e=>({
 
       id:e.id,
@@ -2500,9 +2555,9 @@ async function syncToCloud(){
 
       methodId:e.methodId,
 
-      values:e.values,
+      values:JSON.parse(JSON.stringify(e.values||{})),
 
-      marker:e.marker||null,
+      marker:e.marker?JSON.parse(JSON.stringify(e.marker)):null,
 
       photos:(e.photos||[])
         .filter(p=>p.path)
@@ -2527,7 +2582,7 @@ async function syncToCloud(){
       inspectorName:(project.tutkija||"").trim(),
 
       data:{
-        project,
+        project:pushedProject,
         entries:cloudEntries,
         deletedEntryIds,
         floorPlanPath:floorPlanPath||null,
@@ -2540,14 +2595,16 @@ async function syncToCloud(){
     lastRemoteUpdatedAt=
       (savedRow && savedRow.updated_at) || lastRemoteUpdatedAt;
 
-    projectDirty={};
+    Object.keys(projectDirty).forEach(k=>{
+      if(project[k]===pushedProject[k])delete projectDirty[k];
+    });
     researchPlanCleared=false;
 
     if(entries.map(e=>e.id).join(",")===orderSnapshot){
       entryOrderDirty=false;
     }
 
-    markEntriesSynced();
+    entrySyncSig=pushedSigs;
 
     if(mergeResult.changed && view==="project"){
       render();

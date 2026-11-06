@@ -288,7 +288,14 @@ function deriveInspector(){
 }
 
 let cloudSyncInFlight = false;
+/* KORJAUS: synkronoinnin aikana tullut muutos jonotetaan eikä ohiteta. */
+let cloudSyncQueued = false;
+/* Kasvaa jokaisesta muutoksesta; kertoo, onko lähetyksen jälkeen tullut uusia muutoksia. */
+let changeSeq = 0;
+/* true, jos laitteella oli ladattaessa pilveen viemättömiä muutoksia. */
+let localPendingAtLoad = false;
 function saveDebounced(){
+  changeSeq++;
   /* Kaikki muutokset (tekstit, taulukon solut, tilat, kuvat) kulkevat tämän kautta, joten
      täytetty-ehtojen näkyvyys päivitetään tässä. */
   try{ refreshVisibility(); }catch(e){ console.warn(e); }
@@ -299,6 +306,10 @@ function saveDebounced(){
 }
 async function doSave(){
   if (READ_ONLY) return;
+  saveTimer = null;
+  /* Merkitään, että laitteella on pilveen viemättömiä muutoksia. Lippu
+     poistetaan vasta onnistuneen pilvitallennuksen jälkeen. */
+  await idbPut("meta", { key:"cloudPending", value: true });
   await idbPut("meta", { key:"header", value: state.header });
   await idbPut("meta", { key:"reveals", value: state.reveals || {} });
   await idbPut("meta", { key:"copies", value: state.copies || [] });
@@ -317,19 +328,38 @@ async function doSave(){
   syncToCloud();
 }
 
+/* Ajaa odottavan tallennuksen heti (esim. ennen sivulta poistumista). */
+function flushSave(){
+  if (READ_ONLY || !saveTimer) return Promise.resolve();
+  clearTimeout(saveTimer);
+  return doSave();
+}
+
 async function syncToCloud(){
   if (READ_ONLY) return;
-  if (cloudSyncInFlight) return;
+  if (cloudSyncInFlight){ cloudSyncQueued = true; return; }
   cloudSyncInFlight = true;
+  cloudSyncQueued = false;
   try{
     for (const id of Object.keys(state.items)){
       const it = state.items[id];
       for (const p of it.photos){
         if (!p.path && p.blob){
-          try{ p.path = await window.SubmissionSync.uploadPhoto(SUBMISSION_ID, "p" + p.id + ".jpg", p.blob); }catch(e){ console.warn("Valokuvan lataus pilveen epäonnistui", e); }
+          try{
+            const uploadedBlob = p.blob;
+            const path = await window.SubmissionSync.uploadPhoto(SUBMISSION_ID, "p" + p.id + ".jpg", uploadedBlob);
+            /* Jos kuvaa muokattiin latauksen aikana, uusi versio ladataan seuraavalla kerralla. */
+            if (path && p.blob === uploadedBlob){
+              p.path = path;
+              if (db) idbPut("photos", { id: p.id, itemId: id, blob: p.blob, w: p.w, h: p.h, caption: p.caption || "", ts: Date.now(), pending: false });
+            }
+          }catch(e){ console.warn("Valokuvan lataus pilveen epäonnistui", e); }
         }
       }
     }
+    /* KORJAUS: tilannekuva lähetettävästä tilasta. Lähetyksen aikana
+       tehdyt muutokset eivät saa näyttää jo pilveen viedyiltä. */
+    const seqAtSnapshot = changeSeq;
     const cloudItems = {};
     Object.keys(state.items).forEach(id => {
       const it = state.items[id];
@@ -340,18 +370,72 @@ async function syncToCloud(){
     });
     await window.SubmissionSync.saveSubmission({
       id: SUBMISSION_ID, formKey: FORM_ID, formLabel: (DEF && DEF.meta && DEF.meta.title) || "Lomake",
-      title: deriveTitle(), inspectorName: deriveInspector(), data: { header: state.header, items: cloudItems, reveals: state.reveals || {}, copies: state.copies || [], secCopies: state.secCopies || [] }
+      title: deriveTitle(), inspectorName: deriveInspector(), data: JSON.parse(JSON.stringify({ header: state.header, items: cloudItems, reveals: state.reveals || {}, copies: state.copies || [], secCopies: state.secCopies || [] }))
     });
+    const unsentPhotos = Object.keys(state.items).some(id => state.items[id].photos.some(p => !p.path && p.blob));
+    if (changeSeq === seqAtSnapshot && !saveTimer && !unsentPhotos){
+      await idbPut("meta", { key:"cloudPending", value: false });
+    }
     setSaveIndicator("Tallennettu pilveen");
   }catch(e){
     setSaveIndicator("Tallennettu laitteelle (ei pilviyhteyttä)");
   }finally{
     cloudSyncInFlight = false;
+    if (cloudSyncQueued){
+      cloudSyncQueued = false;
+      setTimeout(syncToCloud, 50);
+    }
   }
+}
+
+/* KORJAUS: jos laitteella on pilveen viemättömiä muutoksia, ne kirjoitetaan
+   pilvestä ladatun version päälle. Aiemmin pilviversio voitti aina, jolloin
+   esim. kesken jääneen synkronoinnin jälkeen tehdyt muutokset katosivat. */
+async function overlayLocalPending(metaRows){
+  const val = k => { const r = metaRows.find(x => x.key === k); return r ? r.value : undefined; };
+  if (val("header") !== undefined) state.header = val("header") || {};
+  if (val("reveals") !== undefined) state.reveals = val("reveals") || {};
+  if (Array.isArray(val("copies"))) state.copies = val("copies");
+  if (Array.isArray(val("secCopies"))) state.secCopies = val("secCopies");
+  ensureCopyItems();
+  const itemRows = await idbGetAll("items");
+  itemRows.forEach(row => {
+    const it = state.items[row.id];
+    if (!it) return;
+    it.status = row.status || DEFAULT_STATUS;
+    it.note = row.note || "";
+    it.action = row.action || "";
+    it.value = row.value || "";
+    it.title = row.title || "";
+    it.table = row.table || {};
+  });
+  const photoRows = await idbGetAll("photos");
+  photoRows.forEach(row => {
+    const it = state.items[row.itemId];
+    if (!it) return;
+    const existing = it.photos.find(p => String(p.id) === String(row.id));
+    if (!existing){
+      /* Kuva, jota ei vielä ole pilvessä */
+      it.photos.push({ id: row.id, blob: row.blob, url: URL.createObjectURL(row.blob), w: row.w, h: row.h, caption: row.caption || "" });
+      return;
+    }
+    existing.caption = row.caption || "";
+    if (row.pending){
+      /* Laitteella muokattu kuva, jonka uusi versio ei ehtinyt pilveen */
+      try{ URL.revokeObjectURL(existing.url); }catch(e){}
+      existing.blob = row.blob;
+      existing.url = URL.createObjectURL(row.blob);
+      existing.w = row.w; existing.h = row.h;
+      existing.path = null;
+    }
+  });
 }
 
 async function loadFromStorage(){
   let loadedFromCloud = false;
+  const localMeta = db ? await idbGetAll("meta") : [];
+  const pendingRow = localMeta.find(r => r.key === "cloudPending");
+  localPendingAtLoad = !!(pendingRow && pendingRow.value);
   try{
     const sub = await window.SubmissionSync.loadSubmission(SUBMISSION_ID);
     if (sub && sub.data){
@@ -378,6 +462,7 @@ async function loadFromStorage(){
         }
       }
       loadedFromCloud = true;
+      if (localPendingAtLoad) await overlayLocalPending(localMeta);
     }
   }catch(e){ console.warn("Ei pilviyhteyttä -- jatketaan paikallisella kopiolla", e); }
 
@@ -649,7 +734,7 @@ async function openPhotoViewer(itemId, photo){
     /* Sama tiedostonimi ylikirjoitetaan pilvessä seuraavassa synkronoinnissa. */
     photo.path = null;
     if (db){
-      try{ await idbPut("photos", { id: photo.id, itemId, blob, w: NW, h: NH, caption: photo.caption || "", ts: Date.now() }); }catch(e){ console.warn(e); }
+      try{ await idbPut("photos", { id: photo.id, itemId, blob, w: NW, h: NH, caption: photo.caption || "", ts: Date.now(), pending: true }); }catch(e){ console.warn(e); }
     }
     closeViewer();
     renderSections();
@@ -1825,7 +1910,8 @@ document.getElementById("btnExport").addEventListener("click", async () => {
   }
 });
 
-document.getElementById("btnStyle").addEventListener("click", () => {
+document.getElementById("btnStyle").addEventListener("click", async () => {
+  try{ await Promise.race([flushSave(), new Promise(r => setTimeout(r, 2000))]); }catch(e){}
   const backUrl = "form.html?id=" + encodeURIComponent(FORM_ID);
   window.location.href = "style-editor.html?form=" + encodeURIComponent(FORM_ID) +
     "&label=" + encodeURIComponent(DEF.meta.title || "lomake") +
@@ -1958,8 +2044,10 @@ async function startUsageLock(){
   lockTimer = setInterval(lockBeat, LOCK_BEAT_MS);
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") lockBeat();
+    /* KORJAUS: odottava tallennus ajetaan heti, kun sovellus siirtyy taustalle. */
+    else flushSave().catch(() => {});
   });
-  const release = () => { if (!READ_ONLY) window.SubmissionSync.releaseLock(SUBMISSION_ID); };
+  const release = () => { if (!READ_ONLY){ flushSave().catch(() => {}); window.SubmissionSync.releaseLock(SUBMISSION_ID); } };
   window.addEventListener("pagehide", release);
   // "← Omat lomakkeet" -linkki vapauttaa merkinnän ennen siirtymistä
   const back = document.querySelector('header.topbar a[href="index.html"]');
@@ -1967,6 +2055,8 @@ async function startUsageLock(){
     back.addEventListener("click", async (e) => {
       if (READ_ONLY) return;
       e.preventDefault();
+      /* KORJAUS: viimeisin muutos tallennetaan ennen sivulta poistumista. */
+      try{ await Promise.race([flushSave(), new Promise(r => setTimeout(r, 2000))]); }catch(err){}
       try{
         await Promise.race([
           window.SubmissionSync.releaseLock(SUBMISSION_ID),
@@ -2032,6 +2122,8 @@ function initSubmissionId(){
       renderHeaderFields();
       renderSections();
       await startUsageLock();
+      /* Laitteelle jääneet, pilveen viemättömät muutokset viedään heti. */
+      if (localPendingAtLoad && !READ_ONLY) syncToCloud();
     }catch(err){
       fatalError("Odottamaton virhe lomaketta ladatessa: " + (err && err.message ? err.message : err));
     }
