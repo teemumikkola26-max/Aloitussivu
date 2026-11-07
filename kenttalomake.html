@@ -644,6 +644,56 @@ select{
   padding-right:0
 }
 
+/* Tutkimussuunnitelman tarkistuslista */
+.sp-card{cursor:pointer}
+.sp-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+.sp-big{font-size:1.5rem;font-weight:800;font-variant-numeric:tabular-nums}
+.sp-progress{height:10px;border-radius:99px;background:#eeebe3;overflow:hidden;margin:8px 0 6px}
+.sp-progress span{display:block;height:100%;background:var(--ok);border-radius:99px}
+.sp-stats{display:flex;gap:12px;flex-wrap:wrap;font-size:13.5px;color:var(--muted)}
+.sp-filters{display:flex;gap:6px;overflow-x:auto;margin:0 0 6px;padding-bottom:2px}
+.sp-filters button{flex:none;border:1.5px solid var(--line);background:#fff;border-radius:99px;padding:7px 14px;font-weight:600;font-size:14px;min-height:40px;color:var(--ink)}
+.sp-filters button[aria-pressed="true"]{background:var(--ink);color:#fff;border-color:var(--ink)}
+.sp-section{display:flex;gap:8px;align-items:baseline;margin:14px 2px 6px;font-weight:700;font-size:15px}
+.sp-section span{font-weight:600;color:var(--muted);font-size:13px}
+.sp-item{display:flex;gap:10px;align-items:flex-start;width:100%;text-align:left;background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px;margin-bottom:8px;color:var(--ink);font:inherit;cursor:pointer}
+.sp-st{flex:none;width:28px;height:28px;border-radius:50%;border:2px solid var(--line-strong,#b9b2a0);display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:800}
+.sp-done .sp-st{background:var(--ok);border-color:var(--ok);color:#fff}
+.sp-part .sp-st{border-color:var(--ok);color:var(--ok)}
+.sp-skip .sp-st{background:#eeebe3;border-color:#6b6656;color:#6b6656}
+.sp-body{flex:1;min-width:0;display:block}
+.sp-t{display:block;font-weight:650}
+.sp-skip .sp-t{text-decoration:line-through;color:#6b6656}
+.sp-m{display:block;font-size:13.5px;color:var(--muted);margin-top:2px}
+.sp-reason{display:block;font-size:13.5px;color:#6b6656;margin-top:4px}
+.sp-cnt{flex:none;font-weight:700;font-variant-numeric:tabular-nums;color:var(--muted);font-size:14px;margin-top:3px}
+.sp-done .sp-cnt{color:var(--ok)}
+.sp-methods{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.sp-methods button{min-height:56px;border:1.5px solid var(--line);background:#fff;border-radius:12px;padding:8px 10px;text-align:left;font-weight:600;color:var(--ink);font:inherit;font-weight:600}
+.sp-methods button[aria-pressed="true"]{border-color:var(--ok);box-shadow:0 0 0 1px var(--ok) inset;background:#e6efe6}
+.sp-stepper{display:flex;gap:8px;align-items:center}
+.sp-stepper .btn{width:52px;flex:0 0 auto}
+.sp-stepper input{flex:1;text-align:center}
+.sp-form-acts{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+.sp-link{border-color:var(--ok)}
+.sp-link-none{border-color:var(--line)}
+.sp-link.has-error{border-color:var(--error);box-shadow:0 0 0 2px var(--error) inset}
+.sp-chips{display:flex;flex-direction:column;gap:6px}
+.sp-chip{display:flex;align-items:center;gap:10px;border:1.5px solid var(--line);background:#fff;border-radius:10px;padding:10px 12px;text-align:left;min-height:46px;color:var(--ink);font:inherit;cursor:pointer}
+.sp-chip .sp-dot{flex:none;width:20px;height:20px;border-radius:50%;border:2px solid var(--line-strong,#b9b2a0)}
+.sp-chip[aria-pressed="true"]{border-color:var(--ok);box-shadow:0 0 0 1px var(--ok) inset}
+.sp-chip[aria-pressed="true"] .sp-dot{background:var(--ok);border-color:var(--ok)}
+.sp-chip .sp-c{margin-left:auto;font-size:13.5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.sp-summary summary{cursor:pointer;font-weight:700}
+.sp-tablewrap{overflow-x:auto;margin-top:8px}
+.sp-table{border-collapse:collapse;width:100%;font-size:14px}
+.sp-table th,.sp-table td{text-align:left;padding:7px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+.sp-table th{font-size:12.5px;color:var(--muted)}
+.sp-num{white-space:nowrap;font-variant-numeric:tabular-nums}
+.sp-sub{font-size:15px;margin:14px 0 4px}
+.sp-open-warn{margin-top:12px;padding:10px 12px;border-radius:10px;background:#fbf1de;color:#7a4a06;font-size:14px}
+.method-tile .mt-plan{display:block;font-size:12px;font-weight:600;color:var(--ok);margin-top:4px}
+
 .table-field-table input.calc-cell{
   background:#f4f2ea;
   border-style:dashed;
@@ -1492,6 +1542,28 @@ let entries=[];
 /* Pohjakuvan yhteinen merkintäkerros (plan-markup.js): muodot ja poistettujen tunnisteet. */
 let planMarkup={shapes:[],deleted:[]};
 let markupSyncedSig="";
+/* Tutkimussuunnitelman tarkistuslista: kohdat ja poistettujen tunnisteet. */
+let studyPlan={items:[],deleted:[],lastSection:""};
+let studyPlanSyncedSig="";
+const PLAN_KEY="__planItem";   /* kirjauksen arvo: suunnitelman kohdan id tai "" */
+let studyPlanFilter="all";
+let studyPlanForm=null;        /* {item|null} kun lisäys/muokkauslomake on auki */
+function studyPlanSig(){
+  return studyPlan.items.map(i=>i.id+"@"+(i.updatedAt||"")).join("|")+"#"+studyPlan.deleted.length;
+}
+/* Kohdittainen yhdistäminen: uusin muokkaus voittaa, poistetut pysyvät poissa. */
+function mergeStudyItems(local,remote,delLocal,delRemote){
+  const del={};
+  (delLocal||[]).concat(delRemote||[]).forEach(id=>{del[id]=1;});
+  const byId={},order=[];
+  (local||[]).concat(remote||[]).forEach(it=>{
+    if(!it||!it.id||del[it.id])return;
+    const cur=byId[it.id];
+    if(!cur){byId[it.id]=it;order.push(it.id);}
+    else if(String(it.updatedAt||"")>String(cur.updatedAt||""))byId[it.id]=it;
+  });
+  return order.map(id=>byId[id]);
+}
 function markupSig(){
   return planMarkup.shapes.map(s=>s.id+"@"+(s.updatedAt||"")).join("|")+"#"+planMarkup.deleted.length;
 }
@@ -1885,6 +1957,8 @@ function createPortableState(){
     project,
     planMarkup,
     markupSyncedSig,
+    studyPlan,
+    studyPlanSyncedSig,
     entrySyncSig,
     projectDirty,
     deletedEntryIds,
@@ -1925,6 +1999,8 @@ function createIndexedDbState(){
     project,
     planMarkup,
     markupSyncedSig,
+    studyPlan,
+    studyPlanSyncedSig,
     /* KORJAUS: synkronointitiedot talteen, jotta seuraavalla avauksella
        tiedetään, mitkä paikalliset muutokset puuttuvat vielä pilvestä. */
     entrySyncSig,
@@ -2397,6 +2473,20 @@ async function mergeRemote(remote){
     if(merged.some(s=>!remoteIds[s.id+"@"+(s.updatedAt||"")]))out.needsPush=true;
   }
 
+  /* Tutkimussuunnitelman tarkistuslista: kohdittain, uusin muokkaus voittaa. */
+  if(d.studyPlan && Array.isArray(d.studyPlan.items)){
+    const rDel=Array.isArray(d.studyPlan.deleted)?d.studyPlan.deleted:[];
+    const before=studyPlanSig();
+    const merged=mergeStudyItems(studyPlan.items,d.studyPlan.items,studyPlan.deleted,rDel);
+    const delSet={};studyPlan.deleted.concat(rDel).forEach(id=>{delSet[id]=1;});
+    studyPlan={items:merged,deleted:Object.keys(delSet),lastSection:studyPlan.lastSection||""};
+    if(studyPlanSig()!==before)out.changed=true;
+    const rKeys={};d.studyPlan.items.forEach(it=>{rKeys[it.id+"@"+(it.updatedAt||"")]=1;});
+    if(merged.some(it=>!rKeys[it.id+"@"+(it.updatedAt||"")]))out.needsPush=true;
+  }else if(studyPlan.items.length){
+    out.needsPush=true;
+  }
+
   /* Pohjakuva: otetaan pilven versio, ellei paikallinen ole vielä lähettämättä */
   const localPending=!!(floorPlanBlob && !floorPlanPath);
 
@@ -2689,6 +2779,7 @@ async function syncToCloud(){
 
 
     const pushedMarkupSig=markupSig();
+    const pushedStudySig=studyPlanSig();
     const savedRow=await window.SubmissionSync.saveSubmission({
 
       id:SUBMISSION_ID,
@@ -2706,6 +2797,7 @@ async function syncToCloud(){
         entries:cloudEntries,
         deletedEntryIds,
         planMarkup:{shapes:planMarkup.shapes,deleted:planMarkup.deleted.slice(-500)},
+        studyPlan:{items:studyPlan.items,deleted:studyPlan.deleted.slice(-500)},
         floorPlanPath:floorPlanPath||null,
         researchPlan:researchPlanPath
           ? {path:researchPlanPath,name:researchPlanName||"tutkimussuunnitelma.pdf"}
@@ -2721,6 +2813,7 @@ async function syncToCloud(){
     });
     researchPlanCleared=false;
     markupSyncedSig=pushedMarkupSig;
+    studyPlanSyncedSig=pushedStudySig;
     if(entries.map(e=>e.id).join(",")===orderSnapshot){
       entryOrderDirty=false;
     }
@@ -2959,6 +3052,14 @@ async function applyLocalState(value){
     };
   }
   markupSyncedSig=typeof value.markupSyncedSig==="string"?value.markupSyncedSig:"";
+  if(value.studyPlan && Array.isArray(value.studyPlan.items)){
+    studyPlan={
+      items:value.studyPlan.items,
+      deleted:Array.isArray(value.studyPlan.deleted)?value.studyPlan.deleted:[],
+      lastSection:value.studyPlan.lastSection||""
+    };
+  }
+  studyPlanSyncedSig=typeof value.studyPlanSyncedSig==="string"?value.studyPlanSyncedSig:"";
   entrySyncSig=
     (value.entrySyncSig && typeof value.entrySyncSig==="object")
       ? Object.assign({},value.entrySyncSig)
@@ -2973,6 +3074,7 @@ async function applyLocalState(value){
 function hasUnsyncedLocalChanges(){
   if(Object.keys(projectDirty).some(k=>projectDirty[k]))return true;
   if(markupSig()!==markupSyncedSig)return true;
+  if(studyPlanSig()!==studyPlanSyncedSig)return true;
   if(entryOrderDirty)return true;
   return entries.some(e=>
     entrySyncSig[e.id]===undefined ||
@@ -3507,6 +3609,8 @@ async function clearForm(){
   entrySyncSig={};
   planMarkup={shapes:[],deleted:[]};
   markupSyncedSig="";
+  studyPlan={items:[],deleted:[],lastSection:""};
+  studyPlanSyncedSig="";
 
   editingEntry=null;
   editingIsNew=false;
@@ -4172,7 +4276,9 @@ function syncHistory(){
 
 function entryHasData(e){
   if(!e)return false;
-  const vals=Object.values(e.values||{});
+  const vals=Object.keys(e.values||{})
+    .filter(k=>k.indexOf("__")!==0)
+    .map(k=>e.values[k]);
   const has=vals.some(v=>
     Array.isArray(v)
       ?v.some(r=>Object.values(r||{}).some(x=>String(x??"").trim()!==""))
@@ -4234,6 +4340,9 @@ async function leaveEntryForm(){
 async function navBack(){
   if(view==="methodSelect"){
     view="project";
+  }else if(view==="studyPlan"){
+    view="project";
+    studyPlanForm=null;
   }else if(view==="methodsManage"){
     view="methodSelect";
   }else if(view==="methodEdit"){
@@ -4437,6 +4546,10 @@ function _renderView(){
     );
 
     app.appendChild(
+      renderStudyPlanCard()
+    );
+
+    app.appendChild(
       renderAttachmentsCard()
     );
 
@@ -4484,6 +4597,22 @@ function _renderView(){
     );
 
     /* "Muokkaa menetelmiä" on Lisää toimintoja -valikossa, ettei sitä paineta vahingossa kentällä. */
+  }
+
+
+  if(view==="studyPlan"){
+
+    title.textContent="Tutkimussuunnitelma";
+
+    app.appendChild(
+      renderBack(()=>{
+        view="project";
+        studyPlanForm=null;
+        render();
+      },"Takaisin kohteeseen")
+    );
+
+    renderStudyPlanView(app,footer);
   }
 
 
@@ -4977,7 +5106,8 @@ function renderEntriesCard(){
       entrySummary(entry,m),
       nPh?("📷 "+nPh):"",
       entry.marker?"📍":"",
-      (entry.author && hasMultipleAuthors())?("👤 "+entry.author):""
+      (entry.author && hasMultipleAuthors())?("👤 "+entry.author):"",
+      entryPlanItem(entry)?("📋 "+entryPlanItem(entry).text):""
     ].filter(Boolean).join("  ·  ");
     const card=
       el(`
@@ -5130,6 +5260,7 @@ function renderMethodGrid(){
           </span>
 
           ${escapeHtml(m.short)}
+          ${(()=>{ const n=studyOpenFor(m.id).length; return n?`<span class="mt-plan">${n} avoinna suunnitelmassa</span>`:""; })()}
         </button>
       `);
 
@@ -7532,6 +7663,8 @@ function renderEntryForm(){
   container.addEventListener("change",clearErrOnEdit);
   const planBtnEF=renderPlanOpenButton();
   if(planBtnEF)container.appendChild(planBtnEF);
+  const planLinkEF=renderEntryPlanLink();
+  if(planLinkEF)container.appendChild(planLinkEF);
 
 
   /*
@@ -8489,6 +8622,16 @@ function saveEntryForm(){
       x=>x.id===editingEntry.methodId
     );
 
+
+  if(studyPlanLinkMissing()){
+    toast("Valitse, mihin suunnitelman kohtaan kirjaus kuuluu, tai ”Ei suunnitelmassa”");
+    const lc=document.getElementById("spLinkCard");
+    if(lc){
+      lc.classList.add("has-error");
+      lc.scrollIntoView({behavior:"smooth",block:"center"});
+    }
+    return;
+  }
 
   if(window.LukulaiteOcr){
     const ocrCheck=window.LukulaiteOcr.checkBeforeSave(m.fields,editingEntry.values||{});
@@ -11186,6 +11329,461 @@ function renderResearchPlanCard(){
   }
   return c;
 }
+/* ============================================================
+   TUTKIMUSSUUNNITELMAN TARKISTUSLISTA
+   ------------------------------------------------------------
+   Tutkija kokoaa tutkimussuunnitelmasta listan: menetelmä,
+   tarkennus, määrä ja rakenneosa (tai vapaa tehtävä). Kirjaus
+   liitetään kohtaan arvolla values.__planItem (kohdan id, tai ""
+   = suunnitelman ulkopuolinen). Arvo synkronoituu kirjauksen
+   mukana, joten samaan kohtaan voi kirjata usea tutkija.
+   Lista synkronoidaan kohdittain: uusin muokkaus voittaa.
+   ============================================================ */
+
+
+function studyItems(){ return studyPlan.items; }
+function studyItemById(id){ return id?studyPlan.items.find(it=>it.id===id)||null:null; }
+function entryPlanItem(e){ return studyItemById(e && e.values && e.values[PLAN_KEY]); }
+function studyMethodName(id){ const m=METHODS.find(x=>x.id===id); return m?m.name:"Poistettu menetelmä"; }
+function studyItemCount(it){ return entries.filter(e=>e.values && e.values[PLAN_KEY]===it.id).length; }
+function studyItemState(it){
+  if(it.skip)return "skip";
+  if(it.method){
+    const c=studyItemCount(it);
+    return c>=it.target?"done":(c>0?"part":"open");
+  }
+  return it.done?"done":"open";
+}
+function studyStats(){
+  const s={total:studyPlan.items.length,done:0,part:0,open:0,skip:0};
+  studyPlan.items.forEach(it=>{ s[studyItemState(it)]++; });
+  return s;
+}
+function studyOpenFor(methodId){
+  return studyPlan.items.filter(it=>it.method===methodId && !it.skip && studyItemCount(it)<it.target);
+}
+function touchStudyItem(it){ it.updatedAt=new Date().toISOString(); }
+function studySaved(){ scheduleAutosave(); }
+function studySections(){
+  const out=[];
+  studyPlan.items.forEach(it=>{ if(out.indexOf(it.section)<0)out.push(it.section); });
+  return out;
+}
+
+/* ---------- Kohdenäkymän kortti ---------- */
+function renderStudyPlanCard(){
+  const s=studyStats();
+  if(!s.total){
+    const c=el(`
+      <div class="card">
+        <h2>Tutkimussuunnitelman tarkistuslista</h2>
+        <div class="hint" style="margin-bottom:10px;">
+          Kokoa tutkimussuunnitelmasta tarkistuslista valitsemalla menetelmät ja määrät.
+          Kirjaukset liitetään listan kohtiin, ja näet koko ajan, mitä on vielä tekemättä.
+        </div>
+        <button type="button" class="btn btn-outline btn-block">Kokoa tarkistuslista</button>
+      </div>
+    `);
+    c.querySelector("button").onclick=()=>{ studyPlanForm={item:null}; view="studyPlan"; render(); };
+    return c;
+  }
+  const handled=s.done+s.skip;
+  const pct=Math.round(100*handled/s.total);
+  const c=el(`
+    <div class="card sp-card tappable" role="button" tabindex="0" aria-label="Avaa tutkimussuunnitelman tarkistuslista">
+      <div class="sp-head">
+        <h2 style="margin:0;">Tutkimussuunnitelma</h2>
+        <span class="sp-big">${handled}/${s.total}</span>
+      </div>
+      <div class="sp-progress"><span style="width:${pct}%"></span></div>
+      <div class="sp-stats">
+        <span>✓ ${s.done} tehty</span>
+        ${s.part?`<span>◐ ${s.part} kesken</span>`:""}
+        <span>○ ${s.open} avoinna</span>
+        ${s.skip?`<span>– ${s.skip} ei tehdä</span>`:""}
+      </div>
+    </div>
+  `);
+  const open=()=>{ studyPlanForm=null; view="studyPlan"; render(); };
+  c.onclick=open;
+  c.onkeydown=e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); open(); } };
+  return c;
+}
+
+/* ---------- Tarkistuslistanäkymä ---------- */
+function renderStudyPlanView(app,footer){
+  const s=studyStats();
+  const pct=s.total?Math.round(100*(s.done+s.skip)/s.total):0;
+
+  const planBtn=renderPlanOpenButton();
+  if(planBtn)app.appendChild(planBtn);
+
+  if(studyPlanForm)app.appendChild(renderStudyItemForm());
+
+  if(s.total){
+    app.appendChild(el(`
+      <div class="card">
+        <div class="sp-head"><h2 style="margin:0;">Edistyminen</h2><span class="sp-big">${s.done+s.skip}/${s.total}</span></div>
+        <div class="sp-progress"><span style="width:${pct}%"></span></div>
+        <div class="hint">Napauta kohtaa nähdäksesi kirjaukset ja toiminnot.</div>
+      </div>
+    `));
+
+    const filters=el('<div class="sp-filters" role="group" aria-label="Näytä kohdat"></div>');
+    [["all","Kaikki"],["open","Avoimet"],["done","Tehdyt"],["skip","Ei tehdä"]].forEach(([k,label])=>{
+      const b=el(`<button type="button" aria-pressed="${studyPlanFilter===k}">${label}</button>`);
+      b.onclick=()=>{ studyPlanFilter=k; render(); };
+      filters.appendChild(b);
+    });
+    app.appendChild(filters);
+
+    let shown=0;
+    studySections().forEach(sec=>{
+      const all=studyPlan.items.filter(it=>it.section===sec);
+      const items=all.filter(it=>{
+        const st=studyItemState(it);
+        return studyPlanFilter==="all" ||
+          (studyPlanFilter==="open" && (st==="open"||st==="part")) ||
+          studyPlanFilter===st;
+      });
+      if(!items.length)return;
+      const ok=all.filter(it=>["done","skip"].indexOf(studyItemState(it))>=0).length;
+      app.appendChild(el(`<div class="sp-section">${escapeHtml(sec)} <span>${ok}/${all.length}</span></div>`));
+      items.forEach(it=>{ app.appendChild(renderStudyItemRow(it)); shown++; });
+    });
+    if(!shown)app.appendChild(el('<div class="empty">Ei kohtia tällä valinnalla.</div>'));
+
+    app.appendChild(renderStudySummary());
+  }else if(!studyPlanForm){
+    app.appendChild(el('<div class="empty">Lista on tyhjä. Lisää kohdat tutkimussuunnitelmasta alapalkin painikkeella.</div>'));
+  }
+
+  footer.innerHTML=
+    '<div class="footer-row">'+
+    '<button class="btn btn-outline" id="btnSpAdd">+ Lisää kohta</button>'+
+    '<button class="btn btn-primary" id="btnSpDone">Valmis</button>'+
+    '</div>';
+  document.getElementById("btnSpAdd").onclick=()=>{
+    studyPlanForm={item:null};
+    render();
+    window.scrollTo(0,0);
+  };
+  document.getElementById("btnSpDone").onclick=()=>{ view="project"; studyPlanForm=null; render(); };
+}
+
+function renderStudyItemRow(it){
+  const st=studyItemState(it);
+  const c=studyItemCount(it);
+  const icon=st==="done"?"✓":st==="skip"?"–":st==="part"?"◐":"";
+  const row=el(`
+    <button type="button" class="sp-item sp-${st}">
+      <span class="sp-st" aria-hidden="true">${icon}</span>
+      <span class="sp-body">
+        <span class="sp-t">${escapeHtml(it.text)}</span>
+        ${it.method
+          ?(it.text.indexOf(studyMethodName(it.method))===0?"":`<span class="sp-m">${escapeHtml(studyMethodName(it.method))}</span>`)
+          :'<span class="sp-m">Tehtävä</span>'}
+        ${it.skip?`<span class="sp-reason">Ei tehdä: ${escapeHtml(it.reason||"")}</span>`:""}
+      </span>
+      ${it.method?`<span class="sp-cnt">${c}/${it.target}</span>`:""}
+    </button>
+  `);
+  row.onclick=()=>openStudyItemActions(it);
+  return row;
+}
+
+function startEntryForPlanItem(it){
+  editingEntry={
+    id:"e"+Date.now()+Math.random().toString(36).slice(2,7),
+    methodId:it.method,
+    author:currentUserName(),
+    values:{[PLAN_KEY]:it.id},
+    photos:[],
+    marker:null
+  };
+  editingIsNew=true;
+  view="entryForm";
+  autosave();
+  render();
+}
+
+function openStudyItemActions(it){
+  const linked=entries
+    .map((e,i)=>({e,i}))
+    .filter(x=>x.e.values && x.e.values[PLAN_KEY]===it.id);
+  const actions=[];
+  if(it.method && !it.skip && METHODS.some(m=>m.id===it.method)){
+    actions.push({label:"Uusi kirjaus tähän kohtaan",icon:"+",onSelect:()=>startEntryForPlanItem(it)});
+  }
+  linked.forEach(({e,i})=>{
+    actions.push({
+      label:"Avaa kirjaus "+(i+1)+(e.values.paikka?": "+e.values.paikka:""),
+      icon:"📄",
+      onSelect:()=>{ editingEntry=e; editingIsNew=false; view="entryForm"; render(); }
+    });
+  });
+  if(!it.method && !it.skip){
+    actions.push({
+      label:it.done?"Merkitse tekemättömäksi":"Merkitse tehdyksi",
+      icon:it.done?"↺":"✓",
+      onSelect:()=>{ it.done=!it.done; touchStudyItem(it); studySaved(); render(); toast(it.done?"Merkitty tehdyksi":"Merkitty tekemättömäksi"); }
+    });
+  }
+  if(it.skip){
+    actions.push({label:"Palauta suunnitelmaan",icon:"↺",onSelect:()=>{ it.skip=false; it.reason=""; touchStudyItem(it); studySaved(); render(); }});
+  }else{
+    actions.push({label:"Ei tehdä…",icon:"–",onSelect:()=>askSkipReason(it)});
+  }
+  actions.push({label:"Muokkaa kohtaa",icon:"✏",onSelect:()=>{ studyPlanForm={item:it}; render(); window.scrollTo(0,0); }});
+  actions.push({label:"Poista kohta…",icon:"🗑",danger:true,onSelect:async()=>{
+    const ok=await window.AppUI.confirm({
+      title:"Poistetaanko kohta?",
+      text:linked.length
+        ?"Kohtaan liitetyt "+linked.length+" kirjausta säilyvät, mutta ne näkyvät suunnitelman ulkopuolisina."
+        :"Kohta poistetaan tarkistuslistalta.",
+      ok:"Poista",cancel:"Säilytä",danger:true
+    });
+    if(!ok)return;
+    studyPlan.items=studyPlan.items.filter(x=>x!==it);
+    studyPlan.deleted.push(it.id);
+    studySaved(); render(); toast("Kohta poistettu");
+  }});
+  const title=it.text+(it.method?" ("+studyItemCount(it)+"/"+it.target+")":"");
+  window.AppUI.sheet(title,actions);
+}
+
+/* "Ei tehdä" vaatii syyn: poikkeama suunnitelmasta pitää voida perustella raportissa. */
+async function askSkipReason(it){
+  const quick=["Tila ei ollut käytettävissä","Ei tarpeen havaintojen perusteella","Sovittu tilaajan kanssa","Siirretty jatkotutkimukseen"];
+  const v=await window.AppUI.choose({
+    title:"Miksi kohtaa ei tehdä?",
+    text:"Syy näkyy yhteenvedossa ja auttaa perustelemaan poikkeaman suunnitelmasta raportissa.",
+    actions:quick.map(q=>({label:q,value:q,kind:"plain"})).concat([
+      {label:"Kirjoita oma syy",value:"__own",kind:"plain"},
+      {label:"Peruuta",value:null,kind:"safe"}
+    ])
+  });
+  if(!v)return;
+  if(v==="__own"){
+    studyPlanForm={item:it,skipOnly:true};
+    render();
+    window.scrollTo(0,0);
+    return;
+  }
+  it.skip=true; it.reason=v; touchStudyItem(it); studySaved(); render(); toast("Merkitty: ei tehdä");
+}
+
+/* ---------- Kohdan lisäys- ja muokkauslomake (sivulla, ei ikkunassa) ---------- */
+function renderStudyItemForm(){
+  const it=studyPlanForm.item;
+
+  if(studyPlanForm.skipOnly){
+    const c=el(`
+      <div class="card sp-form">
+        <h2>Miksi kohtaa ei tehdä?</h2>
+        <div class="hint" style="margin-bottom:6px;">${escapeHtml(it.text)}</div>
+        <label for="spReason">Syy</label>
+        <input type="text" id="spReason" placeholder="esim. avaukseen ei saatu lupaa">
+        <div class="footer-row" style="margin-top:10px;">
+          <button type="button" class="btn btn-outline" id="spCancel">Peruuta</button>
+          <button type="button" class="btn btn-primary" id="spOk">Tallenna</button>
+        </div>
+      </div>
+    `);
+    c.querySelector("#spCancel").onclick=()=>{ studyPlanForm=null; render(); };
+    c.querySelector("#spOk").onclick=()=>{
+      const r=c.querySelector("#spReason").value.trim();
+      if(!r){ toast("Kirjoita syy"); return; }
+      it.skip=true; it.reason=r; touchStudyItem(it);
+      studyPlanForm=null; studySaved(); render(); toast("Merkitty: ei tehdä");
+    };
+    setTimeout(()=>{ const i=c.querySelector("#spReason"); if(i)i.focus(); },50);
+    return c;
+  }
+
+  let sel=it?(it.method||""):null;
+  const base=it&&it.method?studyMethodName(it.method):"";
+  const extra=it
+    ?(it.method?(it.text===base?"":(it.text.indexOf(base+", ")===0?it.text.slice(base.length+2):it.text)):it.text)
+    :"";
+  const opts=METHODS.map(m=>[m.id,m.name]).concat([["","Tehtävä (kuitataan käsin)"]]);
+  const c=el(`
+    <div class="card sp-form">
+      <h2>${it?"Muokkaa kohtaa":"Lisää kohta"}</h2>
+      <label style="margin-top:0;">Menetelmä</label>
+      <div class="sp-methods">
+        ${opts.map(o=>`<button type="button" data-mid="${escapeAttribute(o[0])}" aria-pressed="${sel===o[0]}">${escapeHtml(o[1])}</button>`).join("")}
+      </div>
+      <label for="spText"><span id="spTextLbl">Tarkennus ja sijainti</span> <span class="hint" id="spTextOpt" style="font-weight:400;">(valinnainen)</span></label>
+      <input type="text" id="spText" value="${escapeAttribute(extra)}" placeholder="esim. alapohja, luokat 101–104">
+      <div id="spCountWrap">
+        <label for="spCount">Määrä (kpl)</label>
+        <div class="sp-stepper">
+          <button type="button" class="btn btn-outline" data-step="-1" aria-label="Vähemmän">−</button>
+          <input type="number" id="spCount" inputmode="numeric" min="1" value="${it?it.target:1}">
+          <button type="button" class="btn btn-outline" data-step="1" aria-label="Enemmän">+</button>
+        </div>
+      </div>
+      <label for="spSection">Rakenneosa tai osio <span class="hint" style="font-weight:400;">(valinnainen)</span></label>
+      <input type="text" id="spSection" list="spSections" value="${escapeAttribute(it?it.section:(studyPlan.lastSection||""))}" placeholder="esim. Alapohja">
+      <datalist id="spSections">${studySections().map(x=>`<option value="${escapeAttribute(x)}">`).join("")}</datalist>
+      <div class="sp-form-acts">
+        ${it
+          ?'<button type="button" class="btn btn-primary btn-block" data-a="ok">Tallenna</button>'
+          :'<button type="button" class="btn btn-primary btn-block" data-a="next">Lisää ja lisää seuraava</button>'+
+           '<button type="button" class="btn btn-outline btn-block" data-a="ok">Lisää ja sulje</button>'}
+        <button type="button" class="btn btn-ghost btn-block" data-a="close">${it?"Peruuta":"Sulje"}</button>
+      </div>
+    </div>
+  `);
+
+  /* Tehtävällä ei ole määrää, ja sen kuvaus on pakollinen. */
+  function syncFields(){
+    const task=sel==="";
+    c.querySelector("#spCountWrap").style.display=task?"none":"";
+    c.querySelector("#spTextLbl").textContent=task?"Tehtävän kuvaus":"Tarkennus ja sijainti";
+    c.querySelector("#spTextOpt").style.display=task?"none":"";
+  }
+  c.querySelectorAll("[data-mid]").forEach(b=>b.onclick=()=>{
+    sel=b.dataset.mid;
+    c.querySelectorAll("[data-mid]").forEach(x=>x.setAttribute("aria-pressed",String(x===b)));
+    syncFields();
+  });
+  c.querySelectorAll("[data-step]").forEach(b=>b.onclick=()=>{
+    const n=c.querySelector("#spCount");
+    n.value=Math.max(1,(parseInt(n.value,10)||1)+parseInt(b.dataset.step,10));
+  });
+  c.querySelectorAll("[data-a]").forEach(b=>b.onclick=()=>{
+    const a=b.dataset.a;
+    if(a==="close"){ studyPlanForm=null; render(); return; }
+    if(sel===null){ toast("Valitse menetelmä tai tehtävä"); return; }
+    const method=sel||null;
+    const ex=c.querySelector("#spText").value.trim();
+    if(!method && !ex){ toast("Kirjoita tehtävän kuvaus"); c.querySelector("#spText").focus(); return; }
+    const text=method?(ex?studyMethodName(method)+", "+ex:studyMethodName(method)):ex;
+    const section=c.querySelector("#spSection").value.trim()||"Muut tutkimukset";
+    const target=method?Math.max(1,parseInt(c.querySelector("#spCount").value,10)||1):1;
+    studyPlan.lastSection=section;
+    if(it){
+      Object.assign(it,{text,method,target,section});
+      touchStudyItem(it);
+    }else{
+      const ni={id:"sp"+Date.now()+Math.random().toString(36).slice(2,6),section,method,text,target,done:false,skip:false,reason:""};
+      touchStudyItem(ni);
+      studyPlan.items.push(ni);
+    }
+    studySaved();
+    if(a==="next"){
+      studyPlanForm={item:null};
+      render();
+      window.scrollTo(0,0);
+      toast("Lisätty: "+text);
+    }else{
+      studyPlanForm=null;
+      render();
+      toast(it?"Kohta päivitetty":"Lisätty: "+text);
+    }
+  });
+  syncFields();
+  return c;
+}
+
+/* ---------- Yhteenveto (raportin tutkimusmenetelmäosaa varten) ---------- */
+function renderStudySummary(){
+  const extra=entries
+    .map((e,i)=>({e,i}))
+    .filter(x=>!entryPlanItem(x.e));
+  const open=studyPlan.items.filter(it=>["open","part"].indexOf(studyItemState(it))>=0);
+  const d=el(`
+    <details class="card sp-summary">
+      <summary>Yhteenveto raporttia varten</summary>
+      <div class="sp-tablewrap">
+        <table class="sp-table">
+          <thead><tr><th>Kohta</th><th>Toteutus</th><th>Tila</th></tr></thead>
+          <tbody>
+            ${studyPlan.items.map(it=>{
+              const st=studyItemState(it),c=studyItemCount(it);
+              const tila=st==="done"?"Tehty":st==="part"?"Osittain":st==="skip"?"Ei tehty: "+(it.reason||""):"Avoinna";
+              return `<tr><td>${escapeHtml(it.text)}<div class="hint">${escapeHtml(it.section)}</div></td>
+                <td class="sp-num">${it.method?c+" / "+it.target:(it.done?"✓":"–")}</td><td>${escapeHtml(tila)}</td></tr>`;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>
+      <h3 class="sp-sub">Suunnitelman ulkopuoliset kirjaukset</h3>
+      ${extra.length
+        ?`<div class="sp-tablewrap"><table class="sp-table"><thead><tr><th>Kirjaus</th><th>Menetelmä</th></tr></thead><tbody>
+          ${extra.map(x=>`<tr><td>${x.i+1}. ${escapeHtml(x.e.values&&x.e.values.paikka||"Ei paikkaa merkitty")}</td><td>${escapeHtml(studyMethodName(x.e.methodId))}</td></tr>`).join("")}
+          </tbody></table></div>`
+        :'<div class="hint">Ei suunnitelman ulkopuolisia kirjauksia.</div>'}
+      ${open.length?`<div class="sp-open-warn">Käsittelemättä ${open.length} kohtaa. Merkitse ne tehdyiksi tai kirjaa syy, miksi niitä ei tehty, ennen kuin lähdet kohteesta.</div>`:""}
+    </details>
+  `);
+  return d;
+}
+
+/* ---------- Kirjauslomake: mihin suunnitelman kohtaan kirjaus kuuluu ---------- */
+function renderEntryPlanLink(){
+  if(!studyPlan.items.length || !editingEntry)return null;
+  const readOnly=!editingIsNew && !canEditEntry(editingEntry);
+  const vals=editingEntry.values=editingEntry.values||{};
+  const cands=studyPlan.items.filter(it=>it.method===editingEntry.methodId && !it.skip);
+  const current=vals[PLAN_KEY];
+
+  /* Uudessa kirjauksessa ainoa avoin kohta valitaan valmiiksi (käyttäjä voi vaihtaa). */
+  if(editingIsNew && current===undefined){
+    const open=studyOpenFor(editingEntry.methodId);
+    if(open.length===1)vals[PLAN_KEY]=open[0].id;
+  }
+  if(!cands.length){
+    if(vals[PLAN_KEY]===undefined && !readOnly)vals[PLAN_KEY]="";
+    const linkedGone=vals[PLAN_KEY] && !studyItemById(vals[PLAN_KEY]);
+    return el(`
+      <div class="card sp-link sp-link-none" id="spLinkCard">
+        <h2>Tutkimussuunnitelma</h2>
+        <div class="hint">${linkedGone
+          ?"Kohta, johon kirjaus oli liitetty, on poistettu listalta. Kirjaus näkyy suunnitelman ulkopuolisena."
+          :"Tällä menetelmällä ei ole kohtaa tarkistuslistalla. Kirjaus merkitään suunnitelman ulkopuoliseksi lisätutkimukseksi."}</div>
+      </div>
+    `);
+  }
+
+  const isOpen=it=>studyItemCount(it)-(entries.indexOf(editingEntry)>=0 && vals[PLAN_KEY]===it.id?1:0)<it.target;
+  const openC=cands.filter(it=>isOpen(it)||vals[PLAN_KEY]===it.id);
+  const doneC=cands.filter(it=>openC.indexOf(it)<0);
+  const chip=it=>`
+    <button type="button" class="sp-chip" data-p="${escapeAttribute(it.id)}" aria-pressed="${vals[PLAN_KEY]===it.id}" ${readOnly?"disabled":""}>
+      <span class="sp-dot"></span><span>${escapeHtml(it.text)}</span><span class="sp-c">${studyItemCount(it)}/${it.target}</span>
+    </button>`;
+  const c=el(`
+    <div class="card sp-link" id="spLinkCard">
+      <h2>Mihin suunnitelman kohtaan kirjaus kuuluu?</h2>
+      <div class="sp-chips">
+        ${openC.map(chip).join("")}
+        ${doneC.length?`<details><summary class="hint" style="cursor:pointer;padding:6px 0;">Valmiit kohdat (${doneC.length})</summary><div class="sp-chips">${doneC.map(chip).join("")}</div></details>`:""}
+        <button type="button" class="sp-chip" data-p="" aria-pressed="${vals[PLAN_KEY]===""}" ${readOnly?"disabled":""}>
+          <span class="sp-dot"></span><span>Ei suunnitelmassa (lisätutkimus)</span>
+        </button>
+      </div>
+    </div>
+  `);
+  c.querySelectorAll("[data-p]").forEach(b=>b.onclick=()=>{
+    vals[PLAN_KEY]=b.dataset.p;
+    c.querySelectorAll("[data-p]").forEach(x=>x.setAttribute("aria-pressed",String(x===b)));
+    c.classList.remove("has-error");
+    scheduleAutosave();
+  });
+  return c;
+}
+
+/* Tallennuksen tarkistus: jos menetelmällä on kohtia listalla, valinta vaaditaan. */
+function studyPlanLinkMissing(){
+  if(!studyPlan.items.length||!editingEntry)return false;
+  if(!editingIsNew && !canEditEntry(editingEntry))return false;
+  const has=studyPlan.items.some(it=>it.method===editingEntry.methodId && !it.skip);
+  return has && (editingEntry.values||{})[PLAN_KEY]===undefined;
+}
+
 /* ============================================================
    MERKKIENNIN EDITORI
    ============================================================ */

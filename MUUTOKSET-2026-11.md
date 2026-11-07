@@ -141,3 +141,26 @@ Service workerin välimuistin versio on nostettu (`aloitussivu-v20`).
   - Apulauseissa laskettua saraketta verrataan kuten numeroa.
 - **Kosteusfunktioiden kaava:** sama Magnus-kaava kuin raporttipohjamoottorissa. Tulos voi poiketa mittalaitteen näyttämästä noin 1 %.
 - **Tallennuksen tarkistukset:** kaavan virheet, viittaukset puuttuviin sarakkeisiin ja kehäviittaukset estetään tallennettaessa.
+
+## Tutkimussuunnitelman tarkistuslista (aloitussivu-v23)
+
+- **Kohdenäkymä:** uusi kortti "Tutkimussuunnitelma". Siitä näkee edistymisen (käsitellyt / kaikki kohdat) ja pääsee tarkistuslistaan.
+- **Listan kokoaminen:**
+  - Tutkija valitsee kohdalle menetelmän ja voi lisätä tarkennuksen ja sijainnin, määrän sekä rakenneosan tai osion.
+  - Kohta voi olla myös vapaa tehtävä, joka kuitataan käsin.
+  - "Lisää ja lisää seuraava" nopeuttaa koko suunnitelman syöttämistä, ja rakenneosa muistetaan edellisestä kohdasta.
+  - Valmiita pohjia ei ole.
+- **Kohdan toiminnot:**
+  - uusi kirjaus suoraan kohtaan
+  - kohtaan liitettyjen kirjausten avaaminen
+  - tehtävän kuittaus
+  - "Ei tehdä", johon syy on pakollinen
+  - muokkaus ja poisto
+- **Menetelmän valinta:** menetelmäruudussa näkyy, montako suunnitelman kohtaa menetelmällä on avoinna.
+- **Kirjauslomake:**
+  - Lomakkeessa valitaan, mihin suunnitelman kohtaan kirjaus kuuluu, tai "Ei suunnitelmassa".
+  - Ainoa avoin kohta valitaan valmiiksi.
+  - Valinta on pakollinen, jos menetelmällä on kohtia listalla.
+- **Kirjauslista:** kohta näkyy kirjauksen tiedoissa (📋).
+- **Yhteenveto:** suunnitellut ja toteutuneet tutkimukset, tekemättä jätetyt syineen sekä suunnitelman ulkopuoliset kirjaukset. Yhteenveto ei vielä tulostu Word-raporttiin.
+- **Tallennus:** linkki tallentuu kirjaukseen arvona `values.__planItem`, ja se synkronoituu kirjauksen mukana. Tarkistuslista synkronoidaan kohdittain (`data.studyPlan`): uusin muokkaus voittaa, eivätkä poistetut kohdat palaa.
