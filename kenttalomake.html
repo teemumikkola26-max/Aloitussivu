@@ -21,6 +21,7 @@
 <script src="plan-markup.js"></script>
 <script src="report-templates.js" defer></script>
 <script src="docx-style-engine.js" defer></script>
+<script src="lukulaite-ocr.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 
@@ -5518,7 +5519,30 @@ function syncFieldColumnsFromDom(f,fieldIdx){
  * kentän tyypistä: numerokentille suuruusvertailut, muille
  * yhtäsuuruus/erisuuruus ja "sisältää".
  */
+/* Päivämäärät tallennetaan muodossa vvvv-kk-pp; ehdon arvon voi kirjoittaa
+   myös muodossa p.k.vvvv. */
+function normalizeDateValue(v){
+  const s=String(v===undefined||v===null?"":v).trim();
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s))return s;
+  const m=/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/.exec(s);
+  if(m)return m[3]+"-"+m[2].padStart(2,"0")+"-"+m[1].padStart(2,"0");
+  return "";
+}
+
+function isoDateToFi(v){
+  const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v||"").trim());
+  return m?(+m[3])+"."+(+m[2])+"."+m[1]:String(v===undefined||v===null?"":v);
+}
+
 function hintOpsForType(type){
+  if(type==="date"){
+    return [
+      { value:"eq", label:"on (=)" },
+      { value:"lt", label:"ennen" },
+      { value:"gt", label:"jälkeen" },
+      { value:"neq", label:"ei ole (≠)" }
+    ];
+  }
   if(type==="number"){
     return [
       { value:"gt", label:"suurempi kuin (>)" },
@@ -5566,6 +5590,19 @@ function evalHintRule(rule,type,rawValue){
       case "lte":return n<=rv;
       case "eq":return n===rv;
       case "neq":return n!==rv;
+      default:return false;
+    }
+  }
+
+  if(type==="date" && rule.op!=="contains"){
+    const d=normalizeDateValue(strVal);
+    const rd=normalizeDateValue(rule.value);
+    if(!d||!rd)return false;
+    switch(rule.op){
+      case "eq":return d===rd;
+      case "neq":return d!==rd;
+      case "lt":return d<rd;
+      case "gt":return d>rd;
       default:return false;
     }
   }
@@ -6013,6 +6050,8 @@ function renderMethodFieldRow(f,idx,fields){
           sopivat, kun kenttiä on paljon ja sivuttaisvieritys häiritsee.
           Word-raportissa tieto on aina taulukkona.
         </div>
+
+        <div id="mf_ocr_${idx}" style="margin-top:12px;border-top:1px solid var(--line);padding-top:10px;"></div>
       </div>
 
       <div id="mf_placeholder_wrap_${idx}" style="${f.type==="table"?"display:none;":""}">
@@ -6158,11 +6197,11 @@ function renderMethodFieldRow(f,idx,fields){
                   `).join("")}
                 </select>
                 <input
-                  type="text"
+                  type="${col&&col.type==="date"?"date":"text"}"
                   id="mf_ruleCond_val_${idx}_${ruleIdx}_${condIdx}"
                   placeholder="Arvo"
-                  value="${escapeAttribute(cond.value||"")}"
-                  style="width:80px;flex:0 0 auto;"
+                  value="${escapeAttribute(col&&col.type==="date"?normalizeDateValue(cond.value):(cond.value||""))}"
+                  style="width:${col&&col.type==="date"?"auto":"80px"};flex:0 0 auto;"
                 >
                 ${rule.conditions.length>1?`
                   <button type="button" class="btn btn-sm btn-danger" id="mf_ruleCond_del_${idx}_${ruleIdx}_${condIdx}">✕</button>
@@ -6275,6 +6314,7 @@ function renderMethodFieldRow(f,idx,fields){
               <option value="text" ${col.type==="text"?"selected":""}>Teksti</option>
               <option value="number" ${col.type==="number"?"selected":""}>Numero</option>
               <option value="select" ${col.type==="select"?"selected":""}>Valinta</option>
+              <option value="date" ${col.type==="date"?"selected":""}>Päivämäärä</option>
             </select>
             <button type="button" class="btn btn-sm btn-danger" id="mf_col_del_${idx}_${cIdx}">✕</button>
           </div>
@@ -6299,19 +6339,104 @@ function renderMethodFieldRow(f,idx,fields){
           e.target.value==="select"?"":"none";
         syncFieldColumnsFromDom(f,idx);
         renderHints();
+        renderOcrConfig();
       };
+
+      cr.querySelector(`#mf_col_label_${idx}_${cIdx}`).addEventListener("change",()=>{
+        syncFieldColumnsFromDom(f,idx);
+        renderOcrConfig();
+      });
 
       cr.querySelector(`#mf_col_del_${idx}_${cIdx}`).onclick=()=>{
         syncFieldColumnsFromDom(f,idx);
         f.columns.splice(cIdx,1);
         renderColumns();
         renderHints();
+        renderOcrConfig();
+      };
+    });
+  }
+
+  /*
+   * Kameraluku: tutkija kuvaa mittalaitteen näytön, ja lukemat
+   * kirjoitetaan uudelle riville valittuihin sarakkeisiin.
+   */
+  const ocrWrap=row.querySelector(`#mf_ocr_${idx}`);
+
+  function guessOcrColumn(key){
+    const cols=f.columns||[];
+    const tests={
+      T:c=>c.type==="number" && /lämpö|lampo|temp|°c|c°/i.test(c.label||""),
+      RH:c=>c.type==="number" && /(^|\W)rh(\W|$)|suht/i.test(c.label||""),
+      a:c=>c.type==="number" && /abs|g\/m/i.test(c.label||""),
+      date:c=>c.type==="date"
+    };
+    const hit=cols.find(tests[key]);
+    return hit?hit.id:"";
+  }
+
+  function renderOcrConfig(){
+    if(!ocrWrap)return;
+    const cfg=f.ocr||{};
+    const map=cfg.map||{};
+    const cols=f.columns||[];
+    const numCols=cols.filter(c=>c.type==="number");
+    const dateCols=cols.filter(c=>c.type==="date");
+    const sel=(key,list,label,note)=>`
+      <label style="margin-top:6px;" for="mf_ocrmap_${key}_${idx}">${label}</label>
+      <select id="mf_ocrmap_${key}_${idx}" data-key="${key}">
+        <option value="">${note}</option>
+        ${list.map(c=>`<option value="${escapeAttribute(c.id)}" ${map[key]===c.id?"selected":""}>${escapeHtml(c.label||"(nimetön sarake)")}</option>`).join("")}
+      </select>`;
+
+    ocrWrap.innerHTML=`
+      <label class="setting-row" style="font-weight:700;margin:0;">
+        <input type="checkbox" id="mf_ocr_on_${idx}" ${cfg.enabled?"checked":""}>
+        Lukemat mittalaitteen näytöltä kameralla
+      </label>
+      <div class="hint">
+        Lomakkeelle tulee Lue mittarista -painike. Jokaisesta kuvasta syntyy
+        uusi rivi, kuva tallentuu kirjaukselle ja epävarmat lukemat merkitään
+        tarkistettaviksi. Tuettu laite: Vaisala HM40 -sarjan lukulaite
+        (näkymä, jossa T, RH, Td ja a).
+      </div>
+      <div id="mf_ocr_body_${idx}" style="${cfg.enabled?"":"display:none;"}">
+        ${sel("RH",numCols,"Suhteellinen kosteus RH → sarake","Valitse sarake")}
+        ${sel("T",numCols,"Lämpötila T → sarake","Ei tallenneta")}
+        ${sel("a",numCols,"Absoluuttinen kosteus a → sarake","Ei tallenneta")}
+        ${sel("date",dateCols,"Kuvauspäivä → sarake","Ei täytetä")}
+        <div class="hint">
+          Lukemille voi valita vain Numero-tyyppisiä sarakkeita ja
+          kuvauspäivälle Päivämäärä-tyyppisen. Muut sarakkeet (esim.
+          syvyys ja anturi) täytetään käsin.
+        </div>
+      </div>`;
+
+    const on=ocrWrap.querySelector(`#mf_ocr_on_${idx}`);
+    on.onchange=()=>{
+      syncFieldColumnsFromDom(f,idx);
+      f.ocr=f.ocr||{device:"vaisala",map:{}};
+      f.ocr.enabled=on.checked;
+      if(on.checked){
+        ["RH","T","a","date"].forEach(k=>{
+          if(!f.ocr.map[k])f.ocr.map[k]=guessOcrColumn(k);
+        });
+      }
+      renderOcrConfig();
+    };
+
+    ocrWrap.querySelectorAll("select[data-key]").forEach(s=>{
+      s.onchange=()=>{
+        f.ocr=f.ocr||{device:"vaisala",map:{}};
+        f.ocr.map=f.ocr.map||{};
+        f.ocr.map[s.dataset.key]=s.value;
       };
     });
   }
 
   renderHints();
   renderColumns();
+  renderOcrConfig();
 
   row.querySelector(`#mf_addhint_${idx}`).onclick=()=>{
 
@@ -6353,6 +6478,7 @@ function renderMethodFieldRow(f,idx,fields){
     });
     renderColumns();
     renderHints();
+    renderOcrConfig();
   };
 
   typeSelect.onchange=()=>{
@@ -6965,7 +7091,7 @@ async function saveMethodEdit(){
           .map(col=>{
 
             const type=
-              (col.type==="number"||col.type==="select")
+              (col.type==="number"||col.type==="select"||col.type==="date")
                 ?col.type
                 :"text";
 
@@ -7011,9 +7137,33 @@ async function saveMethodEdit(){
           ?fields[i].layout
           :"scroll";
 
+      if(fields[i].ocr && fields[i].ocr.enabled){
+        const colById={};
+        fields[i].columns.forEach(c=>{ colById[c.id]=c; });
+        const map={};
+        const want={T:"number",RH:"number",a:"number",date:"date"};
+        Object.keys(want).forEach(k=>{
+          const id=(fields[i].ocr.map||{})[k];
+          if(id && colById[id] && colById[id].type===want[k])map[k]=id;
+        });
+        if(!map.RH){
+          toast('Valitse "'+label+'" -taulukon kameraluvulle sarake, johon suhteellinen kosteus (RH) kirjoitetaan');
+          return;
+        }
+        const used=Object.values(map);
+        if(new Set(used).size!==used.length){
+          toast('Kameraluvun lukemat pitää ohjata "'+label+'" -taulukossa eri sarakkeisiin');
+          return;
+        }
+        fields[i].ocr={enabled:true,device:"vaisala",map};
+      }else{
+        delete fields[i].ocr;
+      }
+
     }else{
       fields[i].columns=[];
       delete fields[i].layout;
+      delete fields[i].ocr;
     }
 
     if(fields[i].type==="table"){
@@ -7841,6 +7991,64 @@ function renderTableField(f,values){
       `#tblbody_${CSS.escape(f.id)}`
     );
 
+  const readOnly=
+    !!(editingEntry && !editingIsNew && !canEditEntry(editingEntry));
+
+  /* Kameraluku (menetelmän asetus): ks. lukulaite-ocr.js */
+  let ocrCtl=null;
+
+  if(f.ocr && f.ocr.enabled && window.LukulaiteOcr && !readOnly){
+
+    const entry=editingEntry;
+
+    ocrCtl=window.LukulaiteOcr.attach({
+      field:f,
+      rows,
+      addRow(init){
+        const r={};
+        cols.forEach(c=>{ r[c.id]=init[c.id]!==undefined?init[c.id]:""; });
+        rows.push(r);
+        renderRows();
+        return r;
+      },
+      inputFor(r,colId){
+        const i=rows.indexOf(r);
+        return i<0?null:document.getElementById(`tblcell_${f.id}_${i}_${colId}`);
+      },
+      statusAnchor(r){
+        const i=rows.indexOf(r);
+        if(i<0)return null;
+        const inp=document.getElementById(`tblrm_${f.id}_${i}`);
+        return inp?inp.closest("tr"):null;
+      },
+      changed(){
+        if(editingEntry===entry)scheduleAutosave();
+      },
+      addPhoto(blob,caption){
+        return addEntryPhotoBlob(entry,blob,caption);
+      },
+      removePhoto(id){
+        removeEntryPhoto(entry,id);
+      },
+      findPhoto(id){
+        return (entry.photos||[]).find(p=>p.id===id)||null;
+      },
+      setCaption(id,text){
+        const p=(entry.photos||[]).find(p=>p.id===id);
+        if(p && p.caption!==text){
+          p.caption=text;
+          if(editingEntry===entry)refreshPhotoCard();
+        }
+      },
+      toast
+    });
+
+    const addBtnEl=wrap.querySelector(`#tbladd_${CSS.escape(f.id)}`);
+    const camBtn=ocrCtl.button();
+    camBtn.style.marginRight="8px";
+    addBtnEl.before(camBtn);
+  }
+
 
   function renderRows(){
 
@@ -7876,7 +8084,7 @@ function renderTableField(f,values){
               return `
                 <td data-label="${escapeAttribute(c.label||"")}">
                   <input
-                    type="${c.type==="number"?"number":"text"}"
+                    type="${c.type==="number"?"number":(c.type==="date"?"date":"text")}"
                     aria-label="${escapeAttribute(c.label||"")}"
                     id="tblcell_${escapeAttribute(f.id)}_${rIdx}_${escapeAttribute(c.id)}"
                     autocomplete="off"
@@ -7995,15 +8203,19 @@ function renderTableField(f,values){
         inp.oninput=e=>{
           row[c.id]=e.target.value;
           refreshRowHint();
+          if(ocrCtl)ocrCtl.cellEdited(row,c.id);
           scheduleAutosave();
         };
 
         inp.onchange=e=>{
           row[c.id]=e.target.value;
           refreshRowHint();
+          if(ocrCtl)ocrCtl.cellEdited(row,c.id);
           scheduleAutosave();
         };
       });
+
+      if(ocrCtl && row._ocr)ocrCtl.decorate(row);
 
       tr.querySelector(
         `#tblrm_${CSS.escape(f.id)}_${rIdx}`
@@ -8046,6 +8258,8 @@ function renderTableField(f,values){
    MENETELMÄN TALLENNUS
    ============================================================ */
 
+let ocrSaveConfirmed=false;
+
 function saveEntryForm(){
 
   /* Toisen käyttäjän merkintä avataan vain katseltavaksi: "Sulje" */
@@ -8066,6 +8280,32 @@ function saveEntryForm(){
     );
 
 
+  if(window.LukulaiteOcr){
+    const ocrCheck=window.LukulaiteOcr.checkBeforeSave(m.fields,editingEntry.values||{});
+    if(ocrCheck.pending){
+      toast("Odota hetki – "+ocrCheck.pending+(ocrCheck.pending===1?" kuva":" kuvaa")+" vielä luettavana");
+      return;
+    }
+    if(ocrCheck.flagged.length && !ocrSaveConfirmed){
+      const nums=ocrCheck.flagged.map(x=>x.index+1).join(", ");
+      const n=ocrCheck.flagged.length;
+      window.AppUI.confirm({
+        title:n===1?"Yksi kuvasta luettu rivi on tarkistamatta":n+" kuvasta luettua riviä on tarkistamatta",
+        text:(n===1?"Rivillä ":"Riveillä ")+nums+" on arvoja, joiden luenta oli epävarma.",
+        ok:"Tallenna silti",
+        cancel:"Tarkista kuvasta"
+      }).then(ok=>{
+        if(ok){
+          ocrSaveConfirmed=true;
+          saveEntryForm();
+        }else{
+          window.LukulaiteOcr.reviewRow(ocrCheck.flagged[0]);
+        }
+      });
+      return;
+    }
+  }
+  ocrSaveConfirmed=false;
   const missing=findMissingRequired(editingEntry,m);
   if(missing.length){
     showFieldErrors(missing.map(f=>[f,"Pakollinen tieto puuttuu"]));
@@ -8560,6 +8800,45 @@ function normalizeImageOrientation(
   });
 }
 
+
+/* Kameraluvun kuva kirjaukselle: sama käsittely kuin muilla kuvilla. */
+async function addEntryPhotoBlob(entry,blob,caption){
+  if(!entry)return null;
+  if(!Array.isArray(entry.photos))entry.photos=[];
+  const processed=await processImageFile(blob);
+  const id="ph"+Date.now()+Math.random().toString(36).slice(2,8);
+  const photo={
+    id,
+    url:URL.createObjectURL(processed.blob),
+    blob:processed.blob,
+    path:null,
+    caption:caption||"",
+    width:processed.width,
+    height:processed.height
+  };
+  entry.photos.push(photo);
+  if(view==="entryForm" && editingEntry===entry){
+    refreshPhotoCard();
+    scheduleAutosave();
+  }
+  return photo;
+}
+
+function removeEntryPhoto(entry,photoId){
+  if(!entry||!Array.isArray(entry.photos))return;
+  const i=entry.photos.findIndex(p=>p.id===photoId);
+  if(i<0)return;
+  const removed=entry.photos.splice(i,1)[0];
+  if(removed.path && window.SubmissionSync){
+    Promise.resolve()
+      .then(()=>window.SubmissionSync.deletePhotoFile(removed.path))
+      .catch(err=>console.warn("Pilvikuvan poisto epäonnistui",err));
+  }
+  if(removed.url){
+    try{URL.revokeObjectURL(removed.url);}catch(err){}
+  }
+  if(view==="entryForm" && editingEntry===entry)refreshPhotoCard();
+}
 
 async function addPhotos(files,fromCamera){
   const target=editingEntry;
@@ -9224,7 +9503,7 @@ async function exportWordLegacy(){
         ...dataRows.map(r=>
           cols.map(c=>
             r[c.id]!==undefined && r[c.id]!==null
-              ?String(r[c.id])
+              ?(c.type==="date"?isoDateToFi(r[c.id]):String(r[c.id]))
               :""
           )
         )

@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="fi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rakenteen suht. kosteus – kameraluku (demo 2)</title>
+<style>
+:root{
+  --ink:#1c1f1a; --paper:#f2f0e8; --card:#fff; --row:#faf9f4; --line:#cfc9b8; --muted:#66604f;
+  --brand:#b8282f; --brand-dark:#962027; --ok:#2f6b3a; --ok-bg:#e6efe6; --warn:#b7791f; --warn-bg:#fbf1de;
+  --error:#a3271b; --focus:#1d4ed8;
+  --mono:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;
+  color-scheme:light; box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --ink:#ecebe4; --paper:#171815; --card:#22241f; --row:#1d1f1b; --line:#44463e; --muted:#a8a392;
+  --brand:#e0555b; --brand-dark:#f07278; --ok:#86c391; --ok-bg:#1f2e22; --warn:#e5b450; --warn-bg:#3a2f17;
+  --error:#ef7a6c; --focus:#8ab4ff; color-scheme:dark;}}
+:root[data-theme="dark"]{
+  --ink:#ecebe4; --paper:#171815; --card:#22241f; --row:#1d1f1b; --line:#44463e; --muted:#a8a392;
+  --brand:#e0555b; --brand-dark:#f07278; --ok:#86c391; --ok-bg:#1f2e22; --warn:#e5b450; --warn-bg:#3a2f17;
+  --error:#ef7a6c; --focus:#8ab4ff; color-scheme:dark;}
+*,*::before,*::after{box-sizing:inherit}
+html{scroll-padding-top:calc(env(safe-area-inset-top,0px) + 70px)}
+body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding-bottom:110px;-webkit-tap-highlight-color:transparent}
+button,input{font:inherit;color:inherit}
+button{cursor:pointer}
+button:focus-visible,input:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+
+/* Yläpalkki kuten sovelluksessa */
+header{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:var(--card);border-bottom:4px solid var(--brand);display:flex;align-items:center;gap:10px;padding:10px 12px}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:21;background:var(--card)}
+header h1{flex:1;font-size:1.15rem;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pill{font-size:.85rem;font-weight:600;padding:6px 12px;border-radius:99px;background:var(--ok-bg);color:var(--ok);white-space:nowrap}
+.pill.dirty{background:var(--warn-bg);color:var(--warn)}
+main{max-width:640px;margin:0 auto;background:var(--card);border-left:1px solid var(--line);border-right:1px solid var(--line);padding:18px 16px 24px;min-height:80vh}
+.flabel{font-weight:700;font-size:1.05rem;margin:0 0 8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.req{color:var(--brand)}
+.btn{border:1.5px solid var(--line);background:var(--card);border-radius:12px;padding:10px 16px;min-height:46px;font-weight:600}
+.btn-cam{border-color:var(--brand);color:var(--brand);background:var(--card);display:inline-flex;align-items:center;gap:8px}
+.btn-cam svg{width:20px;height:20px}
+.demo-note{font-size:.85rem;color:var(--muted);background:var(--row);border:1px dashed var(--line);border-radius:8px;padding:8px 10px;margin-bottom:18px}
+
+/* Rivikortit */
+.rows{display:flex;flex-direction:column;gap:10px;margin-bottom:10px}
+.rowcard{position:relative;border:1.5px solid var(--line);border-radius:12px;background:var(--row);padding:10px}
+.rowcard.flagged{border-color:var(--warn)}
+.rowcard.new{animation:pop .5s ease-out}
+@keyframes pop{from{background:var(--warn-bg)}to{background:var(--row)}}
+.rowtop{display:flex;gap:10px;align-items:flex-start;margin-bottom:8px;padding-right:52px}
+.thumb{flex:none;width:76px;height:76px;border-radius:8px;border:1.5px solid var(--line);background:#000 center/cover no-repeat;padding:0;position:relative}
+.thumb span{position:absolute;inset:auto 0 0 0;font-size:10px;background:rgba(0,0,0,.6);color:#fff;border-radius:0 0 6px 6px;padding:1px 0}
+.rowtop .pvm{flex:1;min-width:0}
+.status{font-size:.82rem;margin-top:4px;color:var(--muted);min-height:1.2em}
+.status.warn{color:var(--warn)}
+.status.err{color:var(--error)}
+.del{position:absolute;top:8px;right:8px;width:44px;height:44px;border-radius:10px;border:1.5px solid color-mix(in srgb,var(--brand) 45%,transparent);background:var(--card);color:var(--brand);font-size:1.4rem;line-height:1}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px 10px}
+.fld label{display:block;font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:3px}
+.fld input{width:100%;padding:10px;border:1.5px solid var(--line);border-radius:8px;background:var(--card);font-size:1.05rem;font-variant-numeric:tabular-nums;min-height:46px}
+.fld.measured input{font-weight:600}
+.fld.flag input{border-color:var(--warn);background:var(--warn-bg)}
+.fld.flag label::after{content:" ?";color:var(--warn);font-weight:700}
+.fld.reading input{background:repeating-linear-gradient(90deg,var(--card) 0 40%,var(--row) 50%,var(--card) 60% 100%);background-size:300% 100%;animation:shimmer 1.2s linear infinite}
+@keyframes shimmer{from{background-position:100% 0}to{background-position:0 0}}
+.altchip[hidden]{display:none}
+.altchip{grid-column:1/-1;font-size:.88rem;display:flex;gap:8px;align-items:center;flex-wrap:wrap;color:var(--warn)}
+.altchip button{border:1.5px solid var(--warn);background:var(--warn-bg);color:var(--ink);border-radius:99px;padding:6px 12px;min-height:38px;font-weight:600}
+.empty{color:var(--muted);font-size:.92rem;padding:14px;border:1.5px dashed var(--line);border-radius:12px;text-align:center;margin-bottom:10px}
+.field{margin-top:22px}
+.field input.wide{width:100%;padding:12px;border:1.5px solid var(--line);border-radius:12px;background:var(--card);min-height:52px}
+.photos{display:flex;gap:8px;flex-wrap:wrap}
+.photos figure{margin:0;width:96px}
+.photos img{width:96px;height:72px;object-fit:cover;border-radius:6px;border:1px solid var(--line);display:block}
+.photos figcaption{font-size:.72rem;color:var(--muted);line-height:1.25;margin-top:2px}
+
+footer{position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--card);border-top:1px solid var(--line);padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px));display:flex;gap:12px;justify-content:center}
+footer .inner{display:flex;gap:12px;width:100%;max-width:640px}
+.btn-primary{flex:1;background:var(--brand);color:#fff;border:0;border-radius:14px;min-height:56px;font-size:1.1rem;font-weight:700}
+.btn-primary:active{background:var(--brand-dark)}
+.btn-photo{width:84px;min-height:56px;border:1.5px solid var(--line);border-radius:14px;background:var(--card);font-size:1.6rem}
+
+/* Kameranäkymä */
+.cam{position:fixed;inset:0;z-index:50;background:#000;color:#fff;display:flex;flex-direction:column}
+.cam[hidden]{display:none}
+.cam-top{display:flex;align-items:center;gap:10px;padding:calc(env(safe-area-inset-top,0px) + 10px) 12px 10px}
+.cam-top .count{flex:1;font-size:.95rem}
+.cambtn{background:rgba(255,255,255,.14);border:0;color:#fff;border-radius:12px;min-height:46px;min-width:46px;padding:0 14px;font-weight:600}
+.cambtn[aria-pressed="true"]{background:#fff;color:#000}
+.cam-stage{position:relative;flex:1;overflow:hidden;touch-action:none}
+.cam-stage video,.cam-stage canvas{position:absolute;inset:0;width:100%;height:100%}
+.cam-stage video{object-fit:cover}
+.frame{position:absolute;left:14%;top:16%;width:72%;height:54%;border:3px solid #fff;border-radius:10px;box-shadow:0 0 0 100vmax rgba(0,0,0,.5);pointer-events:none}
+.frame::after{content:"Koko näyttö kehykseen";position:absolute;top:calc(100% + 10px);left:0;right:0;text-align:center;font-size:.9rem;opacity:.9}
+.flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none;transition:opacity .25s}
+.flash.on{opacity:.7;transition:none}
+.camhint{position:absolute;left:0;right:0;top:12px;text-align:center;font-size:.9rem;text-shadow:0 1px 2px #000;pointer-events:none}
+.depth{display:flex;align-items:center;gap:6px;font-size:.85rem}
+.depth input{width:76px;min-height:40px;border-radius:10px;border:0;padding:6px 8px;background:rgba(255,255,255,.14);color:#fff;font-size:1rem;text-align:center}
+.strip{display:flex;gap:8px;overflow-x:auto;padding:8px 12px;min-height:72px}
+.strip .t{flex:none;width:56px;height:56px;border-radius:8px;background:#222 center/cover;position:relative;border:2px solid transparent}
+.strip .t.ok{border-color:#7fbf8a}.strip .t.warn{border-color:#e5b450}.strip .t.busy{opacity:.6}
+.strip .t i{position:absolute;right:-4px;top:-4px;width:20px;height:20px;border-radius:50%;font-style:normal;font-size:12px;display:flex;align-items:center;justify-content:center;background:#333}
+.strip .t.ok i{background:#2f6b3a}.strip .t.warn i{background:#b7791f}
+.cam-bottom{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:6px 16px calc(16px + env(safe-area-inset-bottom,0px))}
+.shutter{width:78px;height:78px;border-radius:50%;border:5px solid #fff;background:var(--brand);box-shadow:0 0 0 3px rgba(0,0,0,.4) inset}
+.shutter:active{transform:scale(.94)}
+.shutter:disabled{opacity:.4}
+.cam-bottom .l{justify-self:start}.cam-bottom .r{justify-self:end}
+
+/* Vertailunäkymä */
+dialog{border:0;border-radius:16px;padding:0;width:min(560px,94vw);max-height:92vh;background:var(--card);color:var(--ink)}
+dialog::backdrop{background:rgba(0,0,0,.6)}
+.cmp img{width:100%;display:block;background:#000;max-height:46vh;object-fit:contain}
+.cmp .body{padding:14px}
+.cmp .big{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:10px}
+.cmp .big .fld input{font-size:1.4rem;font-weight:700;text-align:center}
+.cmp .check{font-size:.85rem;color:var(--muted);margin-bottom:12px}
+.cmp .check.bad{color:var(--warn)}
+.cmp .acts{display:flex;gap:8px}
+.cmp .acts button{flex:1}
+.cmp .acts .ok{background:var(--brand);color:#fff;border:0}
+.toast{position:fixed;left:50%;bottom:96px;transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:10px 16px;border-radius:10px;font-size:.92rem;z-index:60;max-width:90vw}
+.toast[hidden]{display:none}
+.confirmdlg .body{padding:18px}
+.confirmdlg h2{font-size:1.1rem;margin:0 0 8px}
+.confirmdlg p{margin:0 0 14px;color:var(--muted)}
+.confirmdlg .acts{display:flex;flex-direction:column;gap:8px}
+.confirmdlg .acts .ok{background:var(--brand);color:#fff;border:0}
+@media (max-width:360px){.grid{grid-template-columns:1fr}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<header>
+  <span aria-hidden="true" style="font-size:1.4rem;color:var(--muted)">‹</span>
+  <h1>Rakenteen suht. kosteus (RH)</h1>
+  <span class="pill" id="savePill">✓ Tallennettu</span>
+</header>
+
+<main>
+  <div class="demo-note">Demo 2. Lukemat tulevat suoraan riveille. Oranssilla merkityt arvot kannattaa tarkistaa kuvasta. Tiedot säilyvät vain tämän välilehden ajan.</div>
+
+  <div class="flabel">Mittausarvot <span class="req">*</span>
+    <button class="btn btn-cam" id="openCam">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+      Lue mittarista
+    </button>
+  </div>
+  <div class="rows" id="rows"></div>
+  <div class="empty" id="empty">Paina Lue mittarista ja kuvaa lukulaitteen näyttö. Jokaisesta kuvasta tulee oma rivinsä.</div>
+  <button class="btn" id="addRow">+ Lisää rivi</button>
+
+  <div class="field">
+    <div class="flabel">Tasaantumisaika <span class="req">*</span></div>
+    <input class="wide" placeholder="Muista kirjata yksikkö! (h/min)">
+  </div>
+
+  <div class="field">
+    <div class="flabel">Kirjauksen kuvat</div>
+    <div class="photos" id="photos"><span style="color:var(--muted);font-size:.9rem">Ei kuvia.</span></div>
+  </div>
+</main>
+
+<footer><div class="inner">
+  <button class="btn-photo" aria-label="Lisää kuva">📷</button>
+  <button class="btn-primary" id="saveBtn">Tallenna kirjaus</button>
+</div></footer>
+
+<!-- Kameranäkymä -->
+<section class="cam" id="cam" hidden aria-label="Lukulaitteen kuvaus">
+  <div class="cam-top">
+    <button class="cambtn" id="camClose" aria-label="Sulje kamera">✕</button>
+    <div class="count" id="camCount">Kuvaa ensimmäinen mittauspiste</div>
+    <label class="depth">Syvyys <input id="camDepth" inputmode="decimal" placeholder="mm"></label>
+    <button class="cambtn" id="torch" aria-pressed="false" hidden aria-label="Taskulamppu">💡</button>
+  </div>
+  <div class="cam-stage" id="stage">
+    <video id="video" playsinline muted></video>
+    <canvas id="cropCanvas" hidden></canvas>
+    <div class="frame" id="frame"></div>
+    <div class="camhint" id="camHint" hidden>Vedä rajaus näytön ympärille</div>
+    <div class="flash" id="flash"></div>
+  </div>
+  <div class="strip" id="strip" aria-live="polite"></div>
+  <div class="cam-bottom">
+    <button class="cambtn l" id="gallery">Galleria</button>
+    <button class="shutter" id="shutter" aria-label="Ota kuva ja lue lukemat" disabled></button>
+    <button class="cambtn r" id="camDone">Valmis</button>
+  </div>
+  <input type="file" id="fileInput" accept="image/*" hidden>
+</section>
+
+<dialog class="cmp" id="cmp">
+  <img id="cmpImg" alt="Lukulaitteen näyttö">
+  <div class="body">
+    <div class="big">
+      <div class="fld"><label for="cmpT">Lämpötila °C</label><input id="cmpT" inputmode="decimal"></div>
+      <div class="fld"><label for="cmpRH">RH %</label><input id="cmpRH" inputmode="decimal"></div>
+      <div class="fld"><label for="cmpA">Abs. g/m³</label><input id="cmpA" inputmode="decimal"></div>
+    </div>
+    <div class="check" id="cmpCheck"></div>
+    <div class="acts">
+      <button class="btn" id="cmpRetake">Kuvaa uudelleen</button>
+      <button class="btn ok" id="cmpOk" autofocus>Arvot oikein</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog class="confirmdlg" id="confirmDlg">
+  <div class="body">
+    <h2 id="confirmTitle"></h2>
+    <p id="confirmText"></p>
+    <div class="acts">
+      <button class="btn ok" id="confirmReview" autofocus>Tarkista</button>
+      <button class="btn" id="confirmSave">Tallenna silti</button>
+    </div>
+  </div>
+</dialog>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<script>
+/* Vaisala-lukulaitteen näytön OCR-tekstin jäsennys ja fysikaalinen ristiintarkistus.
+   Näytön rivijärjestys (HM40-sarja, näkymä "RH Td Tw a x h"): T, RH, Td, Tw, a, x, h */
+(function (root) {
+  'use strict';
+
+  var DECIMALS = { T: 1, RH: 1, Td: 1, Tw: 1, a: 2 };
+  var CONFUSE = { '5': '63', '6': '58', '3': '8', '8': '3609', '1': '7', '7': '1', '0': '8', '9': '8' };
+
+  // Kyllästysvesihöyrynpaine (hPa), Magnus-kaava veden yllä
+  function es(t) { return 6.112 * Math.exp(17.62 * t / (243.12 + t)); }
+  function rhFromTd(t, td) { return 100 * es(td) / es(t); }
+  function rhFromA(t, a) { return 100 * (a * (273.15 + t) / 216.7) / es(t); }
+  function aFromRh(t, rh) { return 216.7 * (rh / 100 * es(t)) / (273.15 + t); }
+
+  // Muuntaa OCR-luvun näytön kiinteään desimaalimuotoon (esim. "523" -> 52.3)
+  function normalize(tok, dec) {
+    var neg = tok.charAt(0) === '-';
+    var s = tok.replace(/[^\d.,]/g, '').replace(',', '.');
+    if (!s) return null;
+    var v;
+    if (s.indexOf('.') >= 0) {
+      var p = s.split('.');
+      if (!p[0]) return null;
+      v = parseFloat(p[0] + '.' + (p[1] || '0').slice(0, dec));
+    } else {
+      if (s.length <= dec) return null;
+      v = parseFloat(s.slice(0, s.length - dec) + '.' + s.slice(s.length - dec));
+    }
+    if (isNaN(v)) return null;
+    return neg ? -v : v;
+  }
+
+  function firstNumber(line) {
+    var m = line.match(/-?\d[\d.,]*/g);
+    if (!m) return null;
+    for (var i = 0; i < m.length; i++) if (m[i].replace(/\D/g, '').length >= 2) return m[i];
+    return null;
+  }
+
+  // Yhden OCR-tuloksen jäsennys
+  function parseText(text) {
+    var lines = text.split(/\r?\n/).map(function (l) { return l.trim(); }).filter(Boolean);
+    var nums = [];
+    lines.forEach(function (l) {
+      var tok = firstNumber(l);
+      if (tok) nums.push({ line: l, tok: tok });
+    });
+    var out = {};
+    var rhIdx = -1;
+    for (var i = 0; i < nums.length; i++) {
+      if (/R\s?H/i.test(nums[i].line.split(nums[i].tok)[0])) { rhIdx = i; break; }
+    }
+    function put(key, item) {
+      if (!item) return;
+      var v = normalize(item.tok, DECIMALS[key]);
+      if (v !== null) out[key] = v;
+    }
+    if (rhIdx >= 0) {
+      put('T', nums[rhIdx - 1]);
+      put('RH', nums[rhIdx]);
+      put('Td', nums[rhIdx + 1]);
+      put('Tw', nums[rhIdx + 2]);
+      put('a', nums[rhIdx + 3]);
+    } else if (nums.length >= 5) {
+      put('T', nums[0]); put('RH', nums[1]); put('Td', nums[2]); put('Tw', nums[3]); put('a', nums[4]);
+    }
+    // Yksikkövihje voittaa paikan: g/m³-rivi on absoluuttinen kosteus
+    nums.forEach(function (n) {
+      var after = n.line.slice(n.line.indexOf(n.tok) + n.tok.length);
+      if (/g\s*[i\/l|]?\s*[mn]/i.test(after) && !/k/i.test(after)) put('a', n);
+    });
+    return out;
+  }
+
+  function plausible(key, v) {
+    if (v === undefined || v === null) return false;
+    if (key === 'RH') return v >= 0 && v <= 100;
+    if (key === 'a') return v >= 0 && v <= 80;
+    return v >= -40 && v <= 80;
+  }
+
+  function alternatives(v, dec) {
+    var s = v.toFixed(dec), res = [];
+    for (var i = 0; i < s.length; i++) {
+      var alts = CONFUSE[s.charAt(i)];
+      if (!alts) continue;
+      for (var j = 0; j < alts.length; j++) res.push(parseFloat(s.slice(0, i) + alts.charAt(j) + s.slice(i + 1)));
+    }
+    return res;
+  }
+
+  // Yhdistää usean esikäsittelyversion tulokset ja valitsee fysikaalisesti johdonmukaisimman yhdistelmän
+  function combine(parses) {
+    var keys = ['T', 'RH', 'Td', 'a'];
+    var n = parses.length;
+    var cand = {}, votes = {};
+    keys.forEach(function (k) {
+      votes[k] = {};
+      parses.forEach(function (p) {
+        if (plausible(k, p[k])) votes[k][p[k].toFixed(DECIMALS[k])] = (votes[k][p[k].toFixed(DECIMALS[k])] || 0) + 1;
+      });
+      var set = {};
+      Object.keys(votes[k]).forEach(function (s) {
+        set[s] = true;
+        alternatives(parseFloat(s), DECIMALS[k]).forEach(function (alt) {
+          if (plausible(k, alt)) set[alt.toFixed(DECIMALS[k])] = true;
+        });
+      });
+      cand[k] = Object.keys(set).map(parseFloat);
+      if (!cand[k].length) cand[k] = [null];
+    });
+
+    function cost(k, v) {
+      if (v === null) return 6;
+      var c = votes[k][v.toFixed(DECIMALS[k])] || 0;
+      return -Math.log((c + 0.3) / (n + 1));
+    }
+
+    var best = null, all = [];
+    cand.T.forEach(function (T) {
+      cand.RH.forEach(function (RH) {
+        cand.Td.forEach(function (Td) {
+          cand.a.forEach(function (a) {
+            var c = cost('T', T) + cost('RH', RH) + cost('Td', Td) + cost('a', a);
+            var checks = 0;
+            if (T !== null && RH !== null) {
+              if (Td !== null) { c += 0.5 * Math.pow((RH - rhFromTd(T, Td)) / 1.0, 2); checks++; }
+              if (a !== null) { c += 0.5 * Math.pow((RH - rhFromA(T, a)) / 1.0, 2); checks++; }
+            }
+            var combo = { cost: c, T: T, RH: RH, Td: Td, a: a, checks: checks };
+            all.push(combo);
+            if (!best || c < best.cost) best = combo;
+          });
+        });
+      });
+    });
+
+    // Lähes yhtä hyvä, mutta eri T/RH-pari = tulkinta ei ole yksiselitteinen
+    var alt = null;
+    all.forEach(function (c) {
+      if (c.T === null || c.RH === null || best.T === null || best.RH === null) return;
+      if (Math.abs(c.T - best.T) < 0.5 && Math.abs(c.RH - best.RH) < 1.0) return;
+      if (!alt || c.cost < alt.cost) alt = c;
+    });
+    var result = { values: {}, status: {}, votes: votes, checks: {} };
+    if (alt && alt.T !== null && alt.RH !== null && alt.cost - best.cost < 2.5) {
+      result.alternative = { T: alt.T, RH: alt.RH, Td: alt.Td, a: alt.a };
+    }
+    keys.forEach(function (k) {
+      var v = best[k];
+      result.values[k] = v;
+      if (v === null) { result.status[k] = 'puuttuu'; return; }
+      var c = votes[k][v.toFixed(DECIMALS[k])] || 0;
+      var top = Math.max.apply(null, Object.keys(votes[k]).map(function (s) { return votes[k][s]; }).concat([0]));
+      result.status[k] = c === 0 ? 'korjattu' : (c < top ? 'valittu' : 'ok');
+    });
+    var V = result.values;
+    if (V.T !== null && V.RH !== null) {
+      if (V.Td !== null) result.checks.rhFromTd = rhFromTd(V.T, V.Td);
+      if (V.a !== null) result.checks.rhFromA = rhFromA(V.T, V.a);
+      result.checks.aFromRh = aFromRh(V.T, V.RH);
+    }
+    var devs = [];
+    if (result.checks.rhFromTd !== undefined) devs.push(Math.abs(V.RH - result.checks.rhFromTd));
+    if (result.checks.rhFromA !== undefined) devs.push(Math.abs(V.RH - result.checks.rhFromA));
+    result.maxDev = devs.length ? Math.max.apply(null, devs) : null;
+    result.consistent = result.maxDev !== null && result.maxDev <= 1.5;
+    return result;
+  }
+
+  var api = { parseText: parseText, combine: combine, normalize: normalize, rhFromTd: rhFromTd, rhFromA: rhFromA, aFromRh: aFromRh };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  else root.VaisalaParse = api;
+})(this);
+
+</script>
+<script>
+(function(){
+'use strict';
+var $=function(id){return document.getElementById(id);};
+var rows=[], photos=[], queue=[], busy=false, worker=null, workerP=null, stream=null, track=null;
+var camMode='live', galleryImg=null, crop=null, retakeRowId=null, sessionCount=0, nextId=1;
+
+var fmt=function(v,d){return (v===null||v===undefined||isNaN(v))?'':v.toFixed(d).replace('.',',');};
+var num=function(s){var v=parseFloat(String(s).replace(',','.').trim());return isNaN(v)?null:v;};
+var today=function(){var d=new Date();return d.getDate()+'.'+(d.getMonth()+1)+'.'+d.getFullYear();};
+var clock=function(){var d=new Date();return d.getHours()+'.'+String(d.getMinutes()).padStart(2,'0');};
+
+function toast(msg){var t=$('toast');t.textContent=msg;t.hidden=false;clearTimeout(toast._t);toast._t=setTimeout(function(){t.hidden=true;},2600);}
+function markDirty(){var p=$('savePill');p.textContent='Tallentamatta';p.classList.add('dirty');}
+
+/* ---------- Tekstintunnistus ladataan valmiiksi taustalla ---------- */
+function getWorker(){
+  if(worker) return Promise.resolve(worker);
+  if(!workerP){
+    if(typeof Tesseract==='undefined') return Promise.reject(new Error('Tekstintunnistus ei latautunut. Tarkista verkkoyhteys.'));
+    workerP=Tesseract.createWorker('eng',1).then(function(w){
+      return w.setParameters({tessedit_pageseg_mode:'6'}).then(function(){worker=w;return w;});
+    });
+  }
+  return workerP;
+}
+window.addEventListener('load',function(){ setTimeout(function(){ getWorker().catch(function(){}); },300); });
+
+/* ---------- Kamera ---------- */
+function openCam(rowId){
+  retakeRowId=rowId||null; sessionCount=0; $('strip').innerHTML='';
+  $('camCount').textContent=retakeRowId?'Kuvaa näyttö uudelleen':'Kuvaa ensimmäinen mittauspiste';
+  $('cam').hidden=false; document.body.style.overflow='hidden';
+  showLive();
+  getWorker().catch(function(e){toast(e.message);});
+}
+function showLive(){
+  camMode='live'; $('cropCanvas').hidden=true; $('camHint').hidden=true; $('video').hidden=false; $('frame').hidden=false;
+  if(stream){ $('shutter').disabled=false; return; }
+  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){ toast('Kamera ei ole käytettävissä. Valitse kuva galleriasta.'); return; }
+  navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1440}},audio:false})
+    .then(function(s){
+      stream=s; track=s.getVideoTracks()[0]; $('video').srcObject=s;
+      var caps=track.getCapabilities?track.getCapabilities():{};
+      $('torch').hidden=!caps.torch;
+      return $('video').play();
+    })
+    .then(function(){ $('shutter').disabled=false; })
+    .catch(function(){ toast('Kameran käyttö estettiin. Salli kamera tai valitse kuva galleriasta.'); });
+}
+function closeCam(){
+  if(stream){ stream.getTracks().forEach(function(t){t.stop();}); stream=null; track=null; }
+  $('torch').setAttribute('aria-pressed','false');
+  $('cam').hidden=true; document.body.style.overflow=''; $('shutter').disabled=true;
+  if(sessionCount>0 && !retakeRowId) toast(sessionCount+(sessionCount===1?' rivi lisätty':' riviä lisätty'));
+}
+$('openCam').onclick=function(){openCam();};
+$('camClose').onclick=closeCam;
+$('camDone').onclick=closeCam;
+$('torch').onclick=function(){
+  if(!track) return; var on=this.getAttribute('aria-pressed')!=='true', b=this;
+  track.applyConstraints({advanced:[{torch:on}]}).then(function(){b.setAttribute('aria-pressed',String(on));}).catch(function(){});
+};
+
+function frameRegion(){
+  var v=$('video'), vw=v.videoWidth, vh=v.videoHeight, cr=$('stage').getBoundingClientRect(), fr=$('frame').getBoundingClientRect();
+  var s=Math.max(cr.width/vw,cr.height/vh), ox=(cr.width-vw*s)/2, oy=(cr.height-vh*s)/2;
+  return {x:(fr.left-cr.left-ox)/s,y:(fr.top-cr.top-oy)/s,w:fr.width/s,h:fr.height/s};
+}
+function cropTo(src,sw,sh,r){
+  var mx=r.w*0.05,my=r.h*0.05, x=Math.max(0,r.x-mx), y=Math.max(0,r.y-my), w=Math.min(sw-x,r.w+2*mx), h=Math.min(sh-y,r.h+2*my);
+  var c=document.createElement('canvas'), sc=1000/w; c.width=1000; c.height=Math.round(h*sc);
+  c.getContext('2d').drawImage(src,x,y,w,h,0,0,c.width,c.height); return c;
+}
+function fullPhoto(src,sw,sh){
+  var s=Math.min(1,1600/Math.max(sw,sh)), c=document.createElement('canvas');
+  c.width=Math.round(sw*s); c.height=Math.round(sh*s); c.getContext('2d').drawImage(src,0,0,c.width,c.height);
+  return c.toDataURL('image/jpeg',0.8);
+}
+function thumbOf(c){
+  var t=document.createElement('canvas'), s=360/c.width; t.width=360; t.height=Math.round(c.height*s);
+  t.getContext('2d').drawImage(c,0,0,t.width,t.height); return t.toDataURL('image/jpeg',0.75);
+}
+
+$('shutter').onclick=function(){
+  var src, sw, sh, region;
+  if(camMode==='live'){ var v=$('video'); src=v; sw=v.videoWidth; sh=v.videoHeight; region=frameRegion(); }
+  else { src=galleryImg; sw=galleryImg.width; sh=galleryImg.height; region={x:crop.x*sw,y:crop.y*sh,w:crop.w*sw,h:crop.h*sh}; }
+  var cropC=cropTo(src,sw,sh,region), full=fullPhoto(src,sw,sh), img=thumbOf(cropC);
+  var f=$('flash'); f.classList.add('on'); requestAnimationFrame(function(){requestAnimationFrame(function(){f.classList.remove('on');});});
+  if(navigator.vibrate) navigator.vibrate(30);
+
+  var row;
+  if(retakeRowId){
+    row=rows.find(function(r){return r.id===retakeRowId;});
+    row.img=img; row.state='reading'; row.flags={}; row.alt=null; row.edited={};
+    replacePhoto(row, full);
+  } else {
+    var depth=num($('camDepth').value);
+    row={id:nextId++, pvm:today(), syvyys:depth, t:null, rh:null, a:null, td:null, anturi:'', img:img, state:'reading', flags:{}, alt:null, edited:{}, reviewed:false};
+    rows.push(row);
+    addPhoto(row, full);
+  }
+  renderRow(row, !retakeRowId);
+  addStripThumb(row);
+  sessionCount++;
+  enqueue(row, cropC);
+  markDirty();
+  if(retakeRowId){ closeCam(); }
+  else { $('camCount').textContent=sessionCount+' luettu · kuvaa seuraava'; if(camMode==='gallery') showLive(); }
+};
+
+/* Galleriasta valittu kuva rajataan käsin */
+$('gallery').onclick=function(){ $('fileInput').click(); };
+$('fileInput').onchange=function(e){
+  var file=e.target.files[0]; if(!file) return;
+  var im=new Image();
+  im.onload=function(){
+    galleryImg=im; camMode='gallery'; crop={x:.2,y:.25,w:.6,h:.5};
+    $('video').hidden=true; $('frame').hidden=true; $('cropCanvas').hidden=false; $('camHint').hidden=false;
+    var r=$('stage').getBoundingClientRect(), dpr=window.devicePixelRatio||1, c=$('cropCanvas');
+    c.width=r.width*dpr; c.height=r.height*dpr; drawCrop(); $('shutter').disabled=false;
+  };
+  im.src=URL.createObjectURL(file); e.target.value='';
+};
+function layout(){var c=$('cropCanvas'),s=Math.min(c.width/galleryImg.width,c.height/galleryImg.height);return{s:s,ox:(c.width-galleryImg.width*s)/2,oy:(c.height-galleryImg.height*s)/2,w:galleryImg.width*s,h:galleryImg.height*s};}
+function drawCrop(){
+  var c=$('cropCanvas'),x=c.getContext('2d'),L=layout();
+  x.fillStyle='#000';x.fillRect(0,0,c.width,c.height);x.drawImage(galleryImg,L.ox,L.oy,L.w,L.h);
+  var rx=L.ox+crop.x*L.w,ry=L.oy+crop.y*L.h,rw=crop.w*L.w,rh=crop.h*L.h;
+  x.fillStyle='rgba(0,0,0,.5)';x.fillRect(0,0,c.width,ry);x.fillRect(0,ry+rh,c.width,c.height-ry-rh);x.fillRect(0,ry,rx,rh);x.fillRect(rx+rw,ry,c.width-rx-rw,rh);
+  x.strokeStyle='#fff';x.lineWidth=3*(window.devicePixelRatio||1);x.strokeRect(rx,ry,rw,rh);
+}
+(function(){
+  var c=$('cropCanvas'),start=null;
+  function rel(e){var r=c.getBoundingClientRect(),L=layout(),d=c.width/r.width;return{x:Math.min(1,Math.max(0,((e.clientX-r.left)*d-L.ox)/L.w)),y:Math.min(1,Math.max(0,((e.clientY-r.top)*d-L.oy)/L.h))};}
+  c.addEventListener('pointerdown',function(e){start=rel(e);c.setPointerCapture(e.pointerId);});
+  c.addEventListener('pointermove',function(e){if(!start)return;var p=rel(e);crop={x:Math.min(start.x,p.x),y:Math.min(start.y,p.y),w:Math.abs(p.x-start.x),h:Math.abs(p.y-start.y)};drawCrop();});
+  c.addEventListener('pointerup',function(){start=null;if(crop.w<.05||crop.h<.05){crop={x:.2,y:.25,w:.6,h:.5};drawCrop();}});
+})();
+
+/* ---------- Kirjauksen kuvat ---------- */
+function rowIndex(row){return rows.indexOf(row)+1;}
+function addPhoto(row,full){ photos.push({rowId:row.id,src:full,time:clock()}); renderPhotos(); }
+function replacePhoto(row,full){
+  var p=photos.find(function(p){return p.rowId===row.id;});
+  if(p){p.src=full;p.time=clock();} else photos.push({rowId:row.id,src:full,time:clock()});
+  renderPhotos();
+}
+function renderPhotos(){
+  var box=$('photos'); box.innerHTML='';
+  if(!photos.length){box.innerHTML='<span style="color:var(--muted);font-size:.9rem">Ei kuvia.</span>';return;}
+  photos.forEach(function(p){
+    var row=rows.find(function(r){return r.id===p.rowId;});
+    var f=document.createElement('figure'),i=document.createElement('img'),c=document.createElement('figcaption');
+    i.src=p.src; i.alt='RH-mittaus, rivi '+(row?rowIndex(row):''); c.textContent='RH-mittaus, rivi '+(row?rowIndex(row):'–')+' · klo '+p.time;
+    f.appendChild(i); f.appendChild(c); box.appendChild(f);
+  });
+}
+
+/* ---------- Tunnistusjono ---------- */
+var VARIANTS=[{r:2,o:-20},{r:2,o:-30},{r:1,o:-20},{r:3,o:-20},{r:2,o:-10},{r:3,o:-30}];
+function enqueue(row,canvas){ queue.push({row:row,canvas:canvas,ver:row.ver=(row.ver||0)+1}); pump(); }
+function pump(){
+  if(busy||!queue.length) return;
+  busy=true; var job=queue.shift();
+  recognize(job.canvas).then(function(res){
+    if(job.ver!==job.row.ver) return;          // rivi kuvattiin uudelleen sillä välin
+    applyResult(job.row,res);
+  }).catch(function(err){
+    if(job.ver!==job.row.ver) return;
+    job.row.state='error'; job.row.error=err&&err.message?err.message:String(err); renderRow(job.row);
+  }).then(function(){ busy=false; updateStrip(job.row); pump(); });
+}
+function recognize(canvas){
+  var w=canvas.width,h=canvas.height,g=gray(canvas),parses=[];
+  return getWorker().then(function(wk){
+    var i=0;
+    function next(){
+      if(i>=VARIANTS.length) return Promise.resolve();
+      var v=VARIANTS[i++];
+      return wk.recognize(binarize(blur3(g,w,h,v.r),w,h,v.o)).then(function(r){
+        parses.push(VaisalaParse.parseText(r.data.text));
+        if(parses.length>=3){
+          var c=VaisalaParse.combine(parses);
+          if(c.consistent&&!c.alternative&&['T','RH','a'].every(function(k){return c.status[k]==='ok';})) return;
+        }
+        return next();
+      });
+    }
+    return next();
+  }).then(function(){ return VaisalaParse.combine(parses); });
+}
+function gray(c){
+  var d=c.getContext('2d').getImageData(0,0,c.width,c.height).data,g=new Float32Array(c.width*c.height),j;
+  for(var i=0,k=0;i<d.length;i+=4,k++) g[k]=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
+  var hist=new Uint32Array(256);for(j=0;j<g.length;j++)hist[g[j]|0]++;
+  var cut=g.length*0.02,lo,hi,acc=0;for(lo=0;lo<255&&(acc+=hist[lo])<cut;lo++);acc=0;for(hi=255;hi>0&&(acc+=hist[hi])<cut;hi--);
+  var s=255/Math.max(1,hi-lo);for(j=0;j<g.length;j++)g[j]=Math.min(255,Math.max(0,(g[j]-lo)*s));return g;
+}
+function box(src,w,h,r){
+  var t=new Float32Array(src.length),o=new Float32Array(src.length),x,y,a,n=2*r+1;
+  for(y=0;y<h;y++){var rw=y*w;a=0;for(x=-r;x<=r;x++)a+=src[rw+Math.min(w-1,Math.max(0,x))];
+    for(x=0;x<w;x++){t[rw+x]=a/n;a+=src[rw+Math.min(w-1,x+r+1)]-src[rw+Math.max(0,x-r)];}}
+  for(x=0;x<w;x++){a=0;for(y=-r;y<=r;y++)a+=t[Math.min(h-1,Math.max(0,y))*w+x];
+    for(y=0;y<h;y++){o[y*w+x]=a/n;a+=t[Math.min(h-1,y+r+1)*w+x]-t[Math.max(0,y-r)*w+x];}}
+  return o;
+}
+function blur3(g,w,h,r){return box(box(box(g,w,h,r),w,h,r),w,h,r);}
+function binarize(g,w,h,off){
+  var s=0,j;for(j=0;j<g.length;j++)s+=g[j];var t=s/g.length+off,c=document.createElement('canvas');c.width=w;c.height=h;
+  var x=c.getContext('2d'),im=x.createImageData(w,h);
+  for(j=0;j<g.length;j++){var v=g[j]>t?255:0;im.data[j*4]=im.data[j*4+1]=im.data[j*4+2]=v;im.data[j*4+3]=255;}
+  x.putImageData(im,0,0);return c;
+}
+function applyResult(row,r){
+  var V=r.values;
+  row.t=V.T; row.rh=V.RH; row.a=V.a; row.td=V.Td; row.state='done'; row.alt=r.alternative||null;
+  row.flags={
+    T: r.status.T!=='ok' || !!row.alt,
+    RH: r.status.RH!=='ok' || !r.consistent || !!row.alt,
+    a: r.status.a!=='ok'
+  };
+  renderRow(row);
+}
+
+/* ---------- Kameran kuvanauha ---------- */
+function addStripThumb(row){
+  var t=document.createElement('div'); t.className='t busy'; t.id='st-'+row.id+'-'+(row.ver||0);
+  t.style.backgroundImage='url('+row.img+')'; t.innerHTML='<i>…</i>';
+  $('strip').appendChild(t); $('strip').scrollLeft=1e6;
+}
+function updateStrip(row){
+  var t=$('st-'+row.id+'-'+(row.ver-1)) || document.querySelector('[id^="st-'+row.id+'-"]:last-child');
+  if(!t) return; var f=rowFlagged(row);
+  t.className='t '+(row.state==='error'||f?'warn':'ok'); t.querySelector('i').textContent=row.state==='error'||f?'!':'✓';
+}
+
+/* ---------- Rivikortit ---------- */
+function rowFlagged(r){return !!(r.flags.T||r.flags.RH||r.flags.a);}
+var FIELDS=[
+  {k:'syvyys',label:'Syvyys (mm)',d:0},
+  {k:'t',label:'Lämpötila (C°)',d:1,f:'T',m:1},
+  {k:'rh',label:'RH (%)',d:1,f:'RH',m:1},
+  {k:'a',label:'Abs. (g/m³)',d:2,f:'a',m:1},
+  {k:'anturi',label:'Anturi',text:1}
+];
+function renderRow(row,isNew){
+  var el=$('row-'+row.id);
+  if(!el){
+    el=document.createElement('div'); el.id='row-'+row.id; el.className='rowcard'+(isNew?' new':'');
+    el.innerHTML='<div class="rowtop"><button class="thumb" aria-label="Avaa kuva ja tarkista arvot"><span>Tarkista</span></button>'+
+      '<div class="pvm fld"><label>Pvm</label><input data-k="pvm"><div class="status"></div></div></div>'+
+      '<button class="del" aria-label="Poista rivi">×</button><div class="grid"></div>';
+    var grid=el.querySelector('.grid');
+    FIELDS.forEach(function(F){
+      var d=document.createElement('div'); d.className='fld'+(F.m?' measured':''); d.dataset.k=F.k;
+      var id='f-'+row.id+'-'+F.k;
+      d.innerHTML='<label for="'+id+'">'+F.label+'</label><input id="'+id+'" data-k="'+F.k+'" '+(F.text?'':'inputmode="decimal"')+'>';
+      grid.appendChild(d);
+    });
+    var chip=document.createElement('div'); chip.className='altchip'; chip.hidden=true; grid.appendChild(chip);
+    el.querySelector('.thumb').onclick=function(){openCompare(row);};
+    el.querySelector('.del').onclick=function(){
+      if(!confirm('Poistetaanko rivi '+rowIndex(row)+'? Myös sen kuva poistetaan kirjaukselta.')) return;
+      row.ver=(row.ver||0)+1; rows.splice(rows.indexOf(row),1);
+      photos=photos.filter(function(p){return p.rowId!==row.id;});
+      el.remove(); renderPhotos(); updateEmpty(); markDirty();
+    };
+    el.addEventListener('input',function(e){
+      var k=e.target.dataset.k; if(!k) return;
+      if(k==='pvm'||k==='anturi') row[k]=e.target.value; else row[k]=num(e.target.value);
+      var F=FIELDS.find(function(f){return f.k===k;});
+      if(F&&F.f){ row.flags[F.f]=false; row.edited[F.f]=true; if(F.f==='T'||F.f==='RH') row.alt=null; }
+      paintRow(row, el, true); markDirty();
+    });
+    $('rows').appendChild(el);
+  }
+  paintRow(row, el, false);
+  updateEmpty();
+  return el;
+}
+// Päivittää kortin tilan; kirjoitettaessa ei kosketa kenttien arvoihin
+function paintRow(row, el, typing){
+  var thumb=el.querySelector('.thumb');
+  thumb.style.backgroundImage=row.img?'url('+row.img+')':'none';
+  thumb.style.display=row.img?'':'none';
+  if(!typing){
+    el.querySelector('[data-k="pvm"]').value=row.pvm||'';
+    FIELDS.forEach(function(F){
+      var inp=el.querySelector('input[data-k="'+F.k+'"]');
+      if(document.activeElement===inp) return;
+      inp.value=F.text?(row[F.k]||''):fmt(row[F.k],F.d);
+      inp.placeholder=(row.state==='reading'&&F.m)?'luetaan…':'';
+    });
+  }
+  FIELDS.forEach(function(F){
+    var d=el.querySelector('.fld[data-k="'+F.k+'"]');
+    d.classList.toggle('reading',row.state==='reading'&&!!F.m);
+    d.classList.toggle('flag',!!(F.f&&row.flags[F.f]));
+  });
+  var chip=el.querySelector('.altchip');
+  if(row.alt){
+    chip.hidden=false; chip.innerHTML='';
+    var s=document.createElement('span'); s.textContent='Kuvasta voi lukea myös:'; chip.appendChild(s);
+    var b=document.createElement('button'); b.textContent='RH '+fmt(row.alt.RH,1)+' % / T '+fmt(row.alt.T,1)+' °C';
+    b.onclick=function(){
+      row.rh=row.alt.RH; row.t=row.alt.T; if(row.alt.a!==null) row.a=row.alt.a;
+      row.alt=null; row.flags.T=row.flags.RH=false; row.edited.T=row.edited.RH=true; paintRow(row,el,false); markDirty();
+    };
+    chip.appendChild(b);
+  } else chip.hidden=true;
+  var st=el.querySelector('.status'), flagged=rowFlagged(row);
+  el.classList.toggle('flagged',flagged&&row.state==='done');
+  st.className='status';
+  if(row.state==='reading'){ st.textContent='Luetaan lukemia…'; }
+  else if(row.state==='error'){ st.className='status err'; st.textContent='Lukeminen epäonnistui. Täytä arvot tai kuvaa uudelleen.'; }
+  else if(row.state==='done'||row.state==='manual'){
+    var dev=deviation(row);
+    if(dev!==null&&dev>1.5){ st.className='status warn'; st.textContent='RH ei täsmää lämpötilan ja abs. kosteuden kanssa (ero '+fmt(dev,1)+' %-yks.)'; }
+    else if(flagged){ st.className='status warn'; st.textContent='Tarkista merkityt arvot kuvasta'; }
+    else if(row.img){ st.textContent=row.reviewed?'Tarkistettu':'Luettu kuvasta'; }
+    else st.textContent='';
+  }
+}
+function deviation(row){
+  if(row.t===null||row.rh===null||row.a===null) return null;
+  return Math.abs(row.rh-VaisalaParse.rhFromA(row.t,row.a));
+}
+function updateEmpty(){ $('empty').hidden=rows.length>0; }
+$('addRow').onclick=function(){
+  var row={id:nextId++,pvm:today(),syvyys:null,t:null,rh:null,a:null,td:null,anturi:'',img:null,state:'manual',flags:{},alt:null,edited:{}};
+  rows.push(row); var el=renderRow(row,true); el.querySelector('input[data-k="syvyys"]').focus(); markDirty();
+};
+
+/* ---------- Vertailunäkymä ---------- */
+var cmpRow=null;
+function openCompare(row){
+  cmpRow=row;
+  var p=photos.find(function(p){return p.rowId===row.id;});
+  $('cmpImg').src=row.img||(p&&p.src)||'';
+  $('cmpT').value=fmt(row.t,1); $('cmpRH').value=fmt(row.rh,1); $('cmpA').value=fmt(row.a,2);
+  ['T','RH','A'].forEach(function(k){ $('cmp'+k).parentNode.classList.toggle('flag',!!row.flags[k==='A'?'a':k]); });
+  cmpCheck(); $('cmp').showModal();
+}
+function cmpCheck(){
+  var T=num($('cmpT').value),RH=num($('cmpRH').value),A=num($('cmpA').value),el=$('cmpCheck');
+  if(T===null||RH===null||A===null){el.className='check';el.textContent='';return;}
+  var calc=VaisalaParse.rhFromA(T,A),dev=Math.abs(RH-calc);
+  el.className='check'+(dev>1.5?' bad':'');
+  el.textContent='T:stä ja abs. kosteudesta laskettu RH '+fmt(calc,1)+' %'+(dev>1.5?' – ei täsmää luettuun RH:hon.':' – täsmää.');
+}
+['cmpT','cmpRH','cmpA'].forEach(function(id){$(id).addEventListener('input',function(){this.parentNode.classList.remove('flag');cmpCheck();});});
+$('cmpOk').onclick=function(){
+  var r=cmpRow, nt=num($('cmpT').value), nrh=num($('cmpRH').value), na=num($('cmpA').value);
+  if(nt!==r.t) r.edited.T=true; if(nrh!==r.rh) r.edited.RH=true; if(na!==r.a) r.edited.a=true;
+  r.t=nt; r.rh=nrh; r.a=na; r.flags={}; r.alt=null; r.reviewed=true;
+  paintRow(r,$('row-'+r.id),false); $('cmp').close(); markDirty();
+};
+$('cmpRetake').onclick=function(){ $('cmp').close(); openCam(cmpRow.id); };
+$('cmp').addEventListener('click',function(e){ if(e.target===this) this.close(); });
+
+/* ---------- Tallennus ---------- */
+$('saveBtn').onclick=function(){
+  var reading=rows.filter(function(r){return r.state==='reading';}).length;
+  var flagged=rows.filter(function(r){return r.state==='done'&&(rowFlagged(r)||(deviation(r)||0)>1.5);});
+  if(reading){ toast('Odota hetki – '+reading+(reading===1?' kuva':' kuvaa')+' vielä luettavana.'); return; }
+  if(flagged.length){
+    $('confirmTitle').textContent=flagged.length===1?'Yksi rivi tarkistamatta':flagged.length+' riviä tarkistamatta';
+    $('confirmText').textContent='Rivi'+(flagged.length===1?'llä ':'eillä ')+flagged.map(rowIndex).join(', ')+' on arvoja, joiden luenta oli epävarma.';
+    $('confirmDlg').showModal(); return;
+  }
+  doSave();
+};
+$('confirmReview').onclick=function(){
+  $('confirmDlg').close();
+  var r=rows.find(function(r){return r.state==='done'&&(rowFlagged(r)||(deviation(r)||0)>1.5);});
+  if(r){ $('row-'+r.id).scrollIntoView({behavior:'smooth',block:'center'}); openCompare(r); }
+};
+$('confirmSave').onclick=function(){ $('confirmDlg').close(); doSave(); };
+function doSave(){
+  // Lopullisessa versiossa: rivit lomakkeen taulukkokenttään, kuvat kirjauksen kuviin ja
+  // tunnistuksen metatiedot (luettu arvo, käsin muutettu, tarkistettu) rivin lisätietoihin.
+  var p=$('savePill'); p.textContent='✓ Tallennettu'; p.classList.remove('dirty');
+  toast('Kirjaus tallennettu ('+rows.length+' riviä, '+photos.length+' kuvaa)');
+}
+
+updateEmpty();
+})();
+</script>
+</body>
+</html>

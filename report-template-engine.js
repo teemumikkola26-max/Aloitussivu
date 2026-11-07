@@ -215,6 +215,11 @@
     const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || "");
     return m ? (+m[3]) + "." + (+m[2]) + "." + m[1] : (iso || "");
   }
+  /* Taulukon mittausarvo sellaisenaan (esim. 8.27 -> "8,27"): desimaaleja ei pyöristetä. */
+  function fmtNumKeep(v){
+    const t = String(v).trim();
+    return /^-?\d+([.,]\d+)?$/.test(t) ? t.replace(".", ",") : t;
+  }
   function fmtNum(v){
     const x = parseFloat(String(v).replace(",", "."));
     if (!isFinite(x)) return String(v);
@@ -424,7 +429,7 @@
         const w = Math.floor(layout.textW / cols.length);
         const widths = cols.map(() => w); widths[widths.length - 1] += layout.textW - w * cols.length;
         out.push(B.table([cols.map(c => c.label)].concat(data.map(r => cols.map(c =>
-          r[c.id] == null ? "" : (c.type === "number" ? fmtNum(r[c.id]) : String(r[c.id]))))), widths));
+          r[c.id] == null ? "" : (c.type === "number" ? fmtNumKeep(r[c.id]) : (c.type === "date" ? fiDate(r[c.id]) : String(r[c.id])))))), widths));
         out.push(para(""));
       });
       if ((e.values || {}).huomiot) textParas(e.values.huomiot).forEach(p => out.push(p));

@@ -83,3 +83,24 @@ Pohjakuvalla on kohteen yhteinen merkintäkerros. Sen avaa pohjakuvakortin paini
 - Kirjauksen kuvien pikkukuvat luodaan aina tuoreesta kuvatiedostosta, ja virhetilanteessa yritetään uudelleen.
 - Lomake-editorin lomakkeella uloskirjautuminen on sivun lopussa, ei kelluvana painikkeena alapalkin päällä.
 - Manifest: erillinen maskable-kuvake ja `id`.
+
+## Kameraluku ja päivämääräsarake (taulukkokentät)
+
+Service workerin välimuistin versio on nostettu (`aloitussivu-v20`).
+
+- **Uusi tiedosto `lukulaite-ocr.js`:** mittalaitteen näytön luku kameralla (Vaisala HM40 -sarja, näkymä T, RH, Td ja a).
+- **Menetelmäeditori:** taulukkokentän asetus "Lukemat mittalaitteen näytöltä kameralla". Siinä valitaan sarakkeet, joihin RH (pakollinen), lämpötila, absoluuttinen kosteus ja kuvauspäivä kirjoitetaan.
+- **Kirjauslomake:**
+  - "Lue mittarista" kuvaa näytöt sarjana, ja jokaisesta kuvasta syntyy rivi heti.
+  - Tunnistus tehdään taustalla. Epävarmat arvot merkitään oranssilla.
+  - Rivin pikkukuvasta aukeaa tarkistusnäkymä.
+  - Kuva tallentuu kirjaukselle, ja kuvateksti muodostuu rivin arvoista.
+  - Tallennus odottaa kesken olevat luvut ja kysyy tarkistamattomista riveistä.
+- **Sarakkeen tyyppi Päivämäärä:**
+  - Puhelimen päivämäärävalitsin.
+  - Arvo tallentuu muodossa vvvv-kk-pp.
+  - Raporteissa päivä näkyy muodossa p.k.vvvv.
+  - Apulauseissa ja näyttöehdoissa on vertailut "ennen" ja "jälkeen".
+- **Raporttipohjat (`report-template-engine.js`):**
+  - Taulukon päivämäärät muotoillaan.
+  - Numerosarakkeiden arvot näytetään kirjatulla tarkkuudella, esim. 8,27 eikä 8,3.
