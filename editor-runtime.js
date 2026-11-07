@@ -1298,7 +1298,7 @@ function validateShowIf(target, where, secIdx, fieldIdx){
 /* ---------- Taulukko, johon täyttäjä lisää rivejä ----------
    Editorissa määritetään vain sarakkeet (otsikko + tyyppi). Rivit lisätään
    lomakkeen täytön aikana. Sarakkeet: field.columns = [{id,label,type,options,allowCustom}] */
-const ROWTABLE_COL_TYPES = { text:"Teksti", number:"Numero", date:"Päivämäärä", select:"Valintalista" };
+const ROWTABLE_COL_TYPES = { text:"Teksti", number:"Numero", date:"Päivämäärä", select:"Valintalista", calc:"Laskettu (kaava)" };
 const ROWTABLE_LAYOUTS = {
   auto:"Automaattinen (kortit puhelimella, taulukko leveällä näytöllä)",
   scroll:"Taulukko (vieritetään sivuttain)",
@@ -1320,13 +1320,16 @@ function buildRowTableEditor(field, wrap){
   intro.textContent = "Sarakkeet, joita täyttäjä täyttää rivi kerrallaan (esim. \"Rakennekerros\", \"Paksuus (mm)\"). Täyttäjä lisää lomakkeella niin monta riviä kuin tarvitsee.";
   wrap.appendChild(intro);
 
+  /* Lasketut sarakkeet päivittävät sarakepikavalinnat, kun otsikoita muutetaan. */
+  const calcRefreshers = [];
+
   field.columns.forEach((col, i) => {
     const box = document.createElement("div");
     box.style.cssText = "border:1px solid var(--line-strong);border-radius:8px;padding:8px;margin-bottom:8px;background:#fff;";
 
     const top = document.createElement("div");
     top.className = "editor-row";
-    const labelInput = textInput(col.label, v => col.label = v, "Sarakkeen otsikko " + (i+1));
+    const labelInput = textInput(col.label, v => { col.label = v; calcRefreshers.forEach(fn => fn()); }, "Sarakkeen otsikko " + (i+1));
     labelInput.style.flex = "1";
     const typeSel = document.createElement("select");
     typeSel.className = "type-select";
@@ -1365,6 +1368,7 @@ function buildRowTableEditor(field, wrap){
       box.appendChild(optionsArea);
       box.appendChild(allowCustomCheckbox(col));
     }
+    if (col.type === "calc") box.appendChild(buildCalcColumnEditor(field, col, calcRefreshers));
     wrap.appendChild(box);
   });
 
@@ -1399,6 +1403,93 @@ function buildRowTableEditor(field, wrap){
   wrap.appendChild(note);
 }
 
+/* Lasketun sarakkeen kaava (formula.js). Käyttäjä kirjoittaa sarakkeet nimillä
+   {Nimi}; tallennettaessa ne muutetaan tunnisteiksi, jotta kaava kestää
+   sarakkeen uudelleennimeämisen. */
+function buildCalcColumnEditor(field, col, refreshers){
+  const wrapEl = document.createElement("div");
+  wrapEl.style.cssText = "margin-top:6px;";
+  const F = window.AppFormula;
+  if (!F){
+    wrapEl.textContent = "Kaavojen laskenta ei ole käytettävissä (formula.js puuttuu).";
+    return wrapEl;
+  }
+  if (col.formulaSrc === undefined) col.formulaSrc = F.toDisplay(col.formula, field.columns);
+  if (!Number.isInteger(col.decimals)) col.decimals = 1;
+
+  const lbl = document.createElement("div");
+  lbl.style.cssText = "font-size:.74rem;color:var(--ink-soft);margin-bottom:3px;";
+  lbl.textContent = "Kaava (esim. abskost({Lämpötila}; {RH})):";
+  const inp = textInput(col.formulaSrc, v => { col.formulaSrc = v; check(); }, "Kaava");
+  inp.spellcheck = false;
+  inp.style.width = "100%";
+  /* Kohdistimen paikka talteen: pikavalinta lisää sarakkeen siihen, missä kirjoitettiin. */
+  ["input", "keyup", "click", "select"].forEach(ev => inp.addEventListener(ev, () => { inp._caret = [inp.selectionStart, inp.selectionEnd]; }));
+
+  const chipsLbl = document.createElement("div");
+  chipsLbl.style.cssText = "font-size:.74rem;color:var(--ink-soft);margin:6px 0 3px;";
+  chipsLbl.textContent = "Lisää sarake kaavaan napauttamalla:";
+  const chips = document.createElement("div");
+  chips.style.cssText = "display:flex;flex-wrap:wrap;gap:6px;";
+  const msg = document.createElement("div");
+  msg.setAttribute("role", "status");
+  msg.style.cssText = "font-size:.78rem;margin-top:6px;";
+
+  function check(){
+    if (!String(col.formulaSrc || "").trim()){ msg.textContent = ""; return; }
+    const r = F.compile(col.formulaSrc, field.columns, col.id);
+    msg.style.color = r.ok ? "#2f6b3a" : "#a3271b";
+    msg.textContent = r.ok ? "✓ Kaava on kelvollinen" : r.error;
+  }
+  function drawChips(){
+    chips.innerHTML = "";
+    field.columns.forEach(c => {
+      if (c.id === col.id || c.type === "select" || !String(c.label || "").trim()) return;
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = c.label;
+      b.style.cssText = "border:1px solid var(--line-strong);background:#fff;border-radius:99px;padding:5px 10px;font-size:.78rem;cursor:pointer;";
+      b.addEventListener("click", () => {
+        const ref = "{" + String(c.label).trim() + "}";
+        const a = inp._caret ? inp._caret[0] : inp.value.length, z = inp._caret ? inp._caret[1] : inp.value.length;
+        inp.value = inp.value.slice(0, a) + ref + inp.value.slice(z);
+        col.formulaSrc = inp.value;
+        inp.focus(); inp.setSelectionRange(a + ref.length, a + ref.length);
+        inp._caret = [a + ref.length, a + ref.length];
+        check();
+      });
+      chips.appendChild(b);
+    });
+    if (!chips.children.length) chips.textContent = "Lisää ensin numerosarakkeita.";
+  }
+  refreshers.push(() => { drawChips(); check(); });
+
+  const decRow = document.createElement("div");
+  decRow.style.cssText = "display:flex;align-items:center;gap:8px;margin-top:8px;font-size:.78rem;color:var(--ink-soft);";
+  decRow.appendChild(document.createTextNode("Desimaalit:"));
+  const dec = document.createElement("select");
+  dec.className = "type-select";
+  [0,1,2,3].forEach(d => { const o = document.createElement("option"); o.value = d; o.textContent = d; if (col.decimals === d) o.selected = true; dec.appendChild(o); });
+  dec.addEventListener("change", () => { col.decimals = parseInt(dec.value, 10); });
+  decRow.appendChild(dec);
+
+  const help = document.createElement("details");
+  help.style.cssText = "font-size:.74rem;color:var(--ink-soft);margin-top:8px;";
+  help.innerHTML = "<summary style=\"cursor:pointer;\">Kaavan ohje</summary>";
+  const hb = document.createElement("div");
+  hb.style.cssText = "margin-top:4px;line-height:1.5;";
+  const lines = ["Sarakkeet kirjoitetaan aaltosulkeisiin, esim. {RH (%)}. Funktion arvot erotetaan puolipisteellä."]
+    .concat(F.HELP.map(h => h[0] + " – " + h[1]))
+    .concat(["Jos jokin kaavan sarake on tyhjä, tulos jää tyhjäksi. Kosteusfunktiot voivat poiketa mittalaitteen näyttämästä noin 1 %."]);
+  lines.forEach(t => { const d = document.createElement("div"); d.textContent = t; hb.appendChild(d); });
+  help.appendChild(hb);
+
+  wrapEl.appendChild(lbl); wrapEl.appendChild(inp); wrapEl.appendChild(chipsLbl); wrapEl.appendChild(chips);
+  wrapEl.appendChild(msg); wrapEl.appendChild(decRow); wrapEl.appendChild(help);
+  drawChips(); check();
+  return wrapEl;
+}
+
 /* ---------- Tallennus ---------- */
 function validateDef(){
   if (!ed.meta.title || !ed.meta.title.trim()) return "Anna lomakkeelle nimi.";
@@ -1425,7 +1516,23 @@ function validateDef(){
         if (!cols.some(c => c.label && c.label.trim())) return 'Taulukolle "' + f.label + '" pitää antaa vähintään yhdelle sarakkeelle otsikko.';
         for (const c of cols){
           if (c.type === "select" && !(c.options || []).length) return 'Taulukon "' + f.label + '" valintalistasarakkeella "' + (c.label || "(nimetön)") + '" ei ole vaihtoehtoja.';
+          if (c.type === "calc"){
+            if (!window.AppFormula) return "Kaavojen laskenta ei ole käytettävissä (formula.js puuttuu).";
+            const src = c.formulaSrc !== undefined ? c.formulaSrc : (c.formula || "");
+            const r = window.AppFormula.compile(src, cols, c.id);
+            if (!r.ok) return 'Taulukon "' + f.label + '" sarake "' + (c.label || "(nimetön)") + '": ' + r.error;
+            c.formula = r.formula;
+            if (!Number.isInteger(c.decimals)) c.decimals = 1;
+          } else {
+            delete c.formula; delete c.decimals; delete c.formulaSrc;
+          }
         }
+        if (window.AppFormula){
+          const cyc = window.AppFormula.findCycle(cols);
+          if (cyc) return 'Taulukon "' + f.label + '" kaavat viittaavat toisiinsa kehässä (sarake "' + cyc + '").';
+        }
+        /* Tallennusmuoto on {@tunniste}; editorin näyttömuoto muodostetaan siitä uudelleen. */
+        cols.forEach(c => { delete c.formulaSrc; });
       }
       const fErr = validateHints(f.hints, 'kenttä "' + f.label + '"', sourceMap);
       if (fErr) return fErr;

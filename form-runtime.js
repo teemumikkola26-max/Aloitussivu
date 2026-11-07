@@ -1165,10 +1165,28 @@ function computeSectionNumbering(){
   });
 }
 
+/* Lasketut sarakkeet (formula.js): arvo tallennetaan soluun, jotta raportti
+   ja muut näkymät käyttävät sitä sellaisenaan. */
+function rowTableRecalc(field, itState, r){
+  const cols = rowTableCols(field);
+  if (!window.AppFormula || !cols.some(c => c.type === "calc")) return {};
+  const vals = window.AppFormula.computeRow(cols, id => itState.table["r" + r + "_" + id]);
+  Object.keys(vals).forEach(id => { itState.table["r" + r + "_" + id] = vals[id]; });
+  return vals;
+}
+function injectCalcCss(){
+  if (document.getElementById("rt-calc-css")) return;
+  const st = document.createElement("style");
+  st.id = "rt-calc-css";
+  st.textContent = ".rt-table input.calc-cell{background:#f4f2ea;border-style:dashed;font-weight:600}";
+  document.head.appendChild(st);
+}
+
 function buildRowTableInput(field, itState){
   if (!itState.table) itState.table = {};
   if (itState.table._rows === undefined) itState.table._rows = 1;
   const cols = rowTableCols(field);
+  if (cols.some(c => c.type === "calc")) injectCalcCss();
   const layout = (field.layout === "scroll" || field.layout === "sticky" || field.layout === "cards") ? field.layout : "auto";
 
   const root = document.createElement("div");
@@ -1205,9 +1223,21 @@ function buildRowTableInput(field, itState){
     const n = rowTableCount(itState);
     for (let r = 1; r <= n; r++){
       const tr = document.createElement("tr");
+      rowTableRecalc(field, itState, r);
+      const calcInputs = {};
       cols.forEach(c => {
         const td = document.createElement("td");
         td.setAttribute("data-label", c.label || "");
+        if (c.type === "calc"){
+          const out = document.createElement("input");
+          out.type = "text"; out.readOnly = true; out.tabIndex = -1; out.className = "calc-cell";
+          out.setAttribute("aria-label", (c.label || "Arvo") + " (laskettu), rivi " + r);
+          out.value = String(rowTableCell(itState, r, c)).replace(".", ",");
+          calcInputs[c.id] = out;
+          td.appendChild(out);
+          tr.appendChild(td);
+          return;
+        }
         const input = document.createElement("input");
         input.type = cellInputType(c.type);
         if (c.type === "number") input.step = "any";
@@ -1216,7 +1246,12 @@ function buildRowTableInput(field, itState){
         input.setAttribute("aria-label", (c.label || "Arvo") + ", rivi " + r);
         input.value = rowTableCell(itState, r, c);
         const key = "r" + r + "_" + c.id;
-        const commit = () => { itState.table[key] = input.value; saveDebounced(); };
+        const commit = () => {
+          itState.table[key] = input.value;
+          const vals = rowTableRecalc(field, itState, r);
+          Object.keys(vals).forEach(id => { if (calcInputs[id]) calcInputs[id].value = String(vals[id]).replace(".", ","); });
+          saveDebounced();
+        };
         input.addEventListener("input", commit);
         input.addEventListener("change", commit);
         td.appendChild(input);

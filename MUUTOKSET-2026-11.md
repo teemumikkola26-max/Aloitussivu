@@ -121,3 +121,23 @@ Service workerin välimuistin versio on nostettu (`aloitussivu-v20`).
 - **Diagnostiikka:**
   - Tarkistusnäkymässä on "Tunnistuksen tiedot", joista näkyvät kuvaustapa, tarkkuus ja tunnistettu teksti.
   - Epäonnistuneen luvun syy näkyy rivillä.
+
+## Laskettu sarake taulukkoihin (aloitussivu-v22)
+
+- **Uusi tiedosto `formula.js`:** yhteinen kaavamoottori. Kaavaa ei ajeta koodina, vaan se lasketaan sovelluksen omalla laskimella.
+- **Sarakkeen tyyppi "Laskettu (kaava)":** sama tyyppi menetelmäeditorissa (`kenttalomake.html`) ja lomake-editorissa (`editor-runtime.js`, `form-runtime.js`).
+- **Kaavan kirjoittaminen:**
+  - Sarakkeisiin viitataan nimellä aaltosulkeissa, esim. `{RH (%)}`. Sarakkeen voi lisätä kaavaan myös napauttamalla sen nimeä.
+  - Kaava tarkistetaan kirjoitettaessa.
+  - Kaava tallennetaan sarakkeiden tunnisteilla, joten se säilyy, vaikka sarake nimettäisiin uudelleen.
+- **Kaavan osat:**
+  - laskutoimitukset + − * / ^ ja sulut
+  - min, max, keskiarvo ja itseisarvo
+  - abskost(T; RH), kastepiste(T; RH) ja suhtkost(T; a)
+  - päivämäärien erotus vuorokausina
+- **Laskettu arvo:**
+  - Lomakkeella arvo on vain luettava ja päivittyy heti, kun arvoja kirjoitetaan. Se päivittyy myös kameraluvun jälkeen.
+  - Arvo tallennetaan riville, joten raportit, apulauseet ja synkronointi käyttävät sitä sellaisenaan.
+  - Apulauseissa laskettua saraketta verrataan kuten numeroa.
+- **Kosteusfunktioiden kaava:** sama Magnus-kaava kuin raporttipohjamoottorissa. Tulos voi poiketa mittalaitteen näyttämästä noin 1 %.
+- **Tallennuksen tarkistukset:** kaavan virheet, viittaukset puuttuviin sarakkeisiin ja kehäviittaukset estetään tallennettaessa.

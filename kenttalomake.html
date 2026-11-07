@@ -21,6 +21,7 @@
 <script src="plan-markup.js"></script>
 <script src="report-templates.js" defer></script>
 <script src="docx-style-engine.js" defer></script>
+<script src="formula.js"></script>
 <script src="lukulaite-ocr.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
@@ -642,6 +643,34 @@ select{
 .table-field-table td:last-child{
   padding-right:0
 }
+
+.table-field-table input.calc-cell{
+  background:#f4f2ea;
+  border-style:dashed;
+  color:var(--ink);
+  font-weight:600
+}
+
+.calc-chips{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  margin:6px 0 2px
+}
+
+.calc-chips button{
+  border:1.5px solid var(--line);
+  background:#fff;
+  border-radius:99px;
+  padding:5px 10px;
+  font-size:12.5px;
+  cursor:pointer
+}
+
+.calc-msg.ok{color:var(--ok)}
+.calc-msg.err{color:var(--error)}
+
+.calc-help code{font-family:var(--mono);font-size:12px}
 
 .field-hint-btn-inline{
   width:28px;
@@ -5507,6 +5536,20 @@ function syncFieldColumnsFromDom(f,fieldIdx){
       );
 
     if(allowCustomChk)col.allowCustom=allowCustomChk.checked;
+
+    const formulaInput=
+      document.getElementById(
+        `mf_col_formula_${fieldIdx}_${cIdx}`
+      );
+
+    if(formulaInput && col.type==="calc")col.formulaSrc=formulaInput.value;
+
+    const decSelect=
+      document.getElementById(
+        `mf_col_dec_${fieldIdx}_${cIdx}`
+      );
+
+    if(decSelect && col.type==="calc")col.decimals=parseInt(decSelect.value,10);
   });
 }
 
@@ -5535,6 +5578,7 @@ function isoDateToFi(v){
 }
 
 function hintOpsForType(type){
+  if(type==="calc")type="number";
   if(type==="date"){
     return [
       { value:"eq", label:"on (=)" },
@@ -5572,6 +5616,8 @@ function evalHintRule(rule,type,rawValue){
 
   if(strVal==="")return false;
 
+
+  if(type==="calc")type="number";
 
   if(type==="number"){
 
@@ -6294,6 +6340,63 @@ function renderMethodFieldRow(f,idx,fields){
     });
   }
 
+  /* Laskettu sarake: sarakepikavalinnat ja kaavan tarkistus kirjoitettaessa. */
+  function setupCalcEditor(cr,col,cIdx){
+    const inp=cr.querySelector(`#mf_col_formula_${idx}_${cIdx}`);
+    const chips=cr.querySelector(`#mf_col_chips_${idx}_${cIdx}`);
+    const msg=cr.querySelector(`#mf_col_msg_${idx}_${cIdx}`);
+    if(!inp||!window.AppFormula)return;
+
+    function check(){
+      syncFieldColumnsFromDom(f,idx);
+      if(!inp.value.trim()){
+        msg.className="hint calc-msg";
+        msg.textContent="";
+        return;
+      }
+      const r=window.AppFormula.compile(inp.value,f.columns,col.id);
+      msg.className="hint calc-msg "+(r.ok?"ok":"err");
+      msg.textContent=r.ok?"✓ Kaava on kelvollinen":r.error;
+    }
+
+    function drawChips(){
+      chips.innerHTML="";
+      (f.columns||[]).forEach(c=>{
+        if(c.id===col.id||c.type==="select"||!String(c.label||"").trim())return;
+        const b=document.createElement("button");
+        b.type="button";
+        b.textContent=c.label;
+        b.onclick=()=>{
+          const ref="{"+String(c.label).trim()+"}";
+          const s0=inp._caret?inp._caret[0]:inp.value.length;
+          const s1=inp._caret?inp._caret[1]:inp.value.length;
+          inp.value=inp.value.slice(0,s0)+ref+inp.value.slice(s1);
+          inp.focus();
+          inp.setSelectionRange(s0+ref.length,s0+ref.length);
+          inp._caret=[s0+ref.length,s0+ref.length];
+          check();
+        };
+        chips.appendChild(b);
+      });
+      if(!chips.children.length){
+        chips.innerHTML='<span class="hint">Lisää ensin numerosarakkeita.</span>';
+      }
+    }
+
+    inp.addEventListener("input",check);
+    /* Kohdistimen paikka talteen: pikavalinta lisää sarakkeen siihen, missä kirjoitettiin. */
+    ["input","keyup","click","select"].forEach(ev=>inp.addEventListener(ev,()=>{
+      inp._caret=[inp.selectionStart,inp.selectionEnd];
+    }));
+    cr._calcRefresh=()=>{drawChips();check();};
+    drawChips();
+    check();
+  }
+
+  function refreshCalcEditors(){
+    colsWrap.querySelectorAll(".card").forEach(c=>{ if(c._calcRefresh)c._calcRefresh(); });
+  }
+
   function renderColumns(){
 
     colsWrap.innerHTML="";
@@ -6315,6 +6418,7 @@ function renderMethodFieldRow(f,idx,fields){
               <option value="number" ${col.type==="number"?"selected":""}>Numero</option>
               <option value="select" ${col.type==="select"?"selected":""}>Valinta</option>
               <option value="date" ${col.type==="date"?"selected":""}>Päivämäärä</option>
+              <option value="calc" ${col.type==="calc"?"selected":""}>Laskettu (kaava)</option>
             </select>
             <button type="button" class="btn btn-sm btn-danger" id="mf_col_del_${idx}_${cIdx}">✕</button>
           </div>
@@ -6326,10 +6430,40 @@ function renderMethodFieldRow(f,idx,fields){
               Salli myös muut arvot kuin valikon vaihtoehdot
             </label>
           </div>
+          <div id="mf_col_calc_wrap_${idx}_${cIdx}" style="${col.type==="calc"?"":"display:none;"}margin-top:6px;">
+            <label style="margin-top:0;" for="mf_col_formula_${idx}_${cIdx}">Kaava</label>
+            <input
+              type="text"
+              id="mf_col_formula_${idx}_${cIdx}"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="esim. abskost({Lämpötila}; {RH})"
+              value="${escapeAttribute(col.formulaSrc!==undefined?col.formulaSrc:(window.AppFormula?window.AppFormula.toDisplay(col.formula,f.columns):""))}"
+            >
+            <div class="hint" style="margin-top:4px;">Lisää sarake kaavaan napauttamalla:</div>
+            <div class="calc-chips" id="mf_col_chips_${idx}_${cIdx}"></div>
+            <div class="hint calc-msg" id="mf_col_msg_${idx}_${cIdx}" role="status"></div>
+            <label for="mf_col_dec_${idx}_${cIdx}">Desimaalit</label>
+            <select id="mf_col_dec_${idx}_${cIdx}" style="width:auto;min-width:90px;">
+              ${[0,1,2,3].map(d=>`<option value="${d}" ${(Number.isInteger(col.decimals)?col.decimals:1)===d?"selected":""}>${d}</option>`).join("")}
+            </select>
+            <details class="hint calc-help" style="margin-top:8px;">
+              <summary style="cursor:pointer;">Kaavan ohje</summary>
+              <div style="margin-top:6px;">
+                Sarakkeet kirjoitetaan aaltosulkeisiin, esim. <code>{RH (%)}</code>.
+                Funktion arvot erotetaan puolipisteellä.
+                ${(window.AppFormula?window.AppFormula.HELP:[]).map(h=>`<div><code>${escapeHtml(h[0])}</code> – ${escapeHtml(h[1])}</div>`).join("")}
+                <div style="margin-top:4px;">Jos jokin kaavan sarake on tyhjä, tulos jää tyhjäksi.
+                Kosteusfunktiot laskevat samalla kaavalla kuin raporttipohjat; tulos voi poiketa mittalaitteen näyttämästä noin 1 %.</div>
+              </div>
+            </details>
+          </div>
         </div>
       `);
 
       colsWrap.appendChild(cr);
+
+      if(col.type==="calc")setupCalcEditor(cr,col,cIdx);
 
       const colOptionsWrap=
         cr.querySelector(`#mf_col_options_wrap_${idx}_${cIdx}`);
@@ -6340,11 +6474,13 @@ function renderMethodFieldRow(f,idx,fields){
         syncFieldColumnsFromDom(f,idx);
         renderHints();
         renderOcrConfig();
+        renderColumns();
       };
 
       cr.querySelector(`#mf_col_label_${idx}_${cIdx}`).addEventListener("change",()=>{
         syncFieldColumnsFromDom(f,idx);
         renderOcrConfig();
+        refreshCalcEditors();
       });
 
       cr.querySelector(`#mf_col_del_${idx}_${cIdx}`).onclick=()=>{
@@ -7091,7 +7227,7 @@ async function saveMethodEdit(){
           .map(col=>{
 
             const type=
-              (col.type==="number"||col.type==="select"||col.type==="date")
+              (col.type==="number"||col.type==="select"||col.type==="date"||col.type==="calc")
                 ?col.type
                 :"text";
 
@@ -7109,8 +7245,42 @@ async function saveMethodEdit(){
               if(col.allowCustom)cleaned.allowCustom=true;
             }
 
+            if(type==="calc"){
+              cleaned.formulaSrc=
+                col.formulaSrc!==undefined?col.formulaSrc:(col.formula||"");
+              cleaned.decimals=
+                Number.isInteger(col.decimals)?col.decimals:1;
+            }
+
             return cleaned;
           });
+
+      /* Lasketut sarakkeet: kaava muunnetaan tallennusmuotoon vasta, kun
+         kaikkien sarakkeiden nimet ovat tiedossa. */
+      for(const col of fields[i].columns){
+        if(col.type!=="calc")continue;
+        const src=col.formulaSrc;
+        delete col.formulaSrc;
+        if(!window.AppFormula){
+          toast("Kaavojen laskenta ei ole käytettävissä (formula.js puuttuu)");
+          return;
+        }
+        const r=window.AppFormula.compile(src,fields[i].columns,col.id);
+        if(!r.ok){
+          col.formulaSrc=src;
+          toast('"'+label+'" – sarake "'+(col.label||"(nimetön)")+'": '+r.error);
+          return;
+        }
+        col.formula=r.formula;
+      }
+
+      if(window.AppFormula){
+        const cyc=window.AppFormula.findCycle(fields[i].columns);
+        if(cyc){
+          toast('"'+label+'" -taulukon kaavat viittaavat toisiinsa kehässä (sarake "'+cyc+'")');
+          return;
+        }
+      }
 
       if(fields[i].columns.some(col=>col.label==="")){
         toast('Anna jokaiselle "'+label+'" -taulukon sarakkeelle nimi');
@@ -7994,6 +8164,23 @@ function renderTableField(f,values){
   const readOnly=
     !!(editingEntry && !editingIsNew && !canEditEntry(editingEntry));
 
+  /* Lasketut sarakkeet (formula.js): arvo tallennetaan riville, jotta
+     raportit, apulauseet ja synkronointi käyttävät sitä sellaisenaan. */
+  const calcCols=cols.filter(c=>c.type==="calc");
+
+  function recalcRow(r,updateDom){
+    if(!calcCols.length||!window.AppFormula)return;
+    const vals=window.AppFormula.computeRow(cols,id=>r[id]);
+    const i=rows.indexOf(r);
+    calcCols.forEach(c=>{
+      r[c.id]=vals[c.id];
+      if(updateDom && i>=0){
+        const el=document.getElementById(`tblcell_${f.id}_${i}_${c.id}`);
+        if(el)el.value=String(vals[c.id]).replace(".",",");
+      }
+    });
+  }
+
   /* Kameraluku (menetelmän asetus): ks. lukulaite-ocr.js */
   let ocrCtl=null;
 
@@ -8021,7 +8208,8 @@ function renderTableField(f,values){
         const inp=document.getElementById(`tblrm_${f.id}_${i}`);
         return inp?inp.closest("tr"):null;
       },
-      changed(){
+      changed(r){
+        if(r)recalcRow(r,true);
         if(editingEntry===entry)scheduleAutosave();
       },
       addPhoto(blob,caption){
@@ -8056,10 +8244,28 @@ function renderTableField(f,values){
 
     rows.forEach((row,rIdx)=>{
 
+      recalcRow(row,false);
+
       const tr=
         elRow(`
           <tr>
             ${cols.map(c=>{
+
+              if(c.type==="calc"){
+                return `
+                  <td data-label="${escapeAttribute(c.label||"")}">
+                    <input
+                      type="text"
+                      readonly
+                      tabindex="-1"
+                      class="calc-cell"
+                      aria-label="${escapeAttribute((c.label||"")+" (laskettu)")}"
+                      id="tblcell_${escapeAttribute(f.id)}_${rIdx}_${escapeAttribute(c.id)}"
+                      value="${escapeAttribute(String(row[c.id]??"").replace(".",","))}"
+                    >
+                  </td>
+                `;
+              }
 
               if(c.type==="select"){
 
@@ -8188,6 +8394,8 @@ function renderTableField(f,values){
 
       cols.forEach(c=>{
 
+        if(c.type==="calc")return;
+
         const inp=
           tr.querySelector(
             `#tblcell_${CSS.escape(f.id)}_${rIdx}_${CSS.escape(c.id)}`
@@ -8202,6 +8410,7 @@ function renderTableField(f,values){
 
         inp.oninput=e=>{
           row[c.id]=e.target.value;
+          recalcRow(row,true);
           refreshRowHint();
           if(ocrCtl)ocrCtl.cellEdited(row,c.id);
           scheduleAutosave();
@@ -8209,6 +8418,7 @@ function renderTableField(f,values){
 
         inp.onchange=e=>{
           row[c.id]=e.target.value;
+          recalcRow(row,true);
           refreshRowHint();
           if(ocrCtl)ocrCtl.cellEdited(row,c.id);
           scheduleAutosave();

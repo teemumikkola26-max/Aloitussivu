@@ -735,7 +735,7 @@ function attach(opts){
   function caption(row){
     var parts=(f.columns||[]).map(function(c){
       var v=row[c.id];if(v===undefined||v===null||String(v).trim()==="")return null;
-      if(c.type==="date")v=fiDate(v);else if(c.type==="number")v=String(v).replace(".",",");
+      if(c.type==="date")v=fiDate(v);else if(c.type==="number"||c.type==="calc")v=String(v).replace(".",",");
       return c.label+" "+v;
     }).filter(Boolean);
     return (f.label||"Mittaus")+(parts.length?": "+parts.join(", "):" (lukulaitteen näyttö)");

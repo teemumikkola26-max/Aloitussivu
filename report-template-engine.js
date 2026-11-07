@@ -429,7 +429,7 @@
         const w = Math.floor(layout.textW / cols.length);
         const widths = cols.map(() => w); widths[widths.length - 1] += layout.textW - w * cols.length;
         out.push(B.table([cols.map(c => c.label)].concat(data.map(r => cols.map(c =>
-          r[c.id] == null ? "" : (c.type === "number" ? fmtNumKeep(r[c.id]) : (c.type === "date" ? fiDate(r[c.id]) : String(r[c.id])))))), widths));
+          r[c.id] == null ? "" : ((c.type === "number" || c.type === "calc") ? fmtNumKeep(r[c.id]) : (c.type === "date" ? fiDate(r[c.id]) : String(r[c.id])))))), widths));
         out.push(para(""));
       });
       if ((e.values || {}).huomiot) textParas(e.values.huomiot).forEach(p => out.push(p));
