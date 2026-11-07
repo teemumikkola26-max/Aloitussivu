@@ -58,7 +58,7 @@ function plausible(k,v){
   if(v===undefined||v===null)return false;
   if(k==="RH")return v>=0&&v<=100;
   if(k==="a")return v>=0&&v<=80;
-  return v>=-40&&v<=80;
+  return v>=-30&&v<=50;
 }
 function alternatives(v,dec){
   var s=v.toFixed(dec),res=[];
@@ -144,6 +144,33 @@ function cropCanvas(src,sw,sh,r){
   c.getContext("2d").drawImage(src,x,y,w,h,0,0,c.width,c.height);return c;
 }
 
+/* Tarkkuus: Laplace-varianssi 250 px leveästä, kontrastivenytetystä kuvasta.
+   Kalibrointi: terävä näyttökuva > 1000, selvästi epätarkka < 200. */
+var SHARP_MIN=400;
+function smallGray(c,w){
+  var h=Math.max(8,Math.round(c.height*w/c.width)),t=document.createElement("canvas");t.width=w;t.height=h;
+  var x=t.getContext("2d");x.drawImage(c,0,0,w,h);
+  var d=x.getImageData(0,0,w,h).data,g=new Float32Array(w*h),i,k;
+  for(i=0,k=0;i<d.length;i+=4,k++)g[k]=0.299*d[i]+0.587*d[i+1]+0.114*d[i+2];
+  var s=Array.prototype.slice.call(g).sort(function(a,b){return a-b;}),lo=s[Math.floor(s.length*0.02)],hi=s[Math.floor(s.length*0.98)],sc=255/Math.max(1,hi-lo);
+  for(k=0;k<g.length;k++)g[k]=Math.min(255,Math.max(0,(g[k]-lo)*sc));
+  return {g:g,w:w,h:h};
+}
+function sharpness(c){
+  var o=smallGray(c,250),g=o.g,w=o.w,h=o.h,sum=0,sum2=0,n=0;
+  for(var y=1;y<h-1;y++)for(var x=1;x<w-1;x++){
+    var i=y*w+x,l=g[i-w]+g[i+w]+g[i-1]+g[i+1]-4*g[i];sum+=l;sum2+=l*l;n++;
+  }
+  return n?sum2/n-(sum/n)*(sum/n):0;
+}
+// Normalisoitu korrelaatio kahden saman alueen kuvan välillä (onko rajaus osunut samaan kohtaan)
+function similarity(a,b){
+  var A=smallGray(a,64),B=smallGray(b,64);if(A.h!==B.h)return 0;
+  var n=A.g.length,ma=0,mb=0,i;for(i=0;i<n;i++){ma+=A.g[i];mb+=B.g[i];}ma/=n;mb/=n;
+  var sab=0,saa=0,sbb=0;for(i=0;i<n;i++){var da=A.g[i]-ma,db=B.g[i]-mb;sab+=da*db;saa+=da*da;sbb+=db*db;}
+  return saa&&sbb?sab/Math.sqrt(saa*sbb):0;
+}
+
 /* ---------- Tekstintunnistus (ladataan taustalla ennakkoon) ---------- */
 var workerP=null,scriptP=null;
 function loadScript(){
@@ -162,14 +189,14 @@ function getWorker(){
   return workerP;
 }
 function recognize(canvas){
-  var w=canvas.width,h=canvas.height,g=gray(canvas),parses=[];
+  var w=canvas.width,h=canvas.height,g=gray(canvas),parses=[],raws=[];
   return getWorker().then(function(wk){
     var i=0;
     function next(){
       if(i>=VARIANTS.length)return Promise.resolve();
       var v=VARIANTS[i++];
       return wk.recognize(binarize(box(box(box(g,w,h,v.r),w,h,v.r),w,h,v.r),w,h,v.o)).then(function(r){
-        parses.push(parseText(r.data.text));
+        parses.push(parseText(r.data.text));raws.push(r.data.text);
         if(parses.length>=3){
           var c=combine(parses);
           if(c.consistent&&!c.alternative&&KEYS.every(function(k){return c.status[k]==="ok";}))return;
@@ -178,7 +205,7 @@ function recognize(canvas){
       });
     }
     return next();
-  }).then(function(){return combine(parses);});
+  }).then(function(){var c=combine(parses);c.raw=raws.join("\n----\n");return c;});
 }
 
 /* ---------- Jono ---------- */
@@ -213,6 +240,7 @@ function applyResult(job,r){
     a:r.status.a!=="ok"
   };
   o.edited={};o.reviewed=false;o.state="done";
+  Object.defineProperty(o,"_raw",{value:r.raw||"",enumerable:false,writable:true,configurable:true});
   KEYS.forEach(function(k){
     if(!map[k])return;
     row[map[k]]=V[k]===null?"":V[k].toFixed(DEC[k]);
@@ -274,6 +302,11 @@ function injectCss(){
     ".ocr-frame{position:absolute;left:14%;top:16%;width:72%;height:54%;border:3px solid #fff;border-radius:10px;box-shadow:0 0 0 100vmax rgba(0,0,0,.5);pointer-events:none}",
     ".ocr-frame::after{content:'Koko näyttö kehykseen';position:absolute;top:calc(100% + 10px);left:0;right:0;text-align:center;font-size:14px}",
     ".ocr-hint{position:absolute;left:0;right:0;top:12px;text-align:center;font-size:14px;text-shadow:0 1px 2px #000;pointer-events:none}",
+    ".ocr-focus{position:absolute;width:64px;height:64px;margin:-32px 0 0 -32px;border:2px solid #ffd54a;border-radius:50%;opacity:0;pointer-events:none}",
+    ".ocr-focus.on{animation:ocrFocus 1s ease-out}",
+    "@keyframes ocrFocus{0%{opacity:1;transform:scale(1.4)}60%{opacity:1;transform:scale(1)}100%{opacity:0}}",
+    ".ocr-cmp details{margin-top:12px;font-size:12px;color:var(--muted,#6b6656)}",
+    ".ocr-cmp pre{white-space:pre-wrap;background:#f2f0e8;padding:8px;border-radius:6px;max-height:180px;overflow:auto}",
     ".ocr-flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none;transition:opacity .25s}",
     ".ocr-flash.on{opacity:.7;transition:none}",
     ".ocr-strip{display:flex;gap:8px;overflow-x:auto;padding:8px 12px;min-height:72px}",
@@ -323,7 +356,7 @@ function buildCam(){
       '<div class="cnt"></div><button class="ocr-cb" data-a="torch" aria-pressed="false" aria-label="Taskulamppu" hidden>💡</button></div>'+
       '<div class="ocr-stage"><video playsinline muted></video><canvas hidden></canvas>'+
       '<div class="ocr-frame"></div><div class="ocr-hint" hidden>Vedä rajaus näytön ympärille</div>'+
-      '<div class="ocr-flash"></div><div class="ocr-toast" hidden></div></div>'+
+      '<div class="ocr-focus"></div><div class="ocr-flash"></div><div class="ocr-toast" hidden></div></div>'+
       '<div class="ocr-strip" aria-live="polite"></div>'+
       '<div class="ocr-cam-bottom"><button class="ocr-cb l" data-a="gallery">Galleria</button>'+
       '<button class="ocr-shutter" data-a="shoot" aria-label="Ota kuva ja lue lukemat" disabled></button>'+
@@ -344,15 +377,25 @@ function openCamera(ctl,retakeRow){
     var act=a.getAttribute("data-a");
     if(act==="close")C.close(false);
     else if(act==="shoot")shoot(C);
-    else if(act==="gallery")q("input[type=file]").click();
+    else if(act==="gallery")openGallery(C);
     else if(act==="torch")toggleTorch(C,a);
   });
   n.addEventListener("keydown",function(e){if(e.key==="Escape")C.close(false);});
-  q("input[type=file]").onchange=function(e){var f=e.target.files[0];e.target.value="";if(f)loadGallery(C,f);};
+  var fileInp=q("input[type=file]");
+  fileInp.onchange=function(e){var f=e.target.files[0];e.target.value="";if(f)loadGallery(C,f);else{C.pickerOpen=false;startLive(C);}};
+  fileInp.addEventListener("cancel",function(){C.pickerOpen=false;startLive(C);});
+  // Varmistus: jos valinnasta palattiin ilman kuvaa eikä cancel-tapahtumaa tullut
+  C.onVis=function(){
+    if(document.visibilityState!=="visible"||C.closed)return;
+    setTimeout(function(){if(!C.closed&&C.pickerOpen&&C.mode==="picking"){C.pickerOpen=false;startLive(C);}},1200);
+  };
+  document.addEventListener("visibilitychange",C.onVis);
+  q(".ocr-stage").addEventListener("click",function(e){tapFocus(C,e);});
   setupCropDrag(C);
   C.close=function(fromPop){
     if(C.closed)return;C.closed=true;
     if(C.stream)C.stream.getTracks().forEach(function(t){t.stop();});
+    document.removeEventListener("visibilitychange",C.onVis);
     n.remove();document.body.style.overflow="";cam=null;
     popOverlay(fromPop);
     if(C.count&&!C.retake&&ctl.opts.toast)ctl.opts.toast(C.count+(C.count===1?" rivi lisätty":" riviä lisätty"));
@@ -369,16 +412,50 @@ function startLive(C){
   C.mode="live";C.canvas.hidden=true;C.node.querySelector(".ocr-hint").hidden=true;C.video.hidden=false;C.frame.hidden=false;
   if(C.stream){C.shutter.disabled=false;return;}
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){camToast("Kamera ei ole käytettävissä. Valitse kuva galleriasta.");return;}
+  if(C.starting)return;
+  C.starting=true;var token=C.liveToken=(C.liveToken||0)+1;
   navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"},width:{ideal:1920},height:{ideal:1440}},audio:false})
     .then(function(s){
-      if(C.closed){s.getTracks().forEach(function(t){t.stop();});return;}
+      C.starting=false;
+      // Kamera ehdittiin sulkea (galleria tai sulkeminen) ennen kuin se käynnistyi
+      if(C.closed||token!==C.liveToken||C.mode!=="live"){s.getTracks().forEach(function(t){t.stop();});return;}
       C.stream=s;C.track=s.getVideoTracks()[0];C.video.srcObject=s;
       var caps=C.track.getCapabilities?C.track.getCapabilities():{};
+      C.caps=caps;
       C.node.querySelector('[data-a=torch]').hidden=!caps.torch;
+      if(caps.focusMode&&caps.focusMode.indexOf("continuous")>=0){
+        C.track.applyConstraints({advanced:[{focusMode:"continuous"}]}).catch(function(){});
+      }
+      // Valokuva tarkennettuna ja täydellä resoluutiolla, jos selain tukee (Chrome/Android)
+      try{C.capture=window.ImageCapture?new window.ImageCapture(C.track):null;}catch(e){C.capture=null;}
       return C.video.play();
     })
     .then(function(){if(!C.closed)C.shutter.disabled=false;})
-    .catch(function(){camToast("Kameran käyttö estettiin. Salli kamera selaimen asetuksista tai valitse kuva galleriasta.");});
+    .catch(function(){C.starting=false;camToast("Kameran käyttö estettiin. Salli kamera selaimen asetuksista tai valitse kuva galleriasta.");});
+}
+function stopLive(C){
+  C.liveToken=(C.liveToken||0)+1;C.starting=false;
+  if(C.stream)C.stream.getTracks().forEach(function(t){t.stop();});
+  C.stream=null;C.track=null;C.capture=null;C.video.srcObject=null;
+}
+// Napautus esikatseluun tarkentaa siihen kohtaan
+function tapFocus(C,e){
+  if(C.mode!=="live"||!C.track||!C.caps)return;
+  var r=C.node.querySelector(".ocr-stage").getBoundingClientRect();
+  var x=(e.clientX-r.left)/r.width,y=(e.clientY-r.top)/r.height;
+  var ring=C.node.querySelector(".ocr-focus");
+  ring.style.left=(e.clientX-r.left)+"px";ring.style.top=(e.clientY-r.top)+"px";
+  ring.classList.remove("on");void ring.offsetWidth;ring.classList.add("on");
+  var adv={};
+  if(C.caps.pointsOfInterest!==undefined)adv.pointsOfInterest=[{x:x,y:y}];
+  if(C.caps.focusMode&&C.caps.focusMode.indexOf("single-shot")>=0)adv.focusMode="single-shot";
+  if(!Object.keys(adv).length)return;
+  C.track.applyConstraints({advanced:[adv]}).catch(function(){});
+  clearTimeout(C.focusT);
+  C.focusT=setTimeout(function(){
+    if(C.track&&C.caps.focusMode&&C.caps.focusMode.indexOf("continuous")>=0)
+      C.track.applyConstraints({advanced:[{focusMode:"continuous"}]}).catch(function(){});
+  },2500);
 }
 function toggleTorch(C,b){
   if(!C.track)return;var on=b.getAttribute("aria-pressed")!=="true";
@@ -389,15 +466,39 @@ function frameRegion(C){
   var s=Math.max(cr.width/vw,cr.height/vh),ox=(cr.width-vw*s)/2,oy=(cr.height-vh*s)/2;
   return {x:(fr.left-cr.left-ox)/s,y:(fr.top-cr.top-oy)/s,w:fr.width/s,h:fr.height/s};
 }
+function openGallery(C){
+  var inp=C.node.querySelector("input[type=file]");
+  // Kamera suljetaan valinnan ajaksi: vähentää muistinkäyttöä, ettei selain lataa sivua uudelleen
+  stopLive(C);C.mode="picking";C.shutter.disabled=true;
+  C.pickerOpen=true;
+  inp.click();
+}
 function loadGallery(C,file){
-  var im=new Image();
-  im.onload=function(){
-    C.img=im;C.mode="gallery";C.crop={x:.2,y:.25,w:.6,h:.5};
-    C.video.hidden=true;C.frame.hidden=true;C.canvas.hidden=false;C.node.querySelector(".ocr-hint").hidden=false;
+  C.pickerOpen=false;
+  camToast("Avataan kuvaa…");
+  function ready(img,w,h){
+    // Suuri kuva pienennetään 3000 px:iin: riittää lukemiseen ja säästää muistia
+    var s=Math.min(1,3000/Math.max(w,h)),c=document.createElement("canvas");
+    c.width=Math.round(w*s);c.height=Math.round(h*s);c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+    if(img.close)img.close();
+    C.img=c;C.mode="gallery";C.crop={x:.2,y:.25,w:.6,h:.5};
+    C.video.hidden=true;C.frame.hidden=true;C.canvas.hidden=false;
+    var hint=C.node.querySelector(".ocr-hint");hint.hidden=false;hint.textContent="Rajaa lukulaitteen näyttö sormella ja paina punaista painiketta";
     var r=C.node.querySelector(".ocr-stage").getBoundingClientRect(),d=window.devicePixelRatio||1;
     C.canvas.width=r.width*d;C.canvas.height=r.height*d;drawCrop(C);C.shutter.disabled=false;
-  };
-  im.src=URL.createObjectURL(file);
+    var t=C.node.querySelector(".ocr-toast");t.hidden=true;
+  }
+  function fail(){camToast("Kuvaa ei voitu avata. Valitse toinen kuva tai kuvaa kameralla.");startLive(C);}
+  if(window.createImageBitmap){
+    createImageBitmap(file,{imageOrientation:"from-image"}).then(function(b){ready(b,b.width,b.height);})
+      .catch(function(){viaImage();});
+  }else viaImage();
+  function viaImage(){
+    var im=new Image(),url=URL.createObjectURL(file);
+    im.onload=function(){ready(im,im.naturalWidth,im.naturalHeight);URL.revokeObjectURL(url);};
+    im.onerror=function(){URL.revokeObjectURL(url);fail();};
+    im.src=url;
+  }
 }
 function cropLayout(C){var c=C.canvas,im=C.img,s=Math.min(c.width/im.width,c.height/im.height);
   return {ox:(c.width-im.width*s)/2,oy:(c.height-im.height*s)/2,w:im.width*s,h:im.height*s};}
@@ -417,25 +518,85 @@ function setupCropDrag(C){
     C.crop={x:Math.min(start.x,p.x),y:Math.min(start.y,p.y),w:Math.abs(p.x-start.x),h:Math.abs(p.y-start.y)};drawCrop(C);});
   c.addEventListener("pointerup",function(){start=null;if(C.crop.w<.05||C.crop.h<.05){C.crop={x:.2,y:.25,w:.6,h:.5};drawCrop(C);}});
 }
+function videoCanvas(v){
+  var c=document.createElement("canvas");c.width=v.videoWidth;c.height=v.videoHeight;
+  c.getContext("2d").drawImage(v,0,0);return c;
+}
+// Valokuva (ImageCapture) piirretään kankaalle esikatselun suuntaan
+function photoCanvas(C){
+  if(!C.capture||!C.capture.takePhoto)return Promise.resolve(null);
+  var timeout=new Promise(function(res){setTimeout(function(){res(null);},6000);});
+  var shot=C.capture.takePhoto().then(function(blob){
+    return window.createImageBitmap?createImageBitmap(blob,{imageOrientation:"from-image"}):null;
+  }).then(function(bmp){
+    if(!bmp)return null;
+    var vw=C.video.videoWidth,vh=C.video.videoHeight,rot=(vw>vh)!==(bmp.width>bmp.height);
+    var c=document.createElement("canvas");c.width=rot?bmp.height:bmp.width;c.height=rot?bmp.width:bmp.height;
+    var x=c.getContext("2d");
+    if(rot){x.translate(c.width,0);x.rotate(Math.PI/2);}
+    x.drawImage(bmp,0,0);if(bmp.close)bmp.close();
+    return c;
+  }).catch(function(){return null;});
+  return Promise.race([shot,timeout]);
+}
+// Esikatselun alue valokuvan koordinaatteihin (esikatselu voi olla rajattu valokuvasta)
+function mapToPhoto(reg,vw,vh,pw,ph){
+  var A=vw/vh,sc,ox=0,oy=0;
+  if(pw/ph>A){sc=ph/vh;ox=(pw-ph*A)/2;}else{sc=pw/vw;oy=(ph-pw/A)/2;}
+  return {x:ox+reg.x*sc,y:oy+reg.y*sc,w:reg.w*sc,h:reg.h*sc};
+}
 function shoot(C){
+  if(C.busy)return;
   var src,sw,sh,reg;
-  if(C.mode==="live"){src=C.video;sw=src.videoWidth;sh=src.videoHeight;if(!sw)return;reg=frameRegion(C);}
+  if(C.mode==="live"){if(!C.video.videoWidth)return;reg=frameRegion(C);}
   else{src=C.img;sw=src.width;sh=src.height;reg={x:C.crop.x*sw,y:C.crop.y*sh,w:C.crop.w*sw,h:C.crop.h*sh};}
-  var crop={x:Math.max(0,reg.x/sw),y:Math.max(0,reg.y/sh),w:Math.min(1,reg.w/sw),h:Math.min(1,reg.h/sh)};
-  var cc=cropCanvas(src,sw,sh,reg);
-  // Koko kuva kirjauksen kuvaksi
-  var s=Math.min(1,1600/Math.max(sw,sh)),full=document.createElement("canvas");
-  full.width=Math.round(sw*s);full.height=Math.round(sh*s);full.getContext("2d").drawImage(src,0,0,full.width,full.height);
+  C.busy=true;C.shutter.disabled=true;
   var f=C.node.querySelector(".ocr-flash");f.classList.add("on");
   requestAnimationFrame(function(){requestAnimationFrame(function(){f.classList.remove("on");});});
   if(navigator.vibrate)navigator.vibrate(30);
-  var thumbUrl=thumbFrom(cc,112);
-  var row=C.ctl.capture({cropCanvas:cc,fullCanvas:full,crop:crop,retakeRow:C.retake,thumbUrl:thumbUrl});
-  C.count++;
-  addStripThumb(C,row,thumbUrl);
-  if(C.retake){C.close(false);return;}
-  C.node.querySelector(".cnt").textContent=C.count+" luettu · kuvaa seuraava";
-  if(C.mode==="gallery")startLive(C);
+
+  var frameP;
+  if(C.mode==="live"){
+    var vc=videoCanvas(C.video),vw=vc.width,vh=vc.height,vcrop=cropCanvas(vc,vw,vh,reg);
+    camToast("Kuvataan…");
+    frameP=photoCanvas(C).then(function(pc){
+      if(pc){
+        var pr=mapToPhoto(reg,vw,vh,pc.width,pc.height),pcrop=cropCanvas(pc,pc.width,pc.height,pr);
+        // Käytetään valokuvaa vain, jos rajaus osui samaan kohtaan kuin esikatselussa
+        if(similarity(vcrop,pcrop)>0.5)return {src:pc,sw:pc.width,sh:pc.height,reg:pr,crop:pcrop,how:"valokuva"};
+      }
+      return {src:vc,sw:vw,sh:vh,reg:reg,crop:vcrop,how:"esikatselu"};
+    });
+  }else frameP=Promise.resolve({src:src,sw:sw,sh:sh,reg:reg,crop:cropCanvas(src,sw,sh,reg),how:"galleria"});
+
+  frameP.then(function(F){
+    if(C.closed)return;
+    var t=C.node.querySelector(".ocr-toast");t.hidden=true;
+    var sharp=sharpness(F.crop);
+    // Epätarkka kuva: pyydetään uusi heti (kahden hylkäyksen jälkeen hyväksytään, ettei käyttäjä jumiudu)
+    if(sharp<SHARP_MIN&&(C.blurRejects||0)<2){
+      C.blurRejects=(C.blurRejects||0)+1;
+      camToast(C.mode==="live"
+        ?"Kuva on epätarkka. Napauta näyttöä tarkentaaksesi, pidä puhelin vakaana ja kuvaa uudelleen."
+        :"Rajattu alue on epätarkka tai liian pieni. Rajaa tarkemmin tai valitse toinen kuva.");
+      return;
+    }
+    C.blurRejects=0;
+    var crop={x:Math.max(0,F.reg.x/F.sw),y:Math.max(0,F.reg.y/F.sh),w:Math.min(1,F.reg.w/F.sw),h:Math.min(1,F.reg.h/F.sh)};
+    var s=Math.min(1,1600/Math.max(F.sw,F.sh)),full=document.createElement("canvas");
+    full.width=Math.round(F.sw*s);full.height=Math.round(F.sh*s);full.getContext("2d").drawImage(F.src,0,0,full.width,full.height);
+    var thumbUrl=thumbFrom(F.crop,112);
+    var row=C.ctl.capture({cropCanvas:F.crop,fullCanvas:full,crop:crop,retakeRow:C.retake,thumbUrl:thumbUrl,sharp:Math.round(sharp),how:F.how});
+    C.count++;
+    addStripThumb(C,row,thumbUrl);
+    if(C.retake){C.close(false);return;}
+    C.node.querySelector(".cnt").textContent=C.count+" luettu · kuvaa seuraava";
+    if(C.mode==="gallery")startLive(C);
+  }).catch(function(err){
+    camToast("Kuvaaminen epäonnistui: "+(err&&err.message?err.message:err));
+  }).then(function(){
+    C.busy=false;if(!C.closed&&(C.mode==="gallery"||C.stream))C.shutter.disabled=false;
+  });
 }
 function thumbFrom(c,w){var t=document.createElement("canvas"),s=w/c.width;t.width=w;t.height=Math.round(c.height*s);
   t.getContext("2d").drawImage(c,0,0,t.width,t.height);return t.toDataURL("image/jpeg",0.7);}
@@ -463,7 +624,12 @@ function openReview(ctl,row){
     defs.map(function(k){return '<div><label for="ocrc_'+k+'">'+esc(cols[m[k]].label)+'</label><input id="ocrc_'+k+'" data-k="'+k+'" inputmode="decimal" value="'+esc(fiNum(num(row[m[k]]),DEC[k]))+'"'+(o.flags&&o.flags[k]?' class="ocr-flag"':'')+'></div>';}).join("")+
     '</div><div class="chk"></div><div class="acts">'+
     '<button type="button" class="btn btn-outline" data-a="retake">Kuvaa uudelleen</button>'+
-    '<button type="button" class="btn btn-primary" data-a="ok">Arvot oikein</button></div></div></div></div>');
+    '<button type="button" class="btn btn-primary" data-a="ok">Arvot oikein</button></div>'+
+    '<details><summary>Tunnistuksen tiedot</summary><pre></pre></details></div></div></div>');
+  node.querySelector("pre").textContent=
+    "Kuvaustapa: "+(o.how||"–")+"\nTarkkuus: "+(o.sharp!==undefined?o.sharp:"–")+" (raja "+SHARP_MIN+")\n"+
+    (o.read?"Tunnistettu: T "+o.read.T+", RH "+o.read.RH+", a "+o.read.a+"\n":"")+
+    (o._raw?"\nTunnistettu teksti:\n"+o._raw:"\nTunnistettu teksti ei ole enää muistissa.");
   var R={close:function(fromPop){if(R.closed)return;R.closed=true;node.remove();popOverlay(fromPop);}};
   function check(){
     var get=function(k){var i=node.querySelector('[data-k="'+k+'"]');return i?num(i.value):null;};
@@ -539,6 +705,7 @@ function attach(opts){
       o=row._ocr={};
     }
     o.state="reading";o.crop=c.crop;o.flags={};o.alt=null;o.edited={};o.reviewed=false;o.time=Date.now();
+    o.sharp=c.sharp;o.how=c.how;
     Object.defineProperty(o,"_thumb",{value:c.thumbUrl,enumerable:false,writable:true,configurable:true});
     KEYS.forEach(function(k){if(map[k])row[map[k]]="";});
     ctl.refreshRow(row);
@@ -617,9 +784,9 @@ function attach(opts){
     var td=sr.firstChild,dev=rowDeviation(f,row),txt,cls="ocr-status",extra="";
     if(st==="reading")txt="Luetaan lukemia…";
     else if(st==="interrupted"){cls+=" warn";txt="Lukeminen keskeytyi.";extra='<button type="button" class="lnk" data-a="rerun">Lue uudelleen</button>';}
-    else if(st==="error"){cls+=" err";txt="Lukeminen epäonnistui. Täytä arvot tai kuvaa uudelleen.";extra='<button type="button" class="lnk" data-a="rerun">Yritä uudelleen</button>';}
+    else if(st==="error"){cls+=" err";txt="Lukeminen epäonnistui"+(o.error?": "+o.error:"")+". Täytä arvot tai kuvaa uudelleen.";extra='<button type="button" class="lnk" data-a="rerun">Yritä uudelleen</button>';}
     else if(dev!==null&&dev>1.5){cls+=" warn";txt="RH ei täsmää lämpötilan ja abs. kosteuden kanssa (ero "+fiNum(dev,1)+" %-yks.)";}
-    else if(rowFlagged(row)){cls+=" warn";txt="Tarkista merkityt arvot kuvasta";}
+    else if(rowFlagged(row)){cls+=" warn";txt=(o.sharp!==undefined&&o.sharp<800)?"Kuva oli osin epätarkka – tarkista merkityt arvot kuvasta":"Tarkista merkityt arvot kuvasta";}
     else txt=o.reviewed?"Tarkistettu kuvasta":"Luettu kuvasta";
     var altHtml="";
     if(o.alt&&st==="flagged")altHtml='<span class="ocr-alt">Kuvasta voi lukea myös: <button type="button" data-a="alt">RH '+fiNum(o.alt.RH,1)+' % / T '+fiNum(o.alt.T,1)+' °C</button></span>';

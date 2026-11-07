@@ -104,3 +104,20 @@ Service workerin välimuistin versio on nostettu (`aloitussivu-v20`).
 - **Raporttipohjat (`report-template-engine.js`):**
   - Taulukon päivämäärät muotoillaan.
   - Numerosarakkeiden arvot näytetään kirjatulla tarkkuudella, esim. 8,27 eikä 8,3.
+
+### Korjaus: kameraluvun kuvaus (aloitussivu-v21)
+
+- **Tarkempi kuva:**
+  - Kamera tarkentaa jatkuvasti, ja esikatselun napautus tarkentaa kyseiseen kohtaan.
+  - Jos selain tukee sitä (Chrome/Android), laukaisin ottaa täysresoluutioisen valokuvan esikatselukuvan sijaan. Valokuvaa käytetään vain, jos sen rajaus vastaa esikatselua.
+- **Epätarkkuuden tunnistus:**
+  - Epätarkka kuva hylätään heti, ja käyttäjää pyydetään kuvaamaan uudelleen.
+  - Kahden hylkäyksen jälkeen kuva hyväksytään, ettei kuvaus jumiudu.
+- **Galleria:**
+  - Kamera suljetaan valinnan ajaksi ja käynnistyy uudelleen, jos valinta perutaan.
+  - Avaamaton kuva ilmoitetaan.
+  - Ohje kertoo, että näyttö rajataan ja painetaan laukaisinta.
+- **Uskottavuus:** lämpötilat rajataan välille −30…50 °C, joten siirtyneet tunnistusrivit eivät enää tuota näennäisesti johdonmukaisia arvoja.
+- **Diagnostiikka:**
+  - Tarkistusnäkymässä on "Tunnistuksen tiedot", joista näkyvät kuvaustapa, tarkkuus ja tunnistettu teksti.
+  - Epäonnistuneen luvun syy näkyy rivillä.
