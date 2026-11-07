@@ -5019,63 +5019,52 @@ function appendPhotoToThumb(thumb,p){
 
   thumb.innerHTML="";
 
+  /*
+   * p.url voi olla vanhentunut (esim. kun URL on kumottu toisaalla), joten
+   * pikkukuvalle luodaan aina oma tuore URL blobista. Se säilyy kuvaobjektilla
+   * (p._thumbUrl) eikä sitä kumota muualla.
+   */
+  const makeSrc=()=>{
+    if(p.blob instanceof Blob){
+      try{
+        if(p._thumbUrl&&p._thumbBlob!==p.blob){
+          try{URL.revokeObjectURL(p._thumbUrl);}catch(err){}
+          p._thumbUrl=null;
+        }
+        if(!p._thumbUrl){
+          p._thumbUrl=URL.createObjectURL(p.blob);
+          p._thumbBlob=p.blob;
+        }
+        return p._thumbUrl;
+      }catch(err){console.warn(err);}
+    }
+    return p.url||"";
+  };
 
-  if(p.url){
-
-    const img=
-      document.createElement("img");
-
-    img.src=p.url;
-
-    img.alt=p.caption
-      ? p.caption
-      : "Tutkimusvalokuva";
-
-    img.loading="lazy";
-
-    thumb.appendChild(img);
-
+  const src=makeSrc();
+  if(!src){
+    thumb.textContent="Kuva ei ole saatavilla";
     return;
   }
 
-
-  /*
-   * Jos URL puuttuu mutta Blob on olemassa,
-   * luodaan URL.
-   */
-  if(p.blob instanceof Blob){
-
-    try{
-
-      p.url=
-        URL.createObjectURL(
-          p.blob
-        );
-
-      const img=
-        document.createElement("img");
-
-      img.src=p.url;
-
-      img.alt=
-        p.caption
-          ? p.caption
-          : "Tutkimusvalokuva";
-
-      img.loading="lazy";
-
-      thumb.appendChild(img);
-
+  const img=document.createElement("img");
+  img.alt=p.caption?p.caption:"Valokuva";
+  let retried=false;
+  img.onerror=()=>{
+    /* Yritetään kerran uudelleen tuoreella URLilla blobista. */
+    if(!retried&&p.blob instanceof Blob){
+      retried=true;
+      try{if(p._thumbUrl)URL.revokeObjectURL(p._thumbUrl);}catch(err){}
+      p._thumbUrl=null;
+      img.src=makeSrc();
       return;
-
-    }catch(err){
-
-      console.warn(err);
     }
-  }
-
-
-  thumb.textContent="Kuva ei ole saatavilla";
+    img.remove();
+    thumb.textContent="Kuva ei ole saatavilla";
+  };
+  img.decoding="async";
+  img.src=src;
+  thumb.appendChild(img);
 }
 
 
@@ -5873,7 +5862,8 @@ function renderMethodsManageCard(){
       </h2>
       <div class="hint">
         Muokkaa olemassa olevia menetelmiä tai lisää uusia.
-        Muutokset tallennetaan tälle laitteelle.
+        Napauta menetelmää muokataksesi sitä. Muutokset tallentuvat laitteelle ja
+        kirjautuneen tilin pilveen, joten ne seuraavat mukana muille laitteille.
       </div>
     </div>
   `);
@@ -5891,35 +5881,30 @@ function renderMethodsManageCard(){
       entries.filter(e=>e.methodId===m.id).length;
 
     const row=el(`
-      <div class="entry-card">
-        <div class="entry-top">
-          <div>
-            <div class="entry-title">${escapeHtml(m.name||"(nimetön menetelmä)")}</div>
-            <div class="entry-sub">
-              ${m.fields.length} kenttää
-              ${methodGuides(m).length?(" · "+methodGuides(m).length+" PDF-ohjetta"):""}
-              ${usedCount?(" · käytössä "+usedCount+" kirjauksessa"):""}
-            </div>
-          </div>
-          <div class="entry-actions">
-            <button type="button" class="btn btn-sm btn-outline" data-act="edit">Muokkaa</button>
-            <button type="button" class="btn btn-sm btn-danger" data-act="del">Poista</button>
+      <div class="entry-card method-row">
+        <div class="entry-main" role="button" tabindex="0" aria-label="Muokkaa menetelmää">
+          <div class="entry-title">${escapeHtml(m.name||"(nimetön menetelmä)")}</div>
+          <div class="entry-sub">
+            ${m.fields.length} kenttää
+            ${methodGuides(m).length?(" · "+methodGuides(m).length+" PDF-ohjetta"):""}
+            ${usedCount?(" · käytössä "+usedCount+" kirjauksessa"):""}
           </div>
         </div>
+        <button type="button" class="entry-more" aria-label="Menetelmän toiminnot">⋯</button>
       </div>
     `);
 
-    row.querySelector('[data-act="edit"]').onclick=()=>{
+    const editMethod=()=>{
       editingMethod=cloneMethods([m])[0];
       editingMethodIsNew=false;
       view="methodEdit";
       render();
     };
 
-    row.querySelector('[data-act="del"]').onclick=async ()=>{
+    const deleteMethod=async ()=>{
       const warn=
         usedCount
-          ?("Menetelmää on käytetty "+usedCount+" kirjatussa menetelmässä. "+
+          ?("Menetelmää on käytetty "+usedCount+" kirjauksessa. "+
             "Jos poistat sen, näitä kirjauksia ei enää voi avata muokattavaksi, "+
             "mutta niiden data säilyy taustalla.\n\n")
           :"";
@@ -5930,11 +5915,28 @@ function renderMethodsManageCard(){
           ok:"Poista menetelmä",cancel:"Säilytä",danger:true
         })
       ){
-        METHODS.splice(idx,1);
+        const at=METHODS.indexOf(m);
+        if(at>=0)METHODS.splice(at,1);
         await persistMethods();
         methodGuides(m).forEach(deleteGuideFile);
         render();
       }
+    };
+
+    const mainEl=row.querySelector(".entry-main");
+    mainEl.onclick=editMethod;
+    mainEl.onkeydown=e=>{
+      if((e.key==="Enter"||e.key===" ") && e.target===mainEl){
+        e.preventDefault();
+        editMethod();
+      }
+    };
+    row.querySelector(".entry-more").onclick=e=>{
+      e.stopPropagation();
+      window.AppUI.sheet(m.name||"Menetelmä",[
+        {label:"Muokkaa",icon:"✏",onSelect:editMethod},
+        {label:"Poista menetelmä…",icon:"🗑",danger:true,onSelect:deleteMethod}
+      ]);
     };
 
     c.appendChild(row);

@@ -281,7 +281,7 @@
       "background:rgba(35,48,67,.9);color:#fff;border:none;" +
       "border-radius:99px;padding:11px 16px;font-size:.85rem;cursor:pointer;" +
       "font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;";
-    const bar = document.querySelector("#footer, .footerbar, .bottom-actions");
+    const bar = document.querySelector("#footer, .footerbar, .bottom-actions, footer.actionbar");
     const place = () => {
       const h = bar ? bar.offsetHeight : 0;
       btn.style.bottom = "calc(env(safe-area-inset-bottom) + " + (h + 12) + "px)";

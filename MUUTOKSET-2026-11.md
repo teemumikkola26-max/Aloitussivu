@@ -4,7 +4,7 @@
 
 1. Aja `supabase-raporttipohjat.sql` Supabasen SQL-editorissa (luo taulun `report_templates`).
    Tiedostot tallentuvat olemassa olevaan `submission-photos`-säiliöön, joten tallennustilan sääntöihin ei tarvita muutoksia.
-2. Vie kaikki tiedostot palvelimelle. Service workerin välimuistin versio on nostettu (`aloitussivu-v17`),
+2. Vie kaikki tiedostot palvelimelle. Service workerin välimuistin versio on nostettu (`aloitussivu-v19`),
    joten puhelimet hakevat uudet tiedostot automaattisesti.
 3. Avaa etusivulta **Asetukset ja ylläpito → Raporttipohjat (Word)** ja lisää merkityt pohjat
    (`PBM_katselmusraportti_POHJA_merkitty.docx`, `PBM_tutkimusseloste_LAAJA_POHJA_merkitty.docx`).
@@ -75,3 +75,11 @@ Pohjakuvalla on kohteen yhteinen merkintäkerros. Sen avaa pohjakuvakortin paini
 - **Vienti:** "Vie pohjakuva merkinnöin (PDF)" lisää piirrokset oikeina PDF-kommentteina (Ink, Line, PolyLine, Square, Circle, Polygon/pilvi, FreeText, Stamp). Niitä voi jatkaa muokkaamaan esim. PDF-XChangessa. Merkinnät osuvat oikein myös kierretyille sivuille.
 - **Tallennus:** merkinnät tallentuvat laitteelle ja pilveen lomakkeen mukana. Usean käyttäjän muutokset yhdistetään merkinnöittäin, jolloin uusin muokkaus voittaa ja poistot säilyvät.
 - **Pohjakuvan vaihto tai poisto** poistaa myös piirrokset, ja tästä varoitetaan ennen vaihtoa.
+
+## Korjauksia (7.11.2026)
+
+- Word-raportin (raporttipohjat) valokuvat ovat nyt allekkain, ei kahdessa sarakkeessa.
+- Menetelmien muokkaus: napauta menetelmää avataksesi sen; Muokkaa ja Poista ovat ⋯-valikossa.
+- Kirjauksen kuvien pikkukuvat luodaan aina tuoreesta kuvatiedostosta, ja virhetilanteessa yritetään uudelleen.
+- Lomake-editorin lomakkeella uloskirjautuminen on sivun lopussa, ei kelluvana painikkeena alapalkin päällä.
+- Manifest: erillinen maskable-kuvake ja `id`.

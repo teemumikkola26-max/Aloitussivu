@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="fi">
+<html lang="fi" data-inline-logout>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -498,6 +498,10 @@
 
 <main id="sections"></main>
 
+<div style="max-width:760px;margin:8px auto 24px;padding:0 14px;">
+  <button type="button" class="btn btn-secondary" id="btnLogoutInline" style="width:100%;">Kirjaudu ulos</button>
+</div>
+
 <footer class="actionbar">
   <button class="btn btn-secondary" id="btnNew">Tyhjennä lomake</button>
   <button class="btn btn-secondary" id="btnStyle" style="flex:0 0 auto;padding:12px 14px;">🎨</button>
@@ -528,5 +532,13 @@
 <script src="docx-style-engine.js"></script>
 <script src="form-common.js"></script>
 <script src="form-runtime.js"></script>
+<script>
+document.getElementById("btnLogoutInline").addEventListener("click", async function(){
+  var txt = window.__logoutConfirmText ? window.__logoutConfirmText() : "Kirjaudutaanko ulos?";
+  if (!confirm(txt)) return;
+  try{ if (typeof window.__flushSave === "function") await window.__flushSave(); }catch(e){}
+  try{ if (window.__supabaseClient) await window.__supabaseClient.auth.signOut(); }catch(e){}
+});
+</script>
 </body>
 </html>

@@ -383,20 +383,18 @@
       });
       return tbl;
     };
+    /* Kuvat allekkain (yksi kuva + kuvateksti per kappale), ei vierekkäin taulukossa. */
     B.photoGrid = (photos) => {
       if (!photos.length) return [];
-      const rows = [];
-      for (let i = 0; i < photos.length; i += 2){
-        const row = photos.slice(i, i + 2).map(ph => {
-          const ip = para("", { keepNext:true, align:"left" });
-          append(ip, media.drawing(ph, layout.photoCx, layout.photoMaxCy));
-          return [ip, B.caption(ph.caption || "")];
-        });
-        if (row.length === 1) row.push([para("")]);
-        rows.push(row);
-      }
-      const half = Math.floor(layout.textW / 2);
-      return [B.table(rows, [half, layout.textW - half], { header:false, borders:false }), para("")];
+      const out = [];
+      photos.forEach(ph => {
+        const ip = para("", { keepNext:true, align:"left" });
+        append(ip, media.drawing(ph, layout.photoCx, layout.photoMaxCy));
+        out.push(ip);
+        out.push(B.caption(ph.caption || ""));
+        out.push(para(""));
+      });
+      return out;
     };
     B.entryPhotos = (e) => (e.photos || []).filter(p => p && p.bytes && p.bytes.length && p.width > 1).map(p => ({
       bytes:p.bytes, width:p.width, height:p.height,
