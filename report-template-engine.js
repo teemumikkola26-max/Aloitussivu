@@ -12,18 +12,27 @@
      {{pvm}} {{vuosi}} {{raporttipvm}} {{projektinumero}} {{lkm:menetelmä}}
    Lohkot (kappaleen ainoa sisältö):
      {{kirjaukset}}               kaikki kirjaukset menetelmittäin
-     {{kirjaukset tiloittain}}    kirjaukset Tunnus/Tila-kentän mukaan ryhmiteltynä
+     {{kirjaukset osioittain}}    kirjaukset osioittain (osiolistan järjestys, osio = pääotsikko);
+                                  ohittaa osiot, joilla on pohjassa oma {{osio:nimi}}
+     {{osio:nimi}}                yhden osion kirjaukset pohjan oman otsikon alle
+                                  (ei uutta pääotsikkoa; kirjaukset alaotsikoina)
+     {{kirjaukset tiloittain}}    kirjaukset ryhmiteltynä (vanha Tunnus/Tila, muuten osio)
      {{menetelmä:id}}             yhden menetelmän kirjaukset (otsikko per kirjaus)
      {{taulukko:id}}              menetelmän kirjaukset taulukkona
      {{kuvat:id}}                 menetelmän kirjausten valokuvat
      {{menetelmäluettelo}}        käytetyt menetelmät luettelona
    Ehdot ja toistot (omat kappaleensa):
      {{jos:id[,id]}} ... {{/jos}}    osa jää pois, jos menetelmää ei käytetty
+     {{jos osio:nimi}} ... {{/jos}}  osa jää pois, jos osiossa ei ole kirjauksia
      {{toista:id}} ... {{/toista}}   osa toistetaan jokaiselle kirjaukselle
    Taulukot:
      {{rivi:id}} rivin solussa -> rivi toistetaan jokaiselle kirjaukselle
    Kirjauskohtaiset (toisto- ja rivipohjissa):
-     {{paikka}} {{<kentän id>}} {{abs}} {{kuvat}} {{sijainti}}
+     {{osio}} {{tunniste}} {{<kentän id>}} {{abs}} {{kuvat}} {{sijainti}}
+     ({{paikka}} = {{tunniste}}, säilytetty vanhoja pohjia varten)
+
+   Kirjauksen tunniste on menetelmän ensimmäisen kentän arvo (vanhoissa
+   kirjauksissa Tunnus/Tila-kenttä).
 
    Pohjan punainen teksti (FF0000 / EE0000) tarkoittaa täytettävää kohtaa:
    kun sovellus täyttää kohdan, teksti muuttuu tavalliseksi (mustaksi).
@@ -40,9 +49,11 @@
   const PLACEHOLDER_REDS = { "FF0000":1, "EE0000":1 };
   const TAG_RE = /\{\{[^{}]*\}\}/g;
   const GLOBAL_KEYS = ["kohde","osoite","tilaaja","yhteyshenkilo","tutkija","pvm","vuosi","raporttipvm","projektinumero"];
-  const BLOCK_NAMES = ["kirjaukset","kirjaukset tiloittain","menetelmäluettelo"];
-  const BLOCK_PREFIXES = ["menetelmä:","taulukko:","kuvat:"];
-  const ENTRY_KEYS = ["paikka","abs","kuvat","sijainti"];
+  const BLOCK_NAMES = ["kirjaukset","kirjaukset osioittain","kirjaukset tiloittain","menetelmäluettelo"];
+  const BLOCK_PREFIXES = ["menetelmä:","taulukko:","kuvat:","osio:"];
+  /* Osion nimet verrataan kirjainkoosta ja välilyönneistä riippumatta. */
+  const normOsio = s => String(s || "").replace(/\s+/g, " ").trim().toLowerCase();
+  const ENTRY_KEYS = ["paikka","tunniste","osio","abs","kuvat","sijainti"];
 
   /* ------------------------------------------------------------------
      Pieni XML-puu: { t:"el", name, attrs:[[k,v]], children:[], parent }
@@ -263,8 +274,9 @@
     (input.methods || []).forEach(m => { methods[m.id] = m; });
     const reportIso = input.reportDate || new Date().toISOString().slice(0, 10);
     const entries = (input.entries || []).filter(e => methods[e.methodId]);
+    const osiot = Array.isArray(input.osiot) ? input.osiot.slice() : [];
     const ctx = {
-      methods, entries, reportIso, warnings:[],
+      methods, entries, reportIso, warnings:[], osiot,
       glob: {
         kohde: p.nimi || "", osoite: p.osoite || "", tilaaja: p.tilaaja || "",
         yhteyshenkilo: p.yhteyshenkilo || "", tutkija: p.tutkija || "",
@@ -281,9 +293,21 @@
         return f.type === "number" ? fmtNum(v) : String(v);
       },
       visible(e, f){ return !e.hidden || e.hidden[f.id] !== true; },
+      /* Tunniste: vanha Tunnus/Tila tai menetelmän ensimmäisen kentän arvo. */
+      ident(e){
+        const v = e.values || {};
+        if (v.paikka != null && String(v.paikka).trim() !== "") return String(v.paikka).trim();
+        const m = methods[e.methodId], f = m && m.fields && m.fields[0];
+        if (!f || f.type === "table" || f.type === "textarea" || !ctx.visible(e, f)) return "";
+        const val = ctx.fieldValue(e, f);
+        return f.type === "date" ? fiDate(val) : val;
+      },
+      osio(e){ return String((e.values || {}).osio || "").trim(); },
+      ofOsio(name){ const k = normOsio(name); return entries.filter(e => normOsio(ctx.osio(e)) === k); },
+      ownOsiot: {},   /* pohjassa omalla {{osio:nimi}}-merkinnällä sijoitetut osiot */
       entryVals(e){
         const m = methods[e.methodId];
-        const vals = { paikka: (e.values || {}).paikka || "" };
+        const vals = { paikka: ctx.ident(e), tunniste: ctx.ident(e), osio: ctx.osio(e) };
         m.fields.forEach(f => { vals[f.id] = ctx.visible(e, f) ? ctx.fieldValue(e, f) : ""; });
         if (e.methodId === "rh") vals.abs = absHumidity((e.values || {}).rh, (e.values || {}).lampo);
         vals.sijainti = markerText(e);
@@ -403,7 +427,7 @@
     };
     B.entryPhotos = (e) => (e.photos || []).filter(p => p && p.bytes && p.bytes.length && p.width > 1).map(p => ({
       bytes:p.bytes, width:p.width, height:p.height,
-      caption: (p.caption && String(p.caption).trim()) || (e.values || {}).paikka || ""
+      caption: (p.caption && String(p.caption).trim()) || ctx.ident(e) || ""
     }));
     B.entryBody = (e) => {
       const m = ctx.methods[e.methodId];
@@ -489,7 +513,7 @@
       const out = [];
       ctx.of(name.slice(10)).forEach(e => {
         const m = ctx.methods[e.methodId];
-        out.push(B.heading((e.values || {}).paikka || m.name, lv + 1));
+        out.push(B.heading(ctx.ident(e) || m.name, lv + 1));
         B.entryBody(e).forEach(x => out.push(x));
         B.photoGrid(B.entryPhotos(e)).forEach(x => out.push(x));
       });
@@ -500,11 +524,17 @@
       if (!es.length) return [];
       const m = ctx.methods[es[0].methodId];
       const fields = m.fields.filter(f => f.type !== "textarea" && f.type !== "table" && es.some(e => ctx.visible(e, f) && ctx.fieldValue(e, f)));
-      const rows = [["Tunnus / tila"].concat(fields.map(f => f.label))]
-        .concat(es.map(e => [(e.values || {}).paikka || ""].concat(fields.map(f => ctx.visible(e, f) ? ctx.fieldValue(e, f) : ""))));
-      const first = Math.floor(layout.textW * (fields.length > 1 ? 0.30 : 0.5));
+      /* Ensimmäinen sarake: vanhoissa kirjauksissa Tunnus/Tila, muuten osio.
+         Jos kummallakaan ei ole arvoja, sarake jätetään pois. */
+      const legacy = es.some(e => (e.values || {}).paikka);
+      const lead = e => legacy ? (((e.values || {}).paikka) || ctx.osio(e)) : ctx.osio(e);
+      const hasLead = es.some(e => lead(e));
+      const allLegacy = es.every(e => (e.values || {}).paikka);
+      const rows = [(hasLead ? [allLegacy ? "Tunnus / tila" : (legacy ? "Osio / tunnus" : "Osio")] : []).concat(fields.map(f => f.label))]
+        .concat(es.map(e => (hasLead ? [lead(e) || ""] : []).concat(fields.map(f => ctx.visible(e, f) ? ctx.fieldValue(e, f) : ""))));
+      const first = hasLead ? Math.floor(layout.textW * (fields.length > 1 ? 0.30 : 0.5)) : 0;
       const rest = Math.floor((layout.textW - first) / Math.max(1, fields.length));
-      const widths = [first].concat(fields.map(() => rest));
+      const widths = (hasLead ? [first] : []).concat(fields.map(() => rest));
       widths[widths.length - 1] += layout.textW - widths.reduce((a, b) => a + b, 0);
       return [B.table(rows, widths), para("")];
     }
@@ -514,7 +544,7 @@
       return B.photoGrid(photos);
     }
     if (name === "kirjaukset tiloittain"){
-      const out = [], order = [], key = e => (((e.values || {}).paikka) || "Muut havainnot").trim();
+      const out = [], order = [], key = e => (String(((e.values || {}).paikka) || "").trim() || ctx.osio(e) || "Muut havainnot");
       ctx.entries.forEach(e => { if (order.indexOf(key(e)) < 0) order.push(key(e)); });
       order.forEach(k => {
         const group = ctx.entries.filter(e => key(e) === k);
@@ -529,13 +559,45 @@
       });
       return out;
     }
+    if (name.indexOf("osio:") === 0){
+      /* Pohjan oma otsikko on jo olemassa: kirjaukset sen alle alaotsikoina. */
+      const out = [];
+      ctx.ofOsio(name.slice(5)).forEach(e => {
+        const mname = ctx.methods[e.methodId].name, id = ctx.ident(e);
+        out.push(B.heading(id ? id + " – " + mname : mname, lv + 1));
+        B.entryBody(e).forEach(x => out.push(x));
+        B.photoGrid(B.entryPhotos(e)).forEach(x => out.push(x));
+      });
+      return out;
+    }
+    if (name === "kirjaukset osioittain"){
+      /* Osiot pääotsikoina osiolistan järjestyksessä; itse kirjoitetut osiot
+         listan jälkeen ja osiottomat kirjaukset otsikon "Muut havainnot" alle.
+         Osiot, joilla on pohjassa oma {{osio:nimi}}, ohitetaan (ei kahteen kertaan). */
+      const out = [], key = e => ctx.osio(e) || "Muut havainnot";
+      const own = e => ctx.osio(e) && ctx.ownOsiot[normOsio(ctx.osio(e))];
+      const rest = ctx.entries.filter(e => !own(e));
+      const order = ctx.osiot.filter(o => rest.some(e => key(e) === o));
+      rest.forEach(e => { const k = key(e); if (order.indexOf(k) < 0 && k !== "Muut havainnot") order.push(k); });
+      if (rest.some(e => key(e) === "Muut havainnot")) order.push("Muut havainnot");
+      order.forEach(k => {
+        out.push(B.heading(k, lv + 1));
+        rest.filter(e => key(e) === k).forEach(e => {
+          const mname = ctx.methods[e.methodId].name, id = ctx.ident(e);
+          out.push(B.heading(id ? id + " – " + mname : mname, lv + 2));
+          B.entryBody(e).forEach(x => out.push(x));
+          B.photoGrid(B.entryPhotos(e)).forEach(x => out.push(x));
+        });
+      });
+      return out;
+    }
     if (name === "kirjaukset"){
       const out = [];
       Object.keys(ctx.methods).forEach(mid => {
         const es = ctx.of(mid); if (!es.length) return;
         out.push(B.heading(ctx.methods[mid].name, lv + 1));
         es.forEach(e => {
-          out.push(B.heading((e.values || {}).paikka || ctx.methods[mid].name, lv + 2));
+          out.push(B.heading(ctx.ident(e) || ctx.methods[mid].name, lv + 2));
           B.entryBody(e).forEach(x => out.push(x));
           B.photoGrid(B.entryPhotos(e)).forEach(x => out.push(x));
         });
@@ -631,11 +693,20 @@
     const B = Builder(ctx, st, media, layout);
 
     // 1) Ehdot (sisimmät ensin)
-    markerPairs(body, /^\{\{jos:[^}]+\}\}$/, "{{/jos}}").forEach(([a, b]) => {
+    markerPairs(body, /^\{\{jos(:| osio:)[^}]+\}\}$/, "{{/jos}}").forEach(([a, b]) => {
       if (!a.parent || !b.parent) return;
-      const ids = ptext(a).trim().slice(6, -2);
-      if (!ctx.of(ids).length) between(a, b).forEach(remove);
+      const t = ptext(a).trim();
+      const empty = /^\{\{jos osio:/.test(t)
+        ? !ctx.ofOsio(t.slice(11, -2)).length
+        : !ctx.of(t.slice(6, -2)).length;
+      if (empty) between(a, b).forEach(remove);
       remove(a); remove(b);
+    });
+
+    // Pohjan omat osiokohdat talteen ennen lohkoja ({{kirjaukset osioittain}} ohittaa ne)
+    kids(body, "w:p").forEach(p => {
+      const m = /^\{\{\s*osio:([^{}]+)\}\}$/.exec(ptext(p).trim());
+      if (m) ctx.ownOsiot[normOsio(m[1])] = true;
     });
 
     // 2) Toistot
@@ -758,7 +829,9 @@
   }
 
   /* Pohjan tarkistus ladattaessa: mitkä merkinnät löytyivät ja mitkä ovat tuntemattomia. */
-  async function scan(templateBytes, methods){
+  async function scan(templateBytes, methods, osiot){
+    const osioKeys = {}; (osiot || []).forEach(o => { osioKeys[normOsio(o)] = 1; });
+    const notices = [];
     const zip = await JSZipLib.loadAsync(templateBytes);
     if (!zip.file("word/document.xml")) throw new Error("Tiedosto ei ole Word-asiakirja (.docx)");
     const ids = {}; (methods || []).forEach(m => { ids[m.id] = m; });
@@ -776,6 +849,12 @@
           if (nm === "/toista") inEntryScope = false;
           let ok = GLOBAL_KEYS.indexOf(nm) >= 0 || BLOCK_NAMES.indexOf(nm) >= 0 || nm === "/jos" || nm === "/toista";
           let m;
+          if (!ok && (m = /^(jos osio|osio):(.+)$/.exec(nm))){
+            ok = true;
+            if (osiot && osiot.length && !osioKeys[normOsio(m[2])]){
+              notices.push(tag + ": osiota ”" + m[2].trim() + "” ei ole osiolistalla. Kohtaan tulevat vain kirjaukset, joiden osioksi on kirjoitettu sama nimi.");
+            }
+          }
           if (!ok && (m = /^(jos|toista|rivi|lkm|menetelmä|taulukko|kuvat):(.+)$/.exec(nm))){
             const bad = m[2].split(",").map(s => s.trim()).filter(id => !ids[id]);
             ok = !bad.length;
@@ -790,7 +869,7 @@
       });
     }
     const uniq = a => a.filter((x, i) => a.indexOf(x) === i);
-    return { found: uniq(found), unknown: uniq(unknown) };
+    return { found: uniq(found), unknown: uniq(unknown), notices: uniq(notices) };
   }
 
   const api = { fill, scan, _parseXml:parseXml, _serialize:serialize };

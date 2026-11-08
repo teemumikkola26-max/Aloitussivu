@@ -692,6 +692,37 @@ select{
 .sp-num{white-space:nowrap;font-variant-numeric:tabular-nums}
 .sp-sub{font-size:15px;margin:14px 0 4px}
 .sp-open-warn{margin-top:12px;padding:10px 12px;border-radius:10px;background:#fbf1de;color:#7a4a06;font-size:14px}
+.osio-help{margin:10px 0 4px;font-size:14.5px}
+.osio-help summary{cursor:pointer;font-weight:700;min-height:40px;display:flex;align-items:center}
+.osio-help ul{padding-left:20px;margin:6px 0 10px}
+.osio-help li{margin-bottom:6px}
+.osio-help code{font-size:13px;background:#f2f0e8;padding:1px 4px;border-radius:4px;overflow-wrap:anywhere}
+.osio-list{display:flex;flex-direction:column;gap:6px;margin:8px 0}
+.osio-row{display:flex;align-items:center;gap:6px;background:#faf9f4;border:1px solid var(--line);border-radius:10px;padding:6px 6px 6px 10px}
+.osio-no{flex:none;width:22px;font-weight:800;color:var(--muted);font-size:14px}
+.osio-row input{flex:1;min-width:0;margin:0}
+.osio-row button{flex:none;width:40px;height:40px;border:1px solid var(--line);background:#fff;border-radius:8px;cursor:pointer;font:inherit}
+.osio-row button:disabled{opacity:.35}
+.osio-row .osio-del{color:var(--error)}
+.osio-add{display:flex;gap:6px}
+.osio-add input{flex:1;min-width:0;margin:0}
+.draft-pending{border-color:var(--warn);background:#fbf1de}
+.more-section{
+  font-size:12px;
+  font-weight:800;
+  letter-spacing:.06em;
+  text-transform:uppercase;
+  color:var(--muted);
+  margin:16px 2px 6px;
+  padding-top:12px;
+  border-top:1px solid var(--line)
+}
+.method-tile .mt-last{position:absolute;top:8px;right:8px;font-size:11px;font-weight:700;color:var(--ok);background:#e6efe6;border-radius:99px;padding:1px 7px}
+.method-tile{position:relative}
+.tip-card{background:#eef2f7;border:1px solid #c9d4e2;border-radius:12px;padding:12px 14px;margin-bottom:12px;font-size:15px}
+.tip-card b{display:block;margin-bottom:2px}
+.tip-card button{margin-top:8px}
+.sync-explain-time{font-variant-numeric:tabular-nums}
 .method-tile .mt-plan{display:block;font-size:12px;font-weight:600;color:var(--ok);margin-top:4px}
 
 .table-field-table input.calc-cell{
@@ -1056,7 +1087,7 @@ input:focus,select:focus,textarea:focus{
   <button type="button" class="tb-back" id="tbBack" aria-label="Takaisin etusivulle">‹</button>
   <img class="tb-logo" id="tbLogo" src="pbm-logo.png" alt="PBM">
   <h1 id="topTitle">Kohteen tiedot</h1>
-  <button type="button" class="sync-status" id="syncStatus" aria-live="polite">Käynnistetään</button>
+  <button type="button" class="sync-status" id="syncStatus" aria-live="polite">Avataan…</button>
 </div>
 <div class="net-banner" id="netBanner" role="status">Ei verkkoyhteyttä – tiedot tallentuvat laitteelle ja siirtyvät pilveen kun yhteys palaa.</div>
 <div class="wrap" id="app"><div class="loading">Ladataan lomaketta...</div></div>
@@ -1435,11 +1466,23 @@ async function syncCustomMethodsFromCloud(){
   }
 
   try{
-    const {data,error}=
+    let {data,error}=
       await window.__supabaseClient
         .from(CUSTOM_METHODS_TABLE)
-        .select("methods")
+        .select("methods,settings")
         .maybeSingle();
+    if(error && isMissingSettingsColumn(error)){
+      settingsColumnOk=false;
+      ({data,error}=
+        await window.__supabaseClient
+          .from(CUSTOM_METHODS_TABLE)
+          .select("methods")
+          .maybeSingle());
+    }
+    if(data && data.settings && Array.isArray(data.settings.osiot)){
+      OSIOT=data.settings.osiot.filter(x=>typeof x==="string"&&x.trim());
+      try{ localStorage.setItem(OSIOT_STORAGE_KEY,JSON.stringify(OSIOT)); }catch(err){}
+    }
 
     if(error){
       console.warn("Menetelmien lataus pilvestä epäonnistui",error);
@@ -1470,20 +1513,34 @@ async function syncCustomMethodsFromCloud(){
  * riville (upsert user_id-sarakkeen mukaan; user_id täyttyy
  * automaattisesti sarakkeen oletusarvosta auth.uid()).
  */
+/* Osiolista tallennetaan custom_methods.settings-sarakkeeseen (supabase-osiot.sql).
+   Jos saraketta ei ole, osiot pysyvät laitekohtaisina. */
+let settingsColumnOk=true;
+function isMissingSettingsColumn(error){
+  const m=String((error&&(error.message||error.details))||"");
+  return (error&&error.code==="42703") || (/settings/.test(m) && /column|schema cache/i.test(m));
+}
 async function pushMethodsToCloud(){
   if(!window.__supabaseClient)return false;
 
   try{
-    const {error}=
+    const row={
+      methods:METHODS,
+      updated_at:new Date().toISOString()
+    };
+    if(settingsColumnOk)row.settings={osiot:OSIOT};
+    let {error}=
       await window.__supabaseClient
         .from(CUSTOM_METHODS_TABLE)
-        .upsert(
-          {
-            methods:METHODS,
-            updated_at:new Date().toISOString()
-          },
-          {onConflict:"user_id"}
-        );
+        .upsert(row,{onConflict:"user_id"});
+    if(error && row.settings && isMissingSettingsColumn(error)){
+      settingsColumnOk=false;
+      delete row.settings;
+      ({error}=
+        await window.__supabaseClient
+          .from(CUSTOM_METHODS_TABLE)
+          .upsert(row,{onConflict:"user_id"}));
+    }
 
     if(error){
       console.warn("Menetelmien tallennus pilveen epäonnistui",error);
@@ -1512,15 +1569,56 @@ async function persistMethods(){
   if(await pushMethodsToCloud())setMethodsPushPending(false);
 }
 
-const COMMON_FIELDS=[
-  {
-    id:"paikka",
-    label:"Tunnus/Tila",
-    type:"text",
-    req:true,
-    placeholder:"esim. RA1 / Makuuhuone"
+/*
+ * OSIOT ja kirjauksen tunniste
+ * ------------------------------------------------------------
+ * Kirjauksen ensimmäinen kenttä on Osio (raportin pääotsikko). Pääkäyttäjä
+ * määrittää osiolistan (OSIOT) ja menetelmille oletusosion (m.defaultOsio);
+ * tutkija voi valita listalta tai kirjoittaa oman.
+ * Aiempi Tunnus/Tila-kenttä (values.paikka) on poistettu. Kirjauksen
+ * tunnisteena käytetään menetelmän ensimmäisen kentän arvoa; vanhojen
+ * kirjausten Tunnus/Tila näytetään ja säilyy ennallaan.
+ */
+const OSIOT_STORAGE_KEY="kenttalomake_osiot_v1";
+let OSIOT=[];
+try{
+  const raw=JSON.parse(localStorage.getItem(OSIOT_STORAGE_KEY)||"[]");
+  if(Array.isArray(raw))OSIOT=raw.filter(x=>typeof x==="string"&&x.trim());
+}catch(err){}
+
+function commonFieldsFor(values){
+  const out=[{
+    id:"osio",
+    label:"Osio",
+    type:"select",
+    allowCustom:true,
+    /* Osio on pakollinen, kun pääkäyttäjä on määrittänyt osiolistan. */
+    req:OSIOT.length>0,
+    options:OSIOT.slice(),
+    placeholder:"Valitse tai kirjoita osio"
+  }];
+  /* Vanha kirjaus: Tunnus/Tila näytetään, jotta sitä voi yhä muokata. */
+  if(values && values.paikka!=null && String(values.paikka).trim()!==""){
+    out.push({id:"paikka",label:"Tunnus/Tila (aiempi kenttä)",type:"text",req:false,placeholder:""});
   }
-];
+  return out;
+}
+
+/* Kirjauksen tunniste: vanha Tunnus/Tila tai menetelmän ensimmäisen kentän arvo. */
+function entryIdent(e,m){
+  const v=e&&e.values||{};
+  if(v.paikka!=null && String(v.paikka).trim()!=="")return String(v.paikka).trim();
+  m=m||METHODS.find(x=>x.id===(e&&e.methodId));
+  const f=m&&m.fields&&m.fields[0];
+  if(!f||f.type==="table"||f.type==="textarea")return "";
+  const raw=v[f.id];
+  if(raw===undefined||raw===null||Array.isArray(raw))return "";
+  let t=String(raw).trim();
+  if(f.type==="date")t=isoDateToFi(t);
+  else if(f.type==="number")t=t.replace(".",",");
+  return t.length>60?t.slice(0,60)+"…":t;
+}
+function entryOsio(e){ return String((e&&e.values&&e.values.osio)||"").trim(); }
 
 
 /* ============================================================
@@ -1919,30 +2017,70 @@ window.__hasUnsyncedChanges=()=>{
 };
 window.__flushSave=()=>autosave(true);
 
+/*
+ * Tallennuksen tila selkokielellä. Yläpalkissa lyhyt tila; napautus avaa
+ * selityksen siitä, missä tiedot ovat ja tarvitseeko käyttäjän tehdä jotain.
+ */
+let lastCloudSyncAt=null;
+function syncClock(d){ return d.getHours()+"."+String(d.getMinutes()).padStart(2,"0"); }
+function classifySync(text,state){
+  const t=String(text||"");
+  const pend=pendingPhotoCount();
+  if(state==="error")return "error";
+  if(/viedään|synkronoidaan|tallennetaan|käsitellään/i.test(t))return "saving";
+  if(/käynnistetään|ladataan\./i.test(t))return "opening";
+  if(/uusi lomake/i.test(t))return "new";
+  if(/rajoitetusti/i.test(t))return "limited";
+  if(/synkronoitu pilveen|ladattu pilvestä/i.test(t))return pend?"photos":"cloud";
+  if(pend)return "photos";
+  return "device";
+}
+function syncInfo(kind){
+  const pend=pendingPhotoCount();
+  const at=lastCloudSyncAt?syncClock(lastCloudSyncAt):"";
+  switch(kind){
+    case "cloud":return {cls:"ok",short:"✓ Pilvessä"+(at?" klo "+at:""),title:"Kaikki tiedot ovat tallessa",
+      text:"Tiedot on tallennettu pilveen"+(at?" klo "+at:"")+", ja muut kohteen tutkijat näkevät ne. Sinun ei tarvitse tehdä mitään."};
+    case "device":return {cls:"",short:"Tallessa laitteella",title:"Tiedot ovat tallessa tällä laitteella",
+      text:navigator.onLine
+        ?"Tiedot siirtyvät pilveen hetken kuluttua itsestään. Voit jatkaa työtä normaalisti."
+        :"Verkkoyhteyttä ei ole. Tiedot siirtyvät pilveen itsestään, kun yhteys palaa. Voit jatkaa työtä normaalisti. Älä tyhjennä selaimen tietoja ennen kuin tila näyttää ”Pilvessä”."};
+    case "photos":return {cls:"",short:pend+(pend===1?" kuva odottaa":" kuvaa odottaa"),title:"Kuvat ovat tallessa tällä laitteella",
+      text:pend+(pend===1?" kuva lähetetään":" kuvaa lähetetään")+" pilveen, kun yhteys palaa. Kuvat ovat jo tallessa tällä laitteella. Pidä sovellus auki tai avaa se myöhemmin uudelleen verkossa."};
+    case "saving":return {cls:"",short:"Tallentaa…",title:"Tallennus on käynnissä",text:"Odota hetki. Tila vaihtuu, kun tallennus on valmis."};
+    case "opening":return {cls:"",short:"Avataan…",title:"Kohdetta avataan",text:"Tietoja haetaan. Tämä kestää yleensä muutaman sekunnin."};
+    case "new":return {cls:"",short:"Uusi kohde",title:"Kohteeseen ei ole vielä kirjattu mitään",text:"Kohde tallentuu automaattisesti heti, kun kirjoitat ensimmäisen tiedon."};
+    case "limited":return {cls:"warn",short:"Tallessa osittain",title:"Laitteen tallennustila on rajallinen",
+      text:"Tekstit ovat tallessa, mutta kaikkia kuvia ei ehkä saatu tallennettua tälle laitteelle. Avaa sovellus verkossa, jotta tiedot siirtyvät pilveen, ja vapauta tarvittaessa tilaa laitteelta."};
+    default:return {cls:"error",short:"Tallennus ei onnistunut",title:"Tallennus ei onnistunut",
+      text:"Tietoja ei saatu tallennettua. Älä sulje sovellusta. Kokeile uudelleen. Jos ongelma jatkuu, ota kuvakaappaus ja ilmoita pääkäyttäjälle."};
+  }
+}
 function setSyncStatus(text,state=""){
 
   const elStatus=document.getElementById("syncStatus");
 
   if(!elStatus)return;
 
-  /* Yläpalkissa lyhyt tila, koko teksti napauttamalla (ja ruudunlukijalle). */
-  const pend=pendingPhotoCount();
-  let short;
-  const t=String(text||"");
-  if(state==="ok")short="✓ Tallennettu";
-  else if(state==="error")short="⚠ Virhe";
-  else if(/viedään|synkronoidaan|tallennetaan|ladataan|käynnistetään/i.test(t))short="⟳ Tallentaa";
-  else if(state==="warn")short=pend?("⚠ "+pend+" kuvaa odottaa"):(navigator.onLine?"⚠ Laitteella":"⚠ Ei verkkoa");
-  else short=t.length>18?t.slice(0,16)+"…":t;
-  elStatus.textContent=short;
-  elStatus.title=text;
-  elStatus.setAttribute("aria-label","Tallennuksen tila: "+text);
+  const kind=classifySync(text,state);
+  if(kind==="cloud")lastCloudSyncAt=new Date();
+  const info=syncInfo(kind);
+  elStatus.textContent=info.short;
+  elStatus.title=info.title;
+  elStatus.setAttribute("aria-label","Tallennuksen tila: "+info.title+". Napauta saadaksesi lisätietoa.");
+  elStatus.dataset.kind=kind;
   elStatus.dataset.full=text;
-  elStatus.className="sync-status "+state;
+  elStatus.className="sync-status "+info.cls;
 }
-document.addEventListener("click",e=>{
+document.addEventListener("click",async e=>{
   const s=e.target.closest&&e.target.closest("#syncStatus");
-  if(s&&s.dataset.full)toast(s.dataset.full);
+  if(!s||!s.dataset.kind)return;
+  const info=syncInfo(s.dataset.kind);
+  if(!window.AppUI){ toast(info.title); return; }
+  const actions=[{label:"Selvä",value:"ok",kind:"primary"}];
+  if(s.dataset.kind==="error")actions.unshift({label:"Yritä uudelleen",value:"retry",kind:"primary"});
+  const v=await window.AppUI.choose({title:info.title,text:info.text,actions:s.dataset.kind==="error"?[actions[0],{label:"Sulje",value:"ok",kind:"plain"}]:actions});
+  if(v==="retry"){ try{await autosave(true);}catch(err){} }
 });
 
 
@@ -3012,9 +3150,8 @@ async function applyLocalState(value){
       }
 
 
-      if(value.view){
-        view=value.view;
-      }
+      /* Kohde avautuu aina alkuun (kohteen tiedot), ei siihen näkymään,
+         johon se viimeksi suljettiin. Ks. kesken jääneen kirjauksen käsittely alla. */
 
       if("editingEntry" in value){
 
@@ -3041,6 +3178,17 @@ async function applyLocalState(value){
       if("editingIsNew" in value){
 
         editingIsNew=value.editingIsNew;
+      }
+
+      /* Aiemmin tallennetun kirjauksen muutokset ovat jo kirjauksessa itsessään.
+         Uusi, tallentamaton kirjaus säilytetään ja sitä tarjotaan jatkettavaksi;
+         tyhjä uusi kirjaus hylätään. */
+      view="project";
+      if(editingEntry && !editingIsNew){
+        editingEntry=null;
+      }else if(editingEntry && editingIsNew && !entryHasData(editingEntry)){
+        editingEntry=null;
+        editingIsNew=false;
       }
 
 
@@ -3408,7 +3556,7 @@ async function confirmClearForm(){
     !researchPlanBlob
   ){
 
-    toast("Lomake on jo tyhjä");
+    toast("Kohteessa ei ole vielä tietoja");
 
     return;
   }
@@ -3416,7 +3564,7 @@ async function confirmClearForm(){
 
   if(entries.some(e=>!canEditEntry(e))){
 
-    toast("Lomakkeessa on toisten käyttäjien merkintöjä, joten sitä ei voi tyhjentää");
+    toast("Kohteessa on toisten käyttäjien kirjauksia, joten sitä ei voi poistaa");
 
     return;
   }
@@ -3424,7 +3572,7 @@ async function confirmClearForm(){
 
   /* Peruuttamaton toiminto: kaksi erillistä vahvistusta, turvallinen valinta korostettuna. */
   if(!(await window.AppUI.confirm({
-    title:"Tyhjennetäänkö koko lomake?",
+    title:"Poistetaanko kohde ja kaikki sen tiedot?",
     text:"Kaikki kohteen tiedot, kirjaukset, valokuvat, pohjakuva ja tutkimussuunnitelma poistetaan pysyvästi – myös pilvestä.",
     ok:"Jatka tyhjennystä…",cancel:"Säilytä tiedot",danger:true
   })))return;
@@ -4071,7 +4219,7 @@ function collectPhotoFiles(list){
     let idx=entries.indexOf(e)+1;
     if(!idx)idx=entries.length+1;
     const mName=fileSafe((m&&(m.short||m.name))||"menetelma",24)||"menetelma";
-    const place=fileSafe(e.values&&e.values.paikka,24);
+    const place=fileSafe(entryIdent(e),24);
     (e.photos||[]).forEach((p,k)=>{
       if(!(p.blob instanceof Blob)){skipped++;return;}
       const ext=/png/.test(p.blob.type||"")?"png":"jpg";
@@ -4410,7 +4558,7 @@ function isEmptyFieldValue(f,values){
 function findMissingRequired(entry,m){
   const values=entry.values||{};
   const vis=computeFieldVisibility(m.fields,values);
-  return [...COMMON_FIELDS,...m.fields].filter(f=>
+  return [...commonFieldsFor(values),...m.fields].filter(f=>
     f.req && vis[f.id]!==false && isEmptyFieldValue(f,values)
   );
 }
@@ -4459,6 +4607,7 @@ function entrySummary(entry,m){
   const vis=computeFieldVisibility(m.fields,entry.values||{});
   for(const f of m.fields){
     if(parts.length>=2)break;
+    if(f===m.fields[0] && !(entry.values&&entry.values.paikka))continue;
     if(f.type==="table"||vis[f.id]===false)continue;
     const v=(entry.values||{})[f.id];
     if(v===undefined||v===null||String(v).trim()==="")continue;
@@ -4472,11 +4621,15 @@ function newEntryId(){
   return "e"+Date.now()+Math.random().toString(36).slice(2,7);
 }
 
-function duplicateEntry(entry){
+async function duplicateEntry(entry){
+  if(!(await confirmReplacePendingDraft()))return;
   const values=JSON.parse(JSON.stringify(entry.values||{}));
-  /* Tunnus/tila ja vapaa huomio ovat aina kohtakohtaisia. */
+  /* Tunniste (vanha Tunnus/tila tai menetelmän ensimmäinen kenttä) ja vapaa
+     huomio ovat aina kohtakohtaisia. Osio säilyy. */
   delete values.paikka;
   delete values.huomiot;
+  const dm=METHODS.find(x=>x.id===entry.methodId);
+  if(dm && dm.fields && dm.fields[0] && dm.fields[0].type!=="table")delete values[dm.fields[0].id];
   editingEntry={
     id:newEntryId(),
     author:currentUserName(),
@@ -4540,6 +4693,13 @@ function _renderView(){
   if(view==="project"){
 
     title.textContent=(project.nimi||"").trim()||"Kohteen tiedot";
+
+    const draftCard=renderPendingDraftCard();
+    if(draftCard)app.appendChild(draftCard);
+
+    const syncTip=oneTimeTip("tallennustila","Tallennuksen tila",
+      "Yläpalkin oikeasta reunasta näet, ovatko tiedot tallessa. Napauta sitä, niin saat selityksen.");
+    if(syncTip)app.appendChild(syncTip);
 
     app.appendChild(
       renderProjectCard()
@@ -4616,6 +4776,15 @@ function _renderView(){
   }
 
 
+  if((view==="methodsManage"||view==="methodEdit") && !isAdminUser()){
+    view="project";
+    editingMethod=null;
+    editingMethodIsNew=false;
+    toast("Menetelmiä muokkaavat pääkäyttäjät");
+    render();
+    return;
+  }
+
   if(view==="methodsManage"){
 
     title.textContent="Menetelmät";
@@ -4629,6 +4798,10 @@ function _renderView(){
 
     app.appendChild(
       renderMethodsManageCard()
+    );
+
+    app.appendChild(
+      renderOsiotCard()
     );
 
     footer.innerHTML=
@@ -4783,6 +4956,25 @@ function renderBack(fn,label){
   return document.createComment("takaisin");
 }
 
+/* Pääkäyttäjä (users.js): ylläpitotoiminnot näkyvät vain pääkäyttäjille.
+   Jos pääkäyttäjiä ei ole valittu, kaikki näkevät ne kuten ennenkin. */
+function isAdminUser(){
+  return !window.AppUsers || !window.AppUsers.activeIsAdmin || window.AppUsers.activeIsAdmin();
+}
+let _lastAdminState=null;
+window.addEventListener("appusers:changed",()=>{
+  const a=isAdminUser();
+  if(_lastAdminState!==null && a!==_lastAdminState){
+    if(!a && (view==="methodsManage"||view==="methodEdit")){
+      editingMethod=null;
+      editingMethodIsNew=false;
+      view="project";
+    }
+    if(view==="project"||view==="methodsManage"||view==="methodEdit")render();
+  }
+  _lastAdminState=a;
+});
+
 function renderMoreMenu(){
   const d=el(`
     <details class="card more-menu">
@@ -4790,14 +4982,18 @@ function renderMoreMenu(){
       <div class="more-body">
         <label class="setting-row"><input type="checkbox" id="chkDeviceSave"> Tallenna kamerakuvat myös laitteelle</label>
         <button type="button" class="btn btn-outline btn-block" id="btnSaveAllPhotos" style="display:none;">⬇ Tallenna kaikki kuvat laitteelle</button>
-        <button type="button" class="btn btn-outline btn-block" id="btnManageMethods">⚙ Muokkaa menetelmiä</button>
-        <button type="button" class="btn btn-outline btn-block" id="btnTemplates">📄 Raporttipohjat (Word)</button>
-        <button type="button" class="btn btn-outline btn-block" id="btnStyle">🎨 Kenttämuistiinpanon ulkoasu</button>
         <button type="button" class="btn btn-outline btn-block" id="btnLogout">Kirjaudu ulos</button>
-        <button type="button" class="btn btn-danger btn-block" id="btnClearForm" style="margin-top:10px;">Tyhjennä koko lomake…</button>
+        ${isAdminUser()?`
+          <div class="more-section">Ylläpito (pääkäyttäjä)</div>
+          <button type="button" class="btn btn-outline btn-block" id="btnManageMethods">⚙ Muokkaa menetelmiä</button>
+          <button type="button" class="btn btn-outline btn-block" id="btnTemplates">📄 Raporttipohjat (Word)</button>
+          <button type="button" class="btn btn-outline btn-block" id="btnStyle">🎨 Kenttämuistiinpanon ulkoasu</button>
+          <button type="button" class="btn btn-danger btn-block" id="btnClearForm" style="margin-top:10px;">Poista kohde ja kaikki sen tiedot…</button>
+        `:""}
       </div>
     </details>
   `);
+  if(isAdminUser()){
   d.querySelector("#btnStyle").onclick=()=>{
     window.location.href=
       "style-editor.html?form="+
@@ -4815,6 +5011,8 @@ function renderMoreMenu(){
     try{await autosave(true);}catch(err){}
     window.location.href="raporttipohjat.html";
   };
+  d.querySelector("#btnClearForm").onclick=confirmClearForm;
+  }
   const totalSavable=entries.reduce(
     (n,e)=>n+(e.photos||[]).filter(p=>p.blob instanceof Blob).length,0
   );
@@ -4839,7 +5037,6 @@ function renderMoreMenu(){
     setDeviceSave(chk.checked);
     toast(chk.checked?"Kamerakuvat tallennetaan myös laitteelle":"Kamerakuvia ei tallenneta laitteelle");
   };
-  d.querySelector("#btnClearForm").onclick=confirmClearForm;
   return d;
 }
 
@@ -5114,8 +5311,8 @@ function renderEntriesCard(){
         <div class="entry-card">
           <div class="entry-main tappable" role="button" tabindex="0"
                aria-label="${canEditEntry(entry)?"Muokkaa":"Avaa"}: ${escapeAttribute(m.name)}">
-            <div class="entry-title">${idx+1}. ${escapeHtml(m.name)}</div>
-            <div class="entry-sub">${escapeHtml(entry.values?.paikka||"Ei paikkaa merkitty")}</div>
+            <div class="entry-title">${idx+1}. ${escapeHtml(m.name)}${entryIdent(entry,m)?" – "+escapeHtml(entryIdent(entry,m)):""}</div>
+            <div class="entry-sub">${escapeHtml(entryOsio(entry)||"Ei osiota")}</div>
             ${meta?`<div class="entry-meta">${escapeHtml(meta)}</div>`:""}
             ${missing.length?`<span class="entry-warn">⚠ ${missing.length} pakollista puuttuu</span>`:""}
           </div>
@@ -5153,7 +5350,7 @@ function renderEntriesCard(){
     card.querySelector(".entry-more").onclick=e=>{
       e.stopPropagation();
       const editable=canEditEntry(entry);
-      window.AppUI.sheet((idx+1)+". "+m.name+(entry.values?.paikka?" – "+entry.values.paikka:""),[
+      window.AppUI.sheet((idx+1)+". "+m.name+(entryIdent(entry,m)?" – "+entryIdent(entry,m):""),[
         {label:editable?"Muokkaa":"Avaa",icon:"✏",onSelect:edit},
         {label:"Kopioi kirjaus",icon:"⧉",onSelect:()=>duplicateEntry(entry)},
         {label:"Siirrä ylös",icon:"↑",disabled:idx===0,onSelect:()=>moveEntry(-1)},
@@ -5238,15 +5435,10 @@ function renderMethodGrid(){
     el('<div class="method-grid"></div>');
 
 
-  const lastUse={};
-  entries.forEach((e,i)=>{ lastUse[e.methodId]=i; });
-  const order=METHODS
-    .map((m,i)=>({m,i}))
-    .sort((x,y)=>{
-      const lx=lastUse[x.m.id]===undefined?-1:lastUse[x.m.id];
-      const ly=lastUse[y.m.id]===undefined?-1:lastUse[y.m.id];
-      return ly!==lx?ly-lx:x.i-y.i;
-    });
+  /* Järjestys pysyy aina samana, jotta tuttu menetelmä löytyy samasta
+     paikasta. Viimeksi käytetty menetelmä merkitään. */
+  const lastMethodId=entries.length?entries[entries.length-1].methodId:null;
+  const order=METHODS.map((m,i)=>({m,i}));
   order.forEach(({m,i})=>{
 
     const t=
@@ -5260,12 +5452,15 @@ function renderMethodGrid(){
           </span>
 
           ${escapeHtml(m.short)}
+          ${m.id===lastMethodId?'<span class="mt-last">Viimeksi</span>':""}
           ${(()=>{ const n=studyOpenFor(m.id).length; return n?`<span class="mt-plan">${n} avoinna suunnitelmassa</span>`:""; })()}
         </button>
       `);
 
 
-    t.onclick=()=>{
+    t.onclick=async()=>{
+
+      if(!(await confirmReplacePendingDraft()))return;
 
       editingEntry={
         id:
@@ -5279,7 +5474,7 @@ function renderMethodGrid(){
 
         author:currentUserName(),
 
-        values:{},
+        values:m.defaultOsio?{osio:m.defaultOsio}:{},
 
         photos:[],
 
@@ -6065,6 +6260,83 @@ function mkSelect(items,current,style){
 
 /* Kenttäriveillä käytettävä "onko kenttä käytössä" -tila (säilyy uudelleenpiirroissa). */
 const logicOpenIds=new Set();
+
+/* Osiolista (pääkäyttäjä). Järjestys on raportin pääotsikoiden järjestys. */
+function renderOsiotCard(){
+  const c=el(`
+    <div class="card">
+      <h2>Osiot <span class="badge">${OSIOT.length}</span></h2>
+      <div class="hint">
+        Kirjauksen ensimmäinen kenttä on Osio. Tutkija valitsee sen tältä listalta
+        tai kirjoittaa oman. Kun lista on tyhjä, osio ei ole pakollinen.
+      </div>
+      <details class="osio-help">
+        <summary>Näin osiot tulevat raporttiin</summary>
+        <ul>
+          <li><b>Kaikki kerralla:</b> raporttipohjan merkintä <code>{{kirjaukset osioittain}}</code> tekee jokaisesta osiosta pääotsikon tämän listan järjestyksessä.</li>
+          <li><b>Pohjan omien otsikoiden alle:</b> jos pohjassa on jo otsikko, esim. ”Alapohja”, kirjoita sen alle <code>{{osio:Alapohja}}</code>. Kirjaukset tulevat otsikon alle, eikä otsikkoa tule kahdesti.</li>
+          <li>Ilman näitä merkintöjä raportin rakenne pysyy ennallaan.</li>
+        </ul>
+        <a class="btn btn-outline btn-block" href="raporttipohjat.html#osiot">Avaa raporttipohjien osio-ohje ja merkinnät</a>
+      </details>
+      <div class="osio-list"></div>
+      <div class="osio-add">
+        <input type="text" placeholder="Uusi osio, esim. Alapohja" aria-label="Uuden osion nimi">
+        <button type="button" class="btn btn-primary">Lisää</button>
+      </div>
+      <div class="hint" style="margin-top:6px;">Nimen muutos koskee uusia kirjauksia ja menetelmien oletusosioita. Jo tehtyjen kirjausten osio ei muutu.</div>
+    </div>
+  `);
+  const list=c.querySelector(".osio-list");
+  OSIOT.forEach((o,i)=>{
+    const r=el(`
+      <div class="osio-row">
+        <span class="osio-no">${i+1}</span>
+        <input type="text" value="${escapeAttribute(o)}" aria-label="Osion ${i+1} nimi">
+        <button type="button" aria-label="Siirrä ylös" ${i===0?"disabled":""}>↑</button>
+        <button type="button" aria-label="Siirrä alas" ${i===OSIOT.length-1?"disabled":""}>↓</button>
+        <button type="button" class="osio-del" aria-label="Poista osio">×</button>
+      </div>
+    `);
+    const [inp,up,down,del]=[r.querySelector("input"),...r.querySelectorAll("button")];
+    inp.onchange=()=>{
+      const v=inp.value.trim();
+      if(!v||OSIOT.indexOf(v)>=0&&v!==o){ inp.value=o; return; }
+      OSIOT[i]=v;
+      METHODS.forEach(m=>{ if(m.defaultOsio===o)m.defaultOsio=v; });
+      saveOsiot(); toast("Osio nimetty uudelleen");
+    };
+    up.onclick=()=>{ [OSIOT[i-1],OSIOT[i]]=[OSIOT[i],OSIOT[i-1]]; saveOsiot(); render(); };
+    down.onclick=()=>{ [OSIOT[i+1],OSIOT[i]]=[OSIOT[i],OSIOT[i+1]]; saveOsiot(); render(); };
+    del.onclick=async()=>{
+      const users=METHODS.filter(m=>m.defaultOsio===o).length;
+      if(!(await window.AppUI.confirm({
+        title:'Poistetaanko osio "'+o+'"?',
+        text:(users?users+" menetelmän oletusosio poistuu. ":"")+"Jo tehtyjen kirjausten osio ei muutu.",
+        ok:"Poista osio",cancel:"Säilytä",danger:true
+      })))return;
+      OSIOT.splice(i,1);
+      METHODS.forEach(m=>{ if(m.defaultOsio===o)delete m.defaultOsio; });
+      saveOsiot(); render(); toast("Osio poistettu");
+    };
+    list.appendChild(r);
+  });
+  if(!OSIOT.length)list.appendChild(el('<div class="empty">Ei osioita. Lisää ensimmäinen osio alta.</div>'));
+  const addInp=c.querySelector(".osio-add input");
+  const add=()=>{
+    const v=addInp.value.trim();
+    if(!v)return;
+    if(OSIOT.indexOf(v)>=0){ toast("Osio on jo listalla"); return; }
+    OSIOT.push(v); saveOsiot(); render(); toast("Lisätty: "+v);
+  };
+  c.querySelector(".osio-add button").onclick=add;
+  addInp.onkeydown=e=>{ if(e.key==="Enter"){ e.preventDefault(); add(); } };
+  return c;
+}
+async function saveOsiot(){
+  try{ localStorage.setItem(OSIOT_STORAGE_KEY,JSON.stringify(OSIOT)); }catch(err){}
+  await persistMethods();
+}
 
 function renderMethodsManageCard(){
 
@@ -7255,6 +7527,17 @@ function renderMethodEditCard(){
 
       <label>Lyhyt nimi (näkyy menetelmävalinnassa)</label>
       <input type="text" id="me_short" value="${escapeAttribute(editingMethod.short||"")}" placeholder="esim. Pintakosteus">
+
+      <label for="me_osio">Oletusosio</label>
+      <select id="me_osio">
+        <option value="">Ei oletusta – tutkija valitsee</option>
+        ${OSIOT.concat(editingMethod.defaultOsio && OSIOT.indexOf(editingMethod.defaultOsio)<0?[editingMethod.defaultOsio]:[])
+          .map(o=>`<option value="${escapeAttribute(o)}" ${editingMethod.defaultOsio===o?"selected":""}>${escapeHtml(o)}</option>`).join("")}
+      </select>
+      <div class="hint">
+        Valmiiksi valittu osio uudessa kirjauksessa. Tutkija voi vaihtaa sen.
+        ${OSIOT.length?"":"Osiolista on vielä tyhjä: lisää osiot Menetelmät-sivun Osiot-kortissa."}
+      </div>
     </div>
   `);
 
@@ -7267,6 +7550,13 @@ function renderMethodEditCard(){
       <div class="hint">
         Kentät näkyvät lomakkeella tässä järjestyksessä, kun tätä
         menetelmää käytetään.
+      </div>
+      <div class="tip-card" style="margin-top:10px;">
+        <b>Ensimmäinen kenttä on kirjauksen tunniste</b>
+        Sen arvo näkyy kirjauslistassa, pohjakuvan merkinnässä, kuvien
+        tiedostonimissä ja raportin alaotsikkona. Valitse siksi
+        ensimmäiseksi kenttä, joka yksilöi kirjauksen, esimerkiksi
+        ”Mittauspiste”, ”Tila” tai ”Näytetunnus”.
       </div>
       <div id="methodFieldsList"></div>
       <button type="button" class="btn btn-outline btn-block" id="btnAddMethodField">
@@ -7603,6 +7893,9 @@ async function saveMethodEdit(){
 
   editingMethod.name=name;
   editingMethod.short=short||name;
+  const osioSel=document.getElementById("me_osio");
+  if(osioSel && osioSel.value)editingMethod.defaultOsio=osioSel.value;
+  else delete editingMethod.defaultOsio;
 
   const prevGuides=methodGuides(METHODS.find(m=>m.id===editingMethod.id));
 
@@ -7674,7 +7967,7 @@ function renderEntryForm(){
     el('<div class="card"></div>');
 
 
-  COMMON_FIELDS.forEach(f=>{
+  commonFieldsFor(editingEntry.values).forEach(f=>{
 
     common.appendChild(
       renderField(
@@ -7724,6 +8017,9 @@ function renderEntryForm(){
    */
   let jumpNotes=[];
   function applyFieldVisibility(){
+    /* Lomake voi saada vielä change-tapahtuman (esim. valintalistan blur),
+       kun se poistetaan näkymästä tallennuksen jälkeen. */
+    if(!editingEntry || !editingEntry.values)return;
     const info={jumps:{}};
     const vis=
       computeFieldVisibility(
@@ -7930,7 +8226,7 @@ function renderEntryForm(){
       el(`
         <div class="hint">
           Lataa ensin pohjakuva kohteen tietoihin,
-          niin voit merkitä tämän menetelmän sijainnin siihen.
+          niin voit merkitä tämän kirjauksen sijainnin siihen.
         </div>
       `)
     );
@@ -8781,7 +9077,7 @@ function saveEntryForm(){
   autosave();
 
   toast(
-    "Menetelmä tallennettu"
+    "Kirjaus tallennettu"
   );
 
 
@@ -8813,7 +9109,7 @@ async function deleteCurrentEntry(fromList){
   if(
     !(await window.AppUI.confirm({
       title:"Poistetaanko kirjaus?",
-      text:(entry.values&&entry.values.paikka?entry.values.paikka+"\n":"")+
+      text:(entryIdent(entry)?entryIdent(entry)+"\n":"")+
         "Kirjauksen tiedot"+(nPh?" ja "+nPh+" valokuvaa":"")+" poistetaan.",
       ok:"Poista kirjaus",cancel:"Säilytä kirjaus",danger:true
     }))
@@ -9499,6 +9795,7 @@ async function exportWithTemplate(tpl){
       project:Object.assign({},project),
       entries:out,
       methods:METHODS,
+      osiot:OSIOT.slice(),
       reportDate:localDateISO()
     });
     const safe=(project.nimi||"kohde").replace(/[^a-z0-9äöå]+/gi,"_").slice(0,40);
@@ -9707,11 +10004,7 @@ async function exportWordLegacy(){
      * "Menetelmä N" -otsikolla. Jos Tunnus/Tila on tyhjä, käytetään
      * pelkkää menetelmän nimeä.
      */
-    const tunnusTila=
-      e.values &&
-      e.values.paikka != null
-        ? String(e.values.paikka).trim()
-        : "";
+    const tunnusTila=entryIdent(e,m);
 
     const entryHeading=
       tunnusTila
@@ -9748,7 +10041,7 @@ async function exportWordLegacy(){
 
 
     [
-      ...COMMON_FIELDS,
+      ...commonFieldsFor(e.values),
       ...m.fields
     ].forEach(f=>{
 
@@ -11370,6 +11663,91 @@ function studySections(){
   return out;
 }
 
+/* ---------- Kesken jäänyt uusi kirjaus ----------
+   Kohde avautuu aina alkuun. Jos edellisellä kerralla jäi uusi kirjaus
+   tallentamatta, se näytetään kohdenäkymän yläosassa jatkettavaksi. */
+function pendingDraft(){
+  return (editingEntry && editingIsNew && entries.indexOf(editingEntry)<0 && entryHasData(editingEntry))
+    ?editingEntry:null;
+}
+function renderPendingDraftCard(){
+  const d=pendingDraft();
+  if(!d)return null;
+  const m=METHODS.find(x=>x.id===d.methodId);
+  const c=el(`
+    <div class="card draft-pending">
+      <h2>Kesken jäänyt kirjaus</h2>
+      <div class="hint" style="margin-bottom:10px;">
+        ${escapeHtml(m?m.name:"Kirjaus")}${entryIdent(d,m)?" – "+escapeHtml(entryIdent(d,m)):""}
+        jäi tallentamatta, kun sovellus suljettiin.
+      </div>
+      <div class="footer-row">
+        <button type="button" class="btn btn-outline" data-a="discard">Hylkää</button>
+        <button type="button" class="btn btn-primary" data-a="resume">Jatka kirjausta</button>
+      </div>
+    </div>
+  `);
+  c.querySelector('[data-a="resume"]').onclick=()=>{ view="entryForm"; render(); };
+  c.querySelector('[data-a="discard"]').onclick=async()=>{
+    const ok=await window.AppUI.confirm({
+      title:"Hylätäänkö kesken jäänyt kirjaus?",
+      text:"Syötetyt tiedot ja kuvat poistetaan, eikä niitä voi palauttaa.",
+      ok:"Hylkää kirjaus",cancel:"Säilytä",danger:true
+    });
+    if(!ok)return;
+    discardPendingDraft();
+    render();
+    toast("Kirjaus hylätty");
+  };
+  return c;
+}
+function discardPendingDraft(){
+  const d=pendingDraft();
+  if(!d)return;
+  (d.photos||[]).forEach(p=>{ if(p.url){ try{URL.revokeObjectURL(p.url);}catch(err){} } });
+  editingEntry=null;
+  editingIsNew=false;
+  autosave();
+}
+/* Uutta kirjausta aloitettaessa kesken jäänyt kirjaus ei saa kadota huomaamatta. */
+async function confirmReplacePendingDraft(){
+  if(!pendingDraft())return true;
+  const v=await window.AppUI.choose({
+    title:"Sinulla on kesken jäänyt kirjaus",
+    text:"Jatketaanko sitä, vai hylätäänkö se ja aloitetaan uusi?",
+    actions:[
+      {label:"Jatka kesken jäänyttä",value:"resume",kind:"primary"},
+      {label:"Hylkää ja aloita uusi",value:"discard",kind:"plain"},
+      {label:"Peruuta",value:null,kind:"plain"}
+    ]
+  });
+  if(v==="resume"){ view="entryForm"; render(); return false; }
+  if(v==="discard"){ discardPendingDraft(); return true; }
+  return false;
+}
+
+/* ---------- Kertavinkki ----------
+   Näytetään uuden toiminnon ensimmäisellä käyttökerralla. Kun vinkin
+   sulkee, sitä ei näytetä enää samalle käyttäjälle tällä laitteella. */
+function tipKey(id){
+  const u=window.AppUsers&&window.AppUsers.getActive?window.AppUsers.getActive():"";
+  return "kl_tip_"+id+"_"+(u||"anon");
+}
+function oneTimeTip(id,title,text){
+  try{ if(localStorage.getItem(tipKey(id)))return null; }catch(err){ return null; }
+  const c=el(`
+    <div class="tip-card" role="note">
+      <b>💡 ${escapeHtml(title)}</b>${escapeHtml(text)}
+      <div><button type="button" class="btn btn-outline btn-sm">Selvä</button></div>
+    </div>
+  `);
+  c.querySelector("button").onclick=()=>{
+    try{ localStorage.setItem(tipKey(id),"1"); }catch(err){}
+    c.remove();
+  };
+  return c;
+}
+
 /* ---------- Kohdenäkymän kortti ---------- */
 function renderStudyPlanCard(){
   const s=studyStats();
@@ -11414,6 +11792,10 @@ function renderStudyPlanCard(){
 function renderStudyPlanView(app,footer){
   const s=studyStats();
   const pct=s.total?Math.round(100*(s.done+s.skip)/s.total):0;
+
+  const tip=oneTimeTip("tarkistuslista","Tarkistuslista",
+    "Lisää tutkimussuunnitelman tutkimukset kohdiksi. Kun teet kirjauksen, valitse mihin kohtaan se kuuluu – lista päivittyy itsestään.");
+  if(tip)app.appendChild(tip);
 
   const planBtn=renderPlanOpenButton();
   if(planBtn)app.appendChild(planBtn);
@@ -11492,12 +11874,13 @@ function renderStudyItemRow(it){
   return row;
 }
 
-function startEntryForPlanItem(it){
+async function startEntryForPlanItem(it){
+  if(!(await confirmReplacePendingDraft()))return;
   editingEntry={
     id:"e"+Date.now()+Math.random().toString(36).slice(2,7),
     methodId:it.method,
     author:currentUserName(),
-    values:{[PLAN_KEY]:it.id},
+    values:Object.assign({[PLAN_KEY]:it.id},(()=>{ const pm=METHODS.find(x=>x.id===it.method); return pm&&pm.defaultOsio?{osio:pm.defaultOsio}:{}; })()),
     photos:[],
     marker:null
   };
@@ -11517,7 +11900,7 @@ function openStudyItemActions(it){
   }
   linked.forEach(({e,i})=>{
     actions.push({
-      label:"Avaa kirjaus "+(i+1)+(e.values.paikka?": "+e.values.paikka:""),
+      label:"Avaa kirjaus "+(i+1)+(entryIdent(e)?": "+entryIdent(e):""),
       icon:"📄",
       onSelect:()=>{ editingEntry=e; editingIsNew=false; view="entryForm"; render(); }
     });
@@ -11713,7 +12096,7 @@ function renderStudySummary(){
       <h3 class="sp-sub">Suunnitelman ulkopuoliset kirjaukset</h3>
       ${extra.length
         ?`<div class="sp-tablewrap"><table class="sp-table"><thead><tr><th>Kirjaus</th><th>Menetelmä</th></tr></thead><tbody>
-          ${extra.map(x=>`<tr><td>${x.i+1}. ${escapeHtml(x.e.values&&x.e.values.paikka||"Ei paikkaa merkitty")}</td><td>${escapeHtml(studyMethodName(x.e.methodId))}</td></tr>`).join("")}
+          ${extra.map(x=>`<tr><td>${x.i+1}. ${escapeHtml(entryIdent(x.e)||entryOsio(x.e)||"Ei tunnistetta")}</td><td>${escapeHtml(studyMethodName(x.e.methodId))}</td></tr>`).join("")}
           </tbody></table></div>`
         :'<div class="hint">Ei suunnitelman ulkopuolisia kirjauksia.</div>'}
       ${open.length?`<div class="sp-open-warn">Käsittelemättä ${open.length} kohtaa. Merkitse ne tehdyiksi tai kirjaa syy, miksi niitä ei tehty, ennen kuin lähdet kohteesta.</div>`:""}
@@ -13489,11 +13872,7 @@ async function exportFloorPlanPdf(){
               );
             const methodName=
               m ? m.name : "Menetelmä";
-            const placeTxt=
-              (
-                e.values &&
-                e.values.paikka
-              ) || "";
+            const placeTxt=entryIdent(e,m);
             const customLabel=
               (
                 e.marker.label||

@@ -302,6 +302,9 @@ function injectCss(){
     ".ocr-frame{position:absolute;left:14%;top:16%;width:72%;height:54%;border:3px solid #fff;border-radius:10px;box-shadow:0 0 0 100vmax rgba(0,0,0,.5);pointer-events:none}",
     ".ocr-frame::after{content:'Koko näyttö kehykseen';position:absolute;top:calc(100% + 10px);left:0;right:0;text-align:center;font-size:14px}",
     ".ocr-hint{position:absolute;left:0;right:0;top:12px;text-align:center;font-size:14px;text-shadow:0 1px 2px #000;pointer-events:none}",
+    ".ocr-tip{position:absolute;left:12px;right:12px;top:12px;z-index:3;background:#fff;color:#1c2430;border-radius:12px;padding:12px 14px;box-shadow:0 6px 20px rgba(0,0,0,.35);font-size:15px;line-height:1.45}",
+    ".ocr-tip b{display:block;margin-bottom:2px}",
+    ".ocr-tip button{margin-top:8px;border:0;background:#1c2430;color:#fff;border-radius:8px;padding:8px 16px;font:inherit;font-weight:700;min-height:40px;cursor:pointer}",
     ".ocr-focus{position:absolute;width:64px;height:64px;margin:-32px 0 0 -32px;border:2px solid #ffd54a;border-radius:50%;opacity:0;pointer-events:none}",
     ".ocr-focus.on{animation:ocrFocus 1s ease-out}",
     "@keyframes ocrFocus{0%{opacity:1;transform:scale(1.4)}60%{opacity:1;transform:scale(1)}100%{opacity:0}}",
@@ -402,7 +405,21 @@ function openCamera(ctl,retakeRow){
   };
   pushOverlay(C);
   startLive(C);
+  showCamTip(C);
   setTimeout(function(){C.shutter.focus();},50);
+}
+/* Kertavinkki kameraluvun ensimmäisellä käyttökerralla (sama avain kuin kenttalomakkeen oneTimeTip). */
+function showCamTip(C){
+  var u=window.AppUsers&&window.AppUsers.getActive?window.AppUsers.getActive():"";
+  var key="kl_tip_kameraluku_"+(u||"anon");
+  try{ if(localStorage.getItem(key))return; }catch(e){ return; }
+  var tip=el('<div class="ocr-tip" role="note"><b>💡 Vinkki</b>Kohdista lukulaitteen koko näyttö kehykseen ja paina punaista painiketta. Jos kuva on epätarkka, napauta näyttöä tarkentaaksesi.<br><button type="button">Selvä</button></div>');
+  tip.querySelector("button").onclick=function(ev){
+    ev.stopPropagation();
+    try{ localStorage.setItem(key,"1"); }catch(e){}
+    tip.remove();
+  };
+  C.node.querySelector(".ocr-stage").appendChild(tip);
 }
 function camToast(msg){
   if(!cam)return;var t=cam.node.querySelector(".ocr-toast");t.textContent=msg;t.hidden=false;

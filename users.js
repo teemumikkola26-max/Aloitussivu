@@ -15,6 +15,9 @@ window.AppUsers = (function(){
   let users = readCache();
   let tableMissing = false;
   let lastError = null;
+  /* Pääkäyttäjät: sarake app_users.is_admin (supabase-paakayttajat.sql).
+     Jos saraketta ei vielä ole, lista toimii kuten ennen eikä pääkäyttäjiä ole. */
+  let adminColumnMissing = false;
 
   function readCache(){
     try{
@@ -28,7 +31,15 @@ window.AppUsers = (function(){
 
   function list(){ return users.slice(); }
   function names(){ return users.map(u => u.name); }
-  function status(){ return { tableMissing, error: lastError }; }
+  function status(){ return { tableMissing, error: lastError, adminColumnMissing }; }
+
+  /* Pääkäyttäjät. Ei tietoturvaratkaisu (kaikilla samat tunnukset), vaan
+     selkeyttää kenttätutkijan näkymää: ylläpitotoiminnot näkyvät vain
+     pääkäyttäjille. Jos pääkäyttäjiä ei ole valittu, kaikki näkevät ne. */
+  function isAdmin(name){ return users.some(u => u.name === name && u.is_admin === true); }
+  function admins(){ return users.filter(u => u.is_admin === true).map(u => u.name); }
+  function hasAdmins(){ return admins().length > 0; }
+  function activeIsAdmin(){ return !hasAdmins() || isAdmin(getActive()); }
 
   function getActive(){
     let n = "";
@@ -65,7 +76,13 @@ window.AppUsers = (function(){
       const { data: sess } = await c.auth.getSession();
       if (!sess || !sess.session) return list();   // ei kirjautunut -> älä tyhjennä välimuistia
     }catch(e){ return list(); }
-    const { data, error } = await c.from("app_users").select("id,name,created_at");
+    let { data, error } = await c.from("app_users").select("id,name,created_at,is_admin");
+    if (error && isMissingColumn(error)){
+      adminColumnMissing = true;
+      ({ data, error } = await c.from("app_users").select("id,name,created_at"));
+    }else if (!error){
+      adminColumnMissing = false;
+    }
     if (error){
       lastError = error;
       tableMissing = isMissingTable(error);
@@ -93,6 +110,24 @@ window.AppUsers = (function(){
     }
     users.push(data); sortUsers(); writeCache(); emit();
     return data;
+  }
+
+  async function setAdmin(id, value){
+    const c = await waitForClient();
+    if (!c) throw new Error("Supabase-yhteyttä ei ole.");
+    if (adminColumnMissing) throw Object.assign(new Error("Pääkäyttäjäsarake puuttuu."), { adminColumnMissing:true });
+    const { error } = await c.from("app_users").update({ is_admin: !!value }).eq("id", id);
+    if (error){
+      if (isMissingColumn(error)){ adminColumnMissing = true; emit(); throw Object.assign(new Error("Pääkäyttäjäsarake puuttuu."), { adminColumnMissing:true }); }
+      throw error;
+    }
+    users = users.map(u => u.id === id ? Object.assign({}, u, { is_admin: !!value }) : u);
+    writeCache(); emit();
+  }
+
+  function isMissingColumn(error){
+    const m = String((error && (error.message || error.details)) || "");
+    return (error && error.code === "42703") || /is_admin/.test(m) && /column|sarake|schema cache/i.test(m);
   }
 
   async function remove(id){
@@ -137,5 +172,6 @@ window.AppUsers = (function(){
 
   setTimeout(emit, 0);
 
-  return { list, names, status, getActive, setActive, refresh, add, remove, populateSelect };
+  return { list, names, status, getActive, setActive, refresh, add, remove, populateSelect,
+           isAdmin, admins, hasAdmins, activeIsAdmin, setAdmin };
 })();

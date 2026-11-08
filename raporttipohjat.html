@@ -67,6 +67,11 @@
   .tags{width:100%;border-collapse:collapse;font-size:14px;margin:8px 0}
   .tags td{border-top:1px solid var(--line);padding:6px 4px;vertical-align:top}
   .tags td:first-child{white-space:nowrap;font-family:SFMono-Regular,Consolas,Menlo,monospace;font-size:13px;padding-right:10px}
+  .osio-steps{padding-left:20px;margin:8px 0;font-size:14.5px}
+  .osio-steps li{margin-bottom:8px}
+  .osio-steps code,.guide p code{font-size:13px;background:#f2f0e8;padding:1px 4px;border-radius:4px;overflow-wrap:anywhere}
+  .osio-example{background:#f2f0e8;border-radius:8px;padding:10px 12px;font-size:13px;overflow-x:auto;white-space:pre;margin:6px 0}
+  .copy-tag{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 10px;font:inherit;font-size:13px;cursor:pointer;min-height:36px}
   .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:24px;background:#1c2430;color:#fff;padding:10px 16px;border-radius:20px;font-size:14px;z-index:2000;opacity:0;transition:opacity .25s;pointer-events:none;max-width:90%;text-align:center}
   .toast.show{opacity:1}
 </style>
@@ -95,6 +100,31 @@
     <div id="tCheck"></div>
     <label style="display:flex;gap:10px;align-items:center;min-height:44px;margin-top:8px"><input type="checkbox" id="tDefault" style="width:22px;height:22px"> Oletuspohja</label>
     <button type="button" class="btn btn-primary btn-block" id="tSave" style="margin-top:8px">Tallenna pohja</button>
+  </div>
+
+  <div class="card">
+    <details class="guide" id="osiot">
+      <summary>Ohje: osiot raportin otsikoina</summary>
+      <p class="hint">Kirjauksen ensimmäinen kenttä on <b>osio</b> (esim. Alapohja). Osiolistan määrittää pääkäyttäjä kenttälomakkeessa: Lisää toimintoja → Muokkaa menetelmiä → Osiot. Osiot voi tuoda raporttiin kahdella tavalla, ja niitä voi myös yhdistää.</p>
+      <ol class="osio-steps">
+        <li><b>Kaikki kerralla:</b> kirjoita omaksi kappaleekseen <code>{{kirjaukset osioittain}}</code>. Jokaisesta osiosta tulee pääotsikko osiolistan järjestyksessä, ja kirjaukset tulevat sen alle.</li>
+        <li><b>Pohjan omien otsikoiden alle:</b> jos pohjassa on jo otsikko, esim. ”5.1 Alapohja” vakioteksteineen, kirjoita sen alle omaksi kappaleekseen <code>{{osio:Alapohja}}</code>. Kirjaukset tulevat otsikon alle, eikä uutta otsikkoa synny.</li>
+        <li><b>Yhdistelmä:</b> osioita, joilla on oma <code>{{osio:…}}</code>-merkintä, ei toisteta <code>{{kirjaukset osioittain}}</code>-kohdassa. Siihen kootaan loput osiot (myös itse kirjoitetut ja ”Muut havainnot”), joten mikään kirjaus ei jää pois.</li>
+        <li><b>Tyhjät osiot pois:</b> jos osiolla ei ole kirjauksia, otsikko ja vakioteksti voidaan poistaa raportista: <code>{{jos osio:Alapohja}}</code> otsikon edelle ja <code>{{/jos}}</code> osion loppuun.</li>
+      </ol>
+      <p class="hint">Esimerkki pohjasta:</p>
+      <pre class="osio-example">{{jos osio:Alapohja}}
+5.1 Alapohja   ← otsikko
+Alapohja on …  ← vakioteksti
+{{osio:Alapohja}}
+{{/jos}}
+…
+6 Muut havainnot
+{{kirjaukset osioittain}}</pre>
+      <p class="hint">Nimen kirjainkoolla tai välilyönneillä ei ole väliä, mutta muuten nimen pitää olla sama kuin osiolistassa. Pohjan tarkistus ilmoittaa, jos merkinnän osiota ei ole listalla.</p>
+      <p class="hint" style="margin-top:12px"><b>Nykyiset osiot ja niiden merkinnät</b> (napauta kopioidaksesi):</p>
+      <table class="tags" id="osioTable"></table>
+    </details>
   </div>
 
   <div class="card">
@@ -133,16 +163,45 @@ const TAGS = [
   ["{{projektinumero}}", "Projektinumero"], ["{{pvm}}", "Tutkimuspäivä"], ["{{vuosi}}", "Tutkimusvuosi"],
   ["{{raporttipvm}}", "Raportin luontipäivä"], ["{{lkm:id}}", "Menetelmän kirjausten määrä"],
   ["{{kirjaukset}}", "Kaikki kirjaukset menetelmittäin kuvineen (oma kappale)"],
-  ["{{kirjaukset tiloittain}}", "Kirjaukset Tunnus/Tila-kentän mukaan ryhmiteltynä"],
+  ["{{kirjaukset osioittain}}", "Kirjaukset osioittain: osiot pääotsikoina osiolistan järjestyksessä, kirjaukset niiden alla. Ohittaa osiot, joilla on pohjassa oma {{osio:nimi}}"],
+  ["{{osio:nimi}}", "Yhden osion kirjaukset pohjan oman otsikon alle (ei uutta otsikkoa), esim. {{osio:Alapohja}}"],
+  ["{{kirjaukset tiloittain}}", "Kirjaukset ryhmiteltynä vanhan Tunnus/Tila-kentän tai osion mukaan"],
   ["{{menetelmä:id}}", "Yhden menetelmän kirjaukset, otsikko per kirjaus"],
   ["{{taulukko:id}}", "Menetelmän kirjaukset taulukkona"],
   ["{{kuvat:id}}", "Menetelmän kirjausten valokuvat kahdessa sarakkeessa"],
   ["{{menetelmäluettelo}}", "Käytetyt menetelmät luettelona"],
   ["{{jos:id}} … {{/jos}}", "Väliin jäävä osa poistetaan, jos menetelmää ei käytetty (useita: jos:rh,avaus)"],
+  ["{{jos osio:nimi}} … {{/jos}}", "Väliin jäävä osa poistetaan, jos osiossa ei ole kirjauksia"],
   ["{{toista:id}} … {{/toista}}", "Väliin jäävä osa toistetaan jokaiselle kirjaukselle"],
   ["{{rivi:id}}", "Taulukon rivi toistetaan jokaiselle kirjaukselle"],
-  ["{{paikka}}, {{kentän id}}", "Kirjauksen tiedot toisto- ja rivipohjissa; lisäksi {{kuvat}}, {{sijainti}} ja RH:lle {{abs}}"]
+  ["{{osio}}, {{tunniste}}, {{kentän id}}", "Kirjauksen tiedot toisto- ja rivipohjissa. Tunniste on menetelmän ensimmäisen kentän arvo ({{paikka}} toimii samoin). Lisäksi {{kuvat}}, {{sijainti}} ja RH:lle {{abs}}"]
 ];
+
+/* Osiolista pohjan tarkistukseen ja ohjeeseen: laitteen kopio, muuten pilvestä. */
+let OSIOT_FOR_SCAN = [];
+async function loadOsiotForScan(){
+  try{ const a = JSON.parse(localStorage.getItem("kenttalomake_osiot_v1") || "null"); if (Array.isArray(a)) OSIOT_FOR_SCAN = a; }catch(e){}
+  try{
+    if (window.__supabaseClient){
+      const { data, error } = await window.__supabaseClient.from("custom_methods").select("settings").maybeSingle();
+      if (!error && data && data.settings && Array.isArray(data.settings.osiot)) OSIOT_FOR_SCAN = data.settings.osiot;
+    }
+  }catch(e){}
+  renderOsioTable();
+}
+function renderOsioTable(){
+  const t = $("#osioTable");
+  if (!t) return;
+  if (!OSIOT_FOR_SCAN.length){
+    t.innerHTML = '<tr><td colspan="2" style="font-family:inherit;white-space:normal">Osiolista on tyhjä. Pääkäyttäjä lisää osiot kenttälomakkeessa: Lisää toimintoja → Muokkaa menetelmiä → Osiot.</td></tr>';
+    return;
+  }
+  t.innerHTML = OSIOT_FOR_SCAN.map(o => "<tr><td>" + esc("{{osio:" + o + "}}") + '</td><td style="text-align:right"><button type="button" class="copy-tag" data-tag="' + esc("{{osio:" + o + "}}") + '">Kopioi</button></td></tr>').join("");
+  t.querySelectorAll(".copy-tag").forEach(b => b.addEventListener("click", async () => {
+    try{ await navigator.clipboard.writeText(b.dataset.tag); toast("Kopioitu: " + b.dataset.tag + " – liitä se Wordissa omaksi kappaleekseen"); }
+    catch(e){ toast("Kopiointi ei onnistunut. Kirjoita merkintä käsin: " + b.dataset.tag); }
+  }));
+}
 
 function renderGuide(){
   $("#tagTable").innerHTML = TAGS.map(([t, d]) => "<tr><td>" + esc(t) + "</td><td>" + esc(d) + "</td></tr>").join("");
@@ -192,13 +251,14 @@ function pickFile(){
 }
 
 async function checkTemplate(file){
-  const r = await window.ReportTemplateEngine.scan(await file.arrayBuffer(), methodsForScan());
+  const r = await window.ReportTemplateEngine.scan(await file.arrayBuffer(), methodsForScan(), OSIOT_FOR_SCAN);
   return r;
 }
 function checkHtml(r){
   if (!r.found.length) return '<div class="check warn">Pohjasta ei löytynyt yhtään merkintää. Raportti syntyy silloin ilman kenttälomakkeen tietoja.</div>';
   return '<div class="check ' + (r.unknown.length ? "warn" : "ok") + '">Löytyi ' + r.found.length + " merkintää." +
-    (r.unknown.length ? "<br>Tuntemattomat (jäävät raporttiin sellaisinaan): <code>" + r.unknown.map(esc).join("</code>, <code>") + "</code>" : " Kaikki tunnistettiin.") + "</div>";
+    (r.unknown.length ? "<br>Tuntemattomat (jäävät raporttiin sellaisinaan): <code>" + r.unknown.map(esc).join("</code>, <code>") + "</code>" : " Kaikki tunnistettiin.") +
+    ((r.notices || []).length ? "<br><b>Huomio:</b><br>" + r.notices.map(esc).join("<br>") : "") + "</div>";
 }
 
 function download(t){
@@ -300,6 +360,12 @@ document.getElementById("backLink").addEventListener("click", e => {
   setTimeout(() => wait(n - 1), 50);
 })(100);
 renderGuide();
+loadOsiotForScan();
+/* Kenttälomakkeen Osiot-kortin ohjelinkki avaa suoraan osio-ohjeen. */
+if (location.hash === "#osiot"){
+  const d = document.getElementById("osiot");
+  if (d){ d.open = true; setTimeout(() => d.scrollIntoView({ block:"start", behavior:"smooth" }), 300); }
+}
 </script>
 </body>
 </html>

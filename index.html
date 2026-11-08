@@ -38,6 +38,13 @@
   .section-label{font-size:13px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-soft);margin:16px 4px 8px}
   .group-label{font-size:14px;font-weight:700;color:var(--brand);margin:10px 4px 6px}
   .group-label .gl-count{font-weight:400;color:var(--ink-soft)}
+  .group-label .gl-own{font-weight:400;color:var(--ink-soft)}
+  .group-toggle-wrap{margin:6px 0 6px}
+  .group-toggle{display:flex;align-items:center;gap:8px;width:100%;min-height:48px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:#fff;font:inherit;font-size:15px;font-weight:700;color:var(--brand);text-align:left;cursor:pointer}
+  .group-toggle .gt-arrow{display:inline-block;transition:transform .2s;color:var(--ink-soft)}
+  .group-toggle[aria-expanded="true"] .gt-arrow{transform:rotate(90deg)}
+  .group-body[hidden]{display:none}
+  @media (prefers-reduced-motion:reduce){.group-toggle .gt-arrow{transition:none}}
   .empty-state{text-align:center;color:var(--ink-soft);font-size:15px;padding:18px 10px}
 
   /* Lomake- ja luonnoskortit: koko kortti napautettava, toiminnot ⋯-valikossa */
@@ -80,6 +87,9 @@
   .u-row:first-of-type{border-top:none}
   .u-name{flex:1;min-width:0;overflow-wrap:anywhere}
   .u-add{display:flex;gap:8px}
+  .u-admin{display:flex;align-items:center;gap:6px;font-size:14px;color:var(--ink-soft);white-space:nowrap}
+  .u-admin input{width:22px;height:22px}
+  .u-admin-tag{display:inline-block;font-size:12px;font-weight:700;color:#2f6b3a;background:#e6efe6;border-radius:99px;padding:1px 8px;margin-left:4px}
   .u-add input{flex:1;min-width:0;min-height:48px;font-size:16px;border:1.5px solid var(--line-strong);border-radius:10px;padding:8px 10px}
   .u-error{color:#a3271b;font-size:14px}
   a.dc-btn{display:flex;align-items:center;justify-content:center;text-decoration:none}
@@ -110,13 +120,16 @@
     <div class="admin-body">
       <h2 id="usersTitle">Käyttäjät</h2>
       <p class="hint">Samoilla tunnuksilla voi olla useita käyttäjiä. Lomakkeille valitaan suorittaja näistä, ja keskeneräiset lomakkeet ryhmitellään käyttäjittäin.</p>
+      <p class="hint">Pääkäyttäjät näkevät ylläpitotoiminnot, kuten menetelmien ja raporttipohjien muokkauksen. Muiden käyttäjien näkymä pysyy yksinkertaisena. Jos pääkäyttäjiä ei ole valittu, kaikki näkevät ylläpitotoiminnot.</p>
+      <div id="adminNote" class="hint" role="status" style="display:none;"></div>
       <div id="userList"></div>
-      <div class="u-add">
+      <div class="u-add admin-only">
         <input type="text" id="newUserName" placeholder="Uuden käyttäjän nimi" autocomplete="off" maxlength="80" aria-label="Uuden käyttäjän nimi">
         <button type="button" class="dc-btn dc-btn-primary" id="addUserBtn">Lisää</button>
       </div>
       <div class="u-error" id="userError" role="alert" style="display:none;"></div>
 
+      <div class="admin-only">
       <h2>Raportit ja lomakepohjat</h2>
       <a class="dc-btn dc-btn-block" href="raporttipohjat.html">📄 Raporttipohjat (Word)</a>
       <a class="dc-btn dc-btn-block" href="editor.html">➕ Luo uusi lomakepohja</a>
@@ -131,6 +144,7 @@
         <input type="file" id="formsBackupFile" accept=".json,application/json" style="display:none;">
       </div>
       <div id="backupStatus" role="status" aria-live="polite" style="font-size:14px;"></div>
+      </div>
 
       <button type="button" class="dc-btn dc-btn-block" id="logoutBtnInline" style="margin-top:8px;">Kirjaudu ulos</button>
     </div>
@@ -344,13 +358,39 @@ async function renderDrafts(){
     if (b === active) return 1;
     return a.localeCompare(b, "fi");
   });
+  /* Oman ryhmän kohteet näkyvät aina; muiden käyttäjien kohteet avataan
+     nimeä napauttamalla. Avatut ryhmät muistetaan tämän istunnon ajan. */
+  let openGroups = {};
+  try{ openGroups = JSON.parse(sessionStorage.getItem("drafts.openGroups") || "{}"); }catch(e){}
   keys.forEach(key => {
+  const own = !!active && key === active;
+  const single = keys.length === 1;
+  const isOpen = own || single || openGroups[key] === true;
   const gl = document.createElement("div");
   gl.className = "group-label";
   gl.setAttribute("role", "heading");
   gl.setAttribute("aria-level", "3");
-  gl.innerHTML = escapeHtmlLite(key || "Ei suorittajaa") + ' <span class="gl-count">(' + groups[key].length + ')</span>';
+  const groupBody = document.createElement("div");
+  groupBody.className = "group-body";
+  if (own || single){
+    gl.innerHTML = escapeHtmlLite(key || "Ei suorittajaa") + (own ? ' <span class="gl-own">(sinä)</span>' : "") + ' <span class="gl-count">(' + groups[key].length + ')</span>';
+  }else{
+    gl.classList.add("group-toggle-wrap");
+    gl.innerHTML = '<button type="button" class="group-toggle" aria-expanded="' + isOpen + '">' +
+      '<span class="gt-arrow" aria-hidden="true">▸</span>' +
+      escapeHtmlLite(key || "Ei suorittajaa") + ' <span class="gl-count">(' + groups[key].length + ')</span></button>';
+    const btn = gl.querySelector("button");
+    btn.addEventListener("click", () => {
+      const open = btn.getAttribute("aria-expanded") !== "true";
+      btn.setAttribute("aria-expanded", String(open));
+      groupBody.hidden = !open;
+      openGroups[key] = open;
+      try{ sessionStorage.setItem("drafts.openGroups", JSON.stringify(openGroups)); }catch(e){}
+    });
+    groupBody.hidden = !isOpen;
+  }
   wrap.appendChild(gl);
+  wrap.appendChild(groupBody);
   groups[key].forEach(sub => {
     const card = document.createElement("div");
     card.className = "draft-card";
@@ -393,7 +433,7 @@ async function renderDrafts(){
         }}
       ]);
     });
-    wrap.appendChild(card);
+    groupBody.appendChild(card);
   });
   });
 }
@@ -434,12 +474,49 @@ function renderUserUi(){
   if (!names.length){
     list.innerHTML = '<div class="empty-state" style="padding:12px 0;">Ei vielä käyttäjiä.</div>';
   }
+  /* Pääkäyttäjät: vain pääkäyttäjä voi muuttaa valintaa (tai kuka tahansa,
+     jos ketään ei ole vielä valittu). */
+  const canAdmin = window.AppUsers.activeIsAdmin ? window.AppUsers.activeIsAdmin() : true;
+  const st0 = window.AppUsers.status();
+  document.querySelectorAll(".admin-only").forEach(el => { el.style.display = canAdmin ? "" : "none"; });
+  const note = document.getElementById("adminNote");
+  const adminNames = window.AppUsers.admins ? window.AppUsers.admins() : [];
+  if (st0.adminColumnMissing && canAdmin){
+    note.style.display = "";
+    note.textContent = "Pääkäyttäjien valinta otetaan käyttöön ajamalla supabase-paakayttajat.sql Supabasen SQL-editorissa.";
+  }else if (!canAdmin){
+    note.style.display = "";
+    note.textContent = "Ylläpitotoiminnot näkyvät pääkäyttäjille (" + adminNames.join(", ") + "). Pyydä heitä tekemään muutokset.";
+  }else note.style.display = "none";
+
   window.AppUsers.list().forEach(u => {
     const row = document.createElement("div");
     row.className = "u-row";
-    row.innerHTML = '<div class="u-name">' + escapeHtmlLite(u.name) + '</div>' +
-      '<button type="button" class="dc-btn dc-btn-danger" data-id="' + escapeHtmlLite(u.id) + '">Poista</button>';
-    row.querySelector("button").addEventListener("click", async () => {
+    const admin = u.is_admin === true;
+    row.innerHTML = '<div class="u-name">' + escapeHtmlLite(u.name) + (admin && !canAdmin ? ' <span class="u-admin-tag">Pääkäyttäjä</span>' : '') + '</div>' +
+      (canAdmin && !st0.adminColumnMissing
+        ? '<label class="u-admin"><input type="checkbox" data-admin="' + escapeHtmlLite(u.id) + '"' + (admin ? " checked" : "") + '> Pääkäyttäjä</label>'
+        : '') +
+      (canAdmin ? '<button type="button" class="dc-btn dc-btn-danger" data-id="' + escapeHtmlLite(u.id) + '">Poista</button>' : '');
+    const chk = row.querySelector("[data-admin]");
+    if (chk) chk.addEventListener("change", async () => {
+      showUserError("");
+      /* Varmistus, ettei poista viimeistä pääkäyttäjää vahingossa omalta itseltään. */
+      if (!chk.checked && u.name === window.AppUsers.getActive() && adminNames.length === 1 && adminNames[0] === u.name){
+        const ok = await window.AppUI.confirm({ title:"Poistetaanko viimeinen pääkäyttäjä?",
+          text:"Kun pääkäyttäjiä ei ole, kaikki käyttäjät näkevät taas ylläpitotoiminnot.", ok:"Poista pääkäyttäjyys", cancel:"Peruuta" });
+        if (!ok){ chk.checked = true; return; }
+      }
+      try{ await window.AppUsers.setAdmin(u.id, chk.checked); }
+      catch(err){
+        chk.checked = !chk.checked;
+        showUserError(err && err.adminColumnMissing
+          ? "Pääkäyttäjäsarake puuttuu tietokannasta. Aja supabase-paakayttajat.sql Supabasen SQL-editorissa."
+          : userErrText(err));
+      }
+    });
+    const delBtn = row.querySelector("[data-id]");
+    if (delBtn) delBtn.addEventListener("click", async () => {
       if (!(await window.AppUI.confirm({ title:'Poistetaanko käyttäjä "' + u.name + '"?', text:"Jo tehdyt lomakkeet säilyttävät suorittajan nimen.", ok:"Poista käyttäjä", cancel:"Peruuta", danger:true }))) return;
       showUserError("");
       try{ await window.AppUsers.remove(u.id); }
@@ -545,8 +622,14 @@ backupButton.addEventListener("click", async () => {
   try {
     const { data, error } = await window.__supabaseClient.from("forms").select("id,title,tag,description,icon,definition,created_at,updated_at").order("title", { ascending:true });
     if (error) throw error;
-    const { data: methodsRow, error: methodsError } = await window.__supabaseClient.from("custom_methods").select("methods").maybeSingle();
+    /* Osiolista on sarakkeessa settings (supabase-osiot.sql); vanhassa tietokannassa sitä ei ole. */
+    let { data: methodsRow, error: methodsError } = await window.__supabaseClient.from("custom_methods").select("methods,settings").maybeSingle();
+    if (methodsError && (methodsError.code === "42703" || /settings/.test(methodsError.message || ""))){
+      ({ data: methodsRow, error: methodsError } = await window.__supabaseClient.from("custom_methods").select("methods").maybeSingle());
+    }
     if (methodsError) throw methodsError;
+    let osiot = methodsRow && methodsRow.settings && Array.isArray(methodsRow.settings.osiot) ? methodsRow.settings.osiot : null;
+    if (!osiot){ try{ const lo = JSON.parse(localStorage.getItem("kenttalomake_osiot_v1") || "null"); if (Array.isArray(lo)) osiot = lo; }catch(_){} }
     let methods = methodsRow && Array.isArray(methodsRow.methods) ? methodsRow.methods : null;
     // Jos pilvessä ei ole vielä muokattuja menetelmiä, ota mukaan tämän laitteen kopio.
     if (!methods) {
@@ -555,7 +638,7 @@ backupButton.addEventListener("click", async () => {
         if (Array.isArray(localMethods)) methods = localMethods;
       } catch (_) {}
     }
-    const backup = { format: BACKUP_FORMAT, version: BACKUP_VERSION, exportedAt: new Date().toISOString(), forms: data || [], kenttalomake: { methods: methods || [] } };
+    const backup = { format: BACKUP_FORMAT, version: BACKUP_VERSION, exportedAt: new Date().toISOString(), forms: data || [], kenttalomake: { methods: methods || [], osiot: osiot || [] } };
     const date = new Date().toISOString().slice(0, 10);
     downloadJsonFile(backup, "lomakepohjat-varmuuskopio-" + date + ".json");
     setBackupStatus("Varmuuskopio luotu (" + backup.forms.length + " lomakepohjaa ja " + (methods || []).length + " kenttälomakkeen menetelmää/kenttärakennetta). Täytettyjä tarkastuksia ei tallenneta.", false);
@@ -623,10 +706,17 @@ backupFileInput.addEventListener("change", async () => {
     if (backup.version >= 2) {
       // Päivitä myös paikallinen kopio, jotta kenttalomake.html käyttää palautettuja rakenteita heti.
       localStorage.setItem(METHODS_STORAGE_KEY, JSON.stringify(backedUpMethods));
-      const { error: methodsRestoreError } = await window.__supabaseClient.from("custom_methods").upsert(
-        { methods: backedUpMethods, updated_at: new Date().toISOString() },
-        { onConflict: "user_id" }
-      );
+      const restoredOsiot = backup.kenttalomake && Array.isArray(backup.kenttalomake.osiot) ? backup.kenttalomake.osiot : null;
+      const restoreRow = { methods: backedUpMethods, updated_at: new Date().toISOString() };
+      if (restoredOsiot){
+        restoreRow.settings = { osiot: restoredOsiot };
+        localStorage.setItem("kenttalomake_osiot_v1", JSON.stringify(restoredOsiot));
+      }
+      let { error: methodsRestoreError } = await window.__supabaseClient.from("custom_methods").upsert(restoreRow, { onConflict: "user_id" });
+      if (methodsRestoreError && restoreRow.settings && (methodsRestoreError.code === "42703" || /settings/.test(methodsRestoreError.message || ""))){
+        delete restoreRow.settings;
+        ({ error: methodsRestoreError } = await window.__supabaseClient.from("custom_methods").upsert(restoreRow, { onConflict: "user_id" }));
+      }
       if (methodsRestoreError) throw methodsRestoreError;
     }
     setBackupStatus("Palautus valmis (" + rows.length + " lomakepohjaa" + (backup.version >= 2 ? " ja " + methodCount + " kenttälomakkeen menetelmää/kenttärakennetta" : "") + "). Päivitä sivu tai avaa kenttälomake uudelleen, jotta palautetut muutokset tulevat käyttöön.", false);

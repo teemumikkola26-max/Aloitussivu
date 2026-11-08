@@ -164,3 +164,68 @@ Service workerin välimuistin versio on nostettu (`aloitussivu-v20`).
 - **Kirjauslista:** kohta näkyy kirjauksen tiedoissa (📋).
 - **Yhteenveto:** suunnitellut ja toteutuneet tutkimukset, tekemättä jätetyt syineen sekä suunnitelman ulkopuoliset kirjaukset. Yhteenveto ei vielä tulostu Word-raporttiin.
 - **Tallennus:** linkki tallentuu kirjaukseen arvona `values.__planItem`, ja se synkronoituu kirjauksen mukana. Tarkistuslista synkronoidaan kohdittain (`data.studyPlan`): uusin muokkaus voittaa, eivätkä poistetut kohdat palaa.
+
+## Selkeämpi käyttö kaikille tutkijoille (aloitussivu-v24)
+
+- **Pääkäyttäjät:**
+  - Asetukset ja ylläpito → Käyttäjät -kohdassa rastitetaan, ketkä ovat pääkäyttäjiä. Pääkäyttäjiä voi olla useita.
+  - Vain pääkäyttäjä voi muuttaa valintaa. Jos pääkäyttäjiä ei ole valittu, kaikki näkevät ylläpitotoiminnot kuten ennen.
+  - Tieto tallentuu sarakkeeseen `app_users.is_admin`, joka luodaan ajamalla kerran `supabase-paakayttajat.sql`. Ilman saraketta sovellus toimii kuten ennen.
+  - Kyse ei ole tietoturvaratkaisusta (kaikilla on samat tunnukset), vaan valinta selkeyttää kenttätutkijan näkymää.
+- **Ylläpito erillään:**
+  - Kenttälomakkeen "Lisää toimintoja" -valikossa menetelmien muokkaus, raporttipohjat, ulkoasu ja kohteen poisto näkyvät vain pääkäyttäjille omassa osiossaan.
+  - Etusivulla raporttipohjat, lomake-editori, siirtotyökalu, varmuuskopio sekä käyttäjien lisäys ja poisto näkyvät vain pääkäyttäjille. Muille kerrotaan, ketkä ovat pääkäyttäjiä.
+- **Tallennuksen tila selkokielellä:**
+  - Yläpalkissa lukee esimerkiksi "Tallessa laitteella", "✓ Pilvessä klo 11.40", "3 kuvaa odottaa", "Tallentaa…" tai "Uusi kohde", eikä varoitusmerkkiä käytetä turhaan.
+  - Napautus avaa selityksen siitä, missä tiedot ovat ja tarvitseeko tehdä jotain. Virhetilanteessa selityksessä on "Yritä uudelleen".
+- **Menetelmät pysyvät paikoillaan:** järjestys ei enää muutu käytön mukaan, ja viimeksi käytetty menetelmä on merkitty.
+- **Yhtenäiset termit:**
+  - "Kirjaus tallennettu" (ennen "Menetelmä tallennettu")
+  - "Poista kohde ja kaikki sen tiedot…" (ennen "Tyhjennä koko lomake…")
+  - "Uusi kohde" (ennen "Uusi lomake") ja "Avataan…" (ennen "Käynnistetään")
+- **Kertavinkit** tallennuksen tilasta, tarkistuslistasta ja kameraluvusta. Vinkki näytetään kerran käyttäjää kohden tällä laitteella.
+
+## Etusivun ryhmät ja kohteen avaaminen (aloitussivu-v25)
+
+- **Etusivu, "Kesken olevat":**
+  - Oman ryhmän (laitteen valittu käyttäjä) kohteet näkyvät aina.
+  - Muiden käyttäjien kohteet ovat nimen alla kokoon taitettuina, ja ne avataan nuolipainikkeesta. Painikkeessa näkyy kohteiden määrä.
+  - Avatut ryhmät muistetaan selainistunnon ajan.
+  - Jos ryhmiä on vain yksi, sen kohteet näkyvät suoraan.
+- **Kohde avautuu aina alkuun (kohteen tiedot), ei viimeksi auki olleeseen näkymään:**
+  - Aiemmin tallennetun kirjauksen muokkaukset ovat jo kirjauksessa.
+  - Kesken jäänyt uusi kirjaus näytetään kohdenäkymän yläosassa kortissa "Kesken jäänyt kirjaus", jossa ovat valinnat "Jatka kirjausta" ja "Hylkää". Tyhjä kesken jäänyt kirjaus hylätään automaattisesti.
+  - Jos uusi kirjaus aloitetaan (myös kopioimalla tai tarkistuslistalta) kesken jääneen kirjauksen ollessa olemassa, käyttäjältä kysytään, jatketaanko vanhaa vai hylätäänkö se.
+
+## Osiot ja kirjauksen tunniste (aloitussivu-v26)
+
+- **Osio korvaa Tunnus/Tilan:**
+  - Kirjauksen ensimmäinen kenttä on nyt Osio, ja Tunnus/Tila-kenttä on poistettu.
+  - Osio valitaan pääkäyttäjän listalta tai kirjoitetaan itse.
+  - Osio on pakollinen, kun osiolista on määritetty.
+- **Osiolista:** pääkäyttäjä hallitsee listaa Menetelmät-sivun Osiot-kortissa (lisäys, uudelleennimeäminen, järjestys, poisto). Järjestys on raportin pääotsikoiden järjestys.
+  - Lista tallentuu sarakkeeseen `custom_methods.settings`, joka luodaan ajamalla kerran `supabase-osiot.sql`. Ilman saraketta lista on laitekohtainen.
+  - Lista on mukana etusivun varmuuskopiossa.
+- **Oletusosio:** menetelmäeditorissa valitaan menetelmälle oletusosio, joka on valmiiksi valittuna uudessa kirjauksessa. Kirjausta kopioitaessa osio säilyy.
+- **Kirjauksen tunniste:**
+  - Tunnisteena käytetään menetelmän ensimmäisen kentän arvoa. Menetelmäeditorissa on tästä ohje.
+  - Tunniste näkyy kirjauslistassa, pohjakuvan merkinnöissä, kuvien tiedostonimissä, kenttämuistiinpanossa ja raporttien alaotsikoissa.
+  - Kirjausta kopioitaessa tunniste tyhjennetään.
+- **Vanhat kirjaukset:** Tunnus/Tila säilyy, näkyy tunnisteena ja on muokattavissa kentässä "Tunnus/Tila (aiempi kenttä)".
+- **Raporttipohjat:**
+  - Uusi merkintä `{{kirjaukset osioittain}}`: osiot pääotsikoina osiolistan järjestyksessä, itse kirjoitetut osiot niiden jälkeen ja osiottomat kirjaukset otsikon "Muut havainnot" alle.
+  - Uudet merkinnät `{{osio}}` ja `{{tunniste}}`. `{{paikka}}` toimii kuten `{{tunniste}}`.
+  - `{{kirjaukset tiloittain}}` ryhmittelee vanhan Tunnus/Tilan tai osion mukaan.
+  - `{{taulukko:…}}`-merkinnän ensimmäinen sarake on osio.
+- **Korjaus:** lomakkeen näkyvyyspäivitys ei kaadu, kun lomake suljetaan tallennuksen jälkeen.
+
+## Osiot pohjan omien otsikoiden alle (aloitussivu-v27)
+
+- **Uusi raporttipohjan merkintä `{{osio:nimi}}`:** yhden osion kirjaukset tulevat pohjan oman otsikon alle ilman uutta otsikkoa. Pohjan otsikko, numerointi ja vakioteksti säilyvät.
+- **`{{kirjaukset osioittain}}` ohittaa osiot, joilla on pohjassa oma `{{osio:…}}`.** Mikään osio ei siis tule kahdesti, eikä mikään kirjaus jää pois.
+- **Uusi ehto `{{jos osio:nimi}} … {{/jos}}`:** osa poistetaan raportista, jos osiossa ei ole kirjauksia.
+- **Nimien vertailu:** osioiden nimiä verrataan kirjainkoosta ja välilyönneistä riippumatta.
+- **Pohjan tarkistus:** raporttipohjasivu huomauttaa, jos merkinnän osiota ei ole osiolistalla.
+- **Opastus:**
+  - Raporttipohjasivulla on oma ohje "Osiot raportin otsikoina": vaiheittainen selitys, esimerkkipohja ja nykyiset osiot merkintöineen kopioitavina.
+  - Kenttälomakkeen Osiot-kortissa on lyhyt ohje ja linkki suoraan tähän ohjeeseen.
