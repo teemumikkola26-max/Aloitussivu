@@ -6273,9 +6273,10 @@ function renderOsiotCard(){
       <details class="osio-help">
         <summary>Näin osiot tulevat raporttiin</summary>
         <ul>
-          <li><b>Kaikki kerralla:</b> raporttipohjan merkintä <code>{{kirjaukset osioittain}}</code> tekee jokaisesta osiosta pääotsikon tämän listan järjestyksessä.</li>
-          <li><b>Pohjan omien otsikoiden alle:</b> jos pohjassa on jo otsikko, esim. ”Alapohja”, kirjoita sen alle <code>{{osio:Alapohja}}</code>. Kirjaukset tulevat otsikon alle, eikä otsikkoa tule kahdesti.</li>
-          <li>Ilman näitä merkintöjä raportin rakenne pysyy ennallaan.</li>
+          <li>Osio kokoaa saman osion kirjaukset raportissa saman pääotsikon alle. Osion nimeä ei tulosteta muualle.</li>
+          <li><b>Raporttipohjaan merkintä <code>{{kirjaukset osioittain}}</code>:</b> jokaisesta osiosta tulee pääotsikko tämän listan järjestyksessä.</li>
+          <li><b>Jos pohjassa on jo samanniminen otsikko</b> (esim. ”Alapohja” tai ”5.1 Alapohja”), osion kirjaukset tulevat automaattisesti sen alle, eikä otsikkoa tule kahdesti. Nimen pitää olla sama; numerointi ja kirjainkoko eivät haittaa.</li>
+          <li>Ilman merkintää <code>{{kirjaukset osioittain}}</code> raportin rakenne pysyy ennallaan.</li>
         </ul>
         <a class="btn btn-outline btn-block" href="raporttipohjat.html#osiot">Avaa raporttipohjien osio-ohje ja merkinnät</a>
       </details>
@@ -10072,8 +10073,9 @@ async function exportWordLegacy(){
       );
 
 
+    /* Osio ohjaa vain otsikointia, joten sitä ei tulosteta kenttänä. */
     [
-      ...commonFieldsFor(e.values),
+      ...commonFieldsFor(e.values).filter(f=>f.id!=="osio"),
       ...m.fields
     ].forEach(f=>{
 

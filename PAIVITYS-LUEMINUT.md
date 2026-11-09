@@ -1,4 +1,4 @@
-# Päivitys v20–v30: asennusohje
+# Päivitys v20–v31: asennusohje
 
 Paketti sisältää koko sovelluksen. Muutokset on tehty lähetettyyn versioon
 (aloitussivu-v19), joten aiemmat muutoksesi ovat tallessa. Muutokset on
@@ -12,7 +12,7 @@ kuvattu tarkemmin tiedostossa MUUTOKSET-2026-11.md.
 
    Jos olet jo ajanut ne, tätä ei tarvitse toistaa.
 2. **Korvaa palvelimen tiedostot tämän paketin tiedostoilla.**
-3. **Avaa sovellus.** Service worker (`aloitussivu-v30`) hakee uudet tiedostot
+3. **Avaa sovellus.** Service worker (`aloitussivu-v31`) hakee uudet tiedostot
    automaattisesti.
 
 ## Versioiden sisältö
@@ -28,3 +28,4 @@ kuvattu tarkemmin tiedostossa MUUTOKSET-2026-11.md.
 - **v28:** taulukkokentän rivit raporttiin (`{{rivit:…}}`), kentät nimellä merkinnöissä
 - **v29:** raportin varoitukset selkokielellä
 - **v30:** samannimisistä taulukkokentistä käytetään näkyvää, ja piilotuksen syy kerrotaan
+- **v31:** osio vain otsikointiin, kirjaukset automaattisesti samannimisen otsikon alle

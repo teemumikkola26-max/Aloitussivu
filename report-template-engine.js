@@ -13,7 +13,8 @@
    Lohkot (kappaleen ainoa sisältö):
      {{kirjaukset}}               kaikki kirjaukset menetelmittäin
      {{kirjaukset osioittain}}    kirjaukset osioittain (osiolistan järjestys, osio = pääotsikko);
-                                  ohittaa osiot, joilla on pohjassa oma {{osio:nimi}}
+                                  osio, jolle pohjassa on samanniminen otsikko tai oma
+                                  {{osio:nimi}}, tulee sen alle eikä toistu tässä
      {{osio:nimi}}                yhden osion kirjaukset pohjan oman otsikon alle
                                   (ei uutta pääotsikkoa; kirjaukset alaotsikoina)
      {{kirjaukset tiloittain}}    kirjaukset ryhmiteltynä (vanha Tunnus/Tila, muuten osio)
@@ -567,11 +568,10 @@
       const fields = m.fields.filter(f => f.type !== "textarea" && f.type !== "table" && es.some(e => ctx.visible(e, f) && ctx.fieldValue(e, f)));
       /* Ensimmäinen sarake: vanhoissa kirjauksissa Tunnus/Tila, muuten osio.
          Jos kummallakaan ei ole arvoja, sarake jätetään pois. */
-      const legacy = es.some(e => (e.values || {}).paikka);
-      const lead = e => legacy ? (((e.values || {}).paikka) || ctx.osio(e)) : ctx.osio(e);
+      /* Ensimmäinen sarake vain vanhoille kirjauksille (Tunnus/Tila); osio ei näy taulukossa. */
+      const lead = e => String((e.values || {}).paikka || "").trim();
       const hasLead = es.some(e => lead(e));
-      const allLegacy = es.every(e => (e.values || {}).paikka);
-      const rows = [(hasLead ? [allLegacy ? "Tunnus / tila" : (legacy ? "Osio / tunnus" : "Osio")] : []).concat(fields.map(f => f.label))]
+      const rows = [(hasLead ? ["Tunnus / tila"] : []).concat(fields.map(f => f.label))]
         .concat(es.map(e => (hasLead ? [lead(e) || ""] : []).concat(fields.map(f => ctx.visible(e, f) ? ctx.fieldValue(e, f) : ""))));
       const first = hasLead ? Math.floor(layout.textW * (fields.length > 1 ? 0.30 : 0.5)) : 0;
       const rest = Math.floor((layout.textW - first) / Math.max(1, fields.length));
@@ -838,6 +838,42 @@
       });
       tpl.forEach(remove); remove(a); remove(b);
     });
+
+    // 2b) Osiot pohjan valmiiden otsikoiden alle (vain kun pohjassa on {{kirjaukset osioittain}}):
+    //     jos pohjassa on otsikko, jonka teksti on sama kuin osion nimi (numerointia ja
+    //     kirjainkokoa huomioimatta), osion kirjaukset lisätään otsikon osion loppuun
+    //     eikä otsikkoa toisteta {{kirjaukset osioittain}}-kohdassa.
+    if (kids(body, "w:p").some(p => /^\{\{\s*kirjaukset osioittain\s*\}\}$/.test(ptext(p).trim()))){
+      const headNorm = t => normOsio(String(t).replace(/^\s*\d+(\.\d+)*\.?\s+/, "").replace(/[.:]+\s*$/, ""));
+      const top = kids(body).filter(c => c.t === "el");
+      const heads = top.map((c, i) => ({ c, i, lv: c.name === "w:p" ? st.headingLevelOf[pstyle(c)] : 0 }))
+        .filter(h => h.lv && ptext(h.c).trim());
+      const osioNames = {};
+      ctx.entries.forEach(e => { const o = ctx.osio(e); if (o) osioNames[normOsio(o)] = o; });
+      Object.keys(osioNames).forEach(k => {
+        if (ctx.ownOsiot[k]) return;
+        const h = heads.find(x => headNorm(ptext(x.c)) === k);
+        if (!h) return;
+        /* Lisäyskohta: ennen seuraavaa samantasoista tai ylempää otsikkoa tai osanvaihtoa. */
+        let end = null;
+        for (let j = h.i + 1; j < top.length; j++){
+          const c = top[j];
+          if (c.name === "w:sectPr"){ end = c; break; }
+          const lv2 = c.name === "w:p" ? st.headingLevelOf[pstyle(c)] : 0;
+          if (lv2 && lv2 <= h.lv && ptext(c).trim()){ end = c; break; }
+        }
+        const els = [];
+        ctx.ofOsio(osioNames[k]).forEach(e => {
+          const mname = ctx.methods[e.methodId].name, id = ctx.ident(e);
+          els.push(B.heading(id ? id + " – " + mname : mname, Math.min(h.lv + 1, 9)));
+          B.entryBody(e).forEach(x => els.push(x));
+          B.photoGrid(B.entryPhotos(e)).forEach(x => els.push(x));
+        });
+        if (end) els.forEach(x => insertBefore(end, x));
+        else els.forEach(x => append(body, x));
+        ctx.ownOsiot[k] = true;
+      });
+    }
 
     // 3) Lohkot
     kids(body, "w:p").forEach(p => {

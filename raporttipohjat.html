@@ -105,10 +105,11 @@
   <div class="card">
     <details class="guide" id="osiot">
       <summary>Ohje: osiot raportin otsikoina</summary>
-      <p class="hint">Kirjauksen ensimmäinen kenttä on <b>osio</b> (esim. Alapohja). Osiolistan määrittää pääkäyttäjä kenttälomakkeessa: Lisää toimintoja → Muokkaa menetelmiä → Osiot. Osiot voi tuoda raporttiin kahdella tavalla, ja niitä voi myös yhdistää.</p>
+      <p class="hint">Kirjauksen ensimmäinen kenttä on <b>osio</b> (esim. Alapohja). Osio kokoaa saman osion kirjaukset raportissa saman pääotsikon alle; osion nimeä ei tulosteta muualle. Osiolistan määrittää pääkäyttäjä kenttälomakkeessa: Lisää toimintoja → Muokkaa menetelmiä → Osiot. Osiot voi tuoda raporttiin kahdella tavalla, ja niitä voi myös yhdistää.</p>
       <ol class="osio-steps">
         <li><b>Kaikki kerralla:</b> kirjoita omaksi kappaleekseen <code>{{kirjaukset osioittain}}</code>. Jokaisesta osiosta tulee pääotsikko osiolistan järjestyksessä, ja kirjaukset tulevat sen alle.</li>
-        <li><b>Pohjan omien otsikoiden alle:</b> jos pohjassa on jo otsikko, esim. ”5.1 Alapohja” vakioteksteineen, kirjoita sen alle omaksi kappaleekseen <code>{{osio:Alapohja}}</code>. Kirjaukset tulevat otsikon alle, eikä uutta otsikkoa synny.</li>
+        <li><b>Pohjan omien otsikoiden alle automaattisesti:</b> jos pohjassa on jo otsikko, jonka nimi on sama kuin osion (esim. osio ”Alapohja” ja otsikko ”5.1 Alapohja”), osion kirjaukset tulevat sen otsikon alle, otsikon muun sisällön perään, eikä otsikkoa toisteta. Numerointi ja kirjainkoko eivät haittaa. Tämä toimii, kun pohjassa on <code>{{kirjaukset osioittain}}</code>.</li>
+        <li><b>Tarkka paikka:</b> jos haluat kirjaukset tiettyyn kohtaan otsikon alla (esim. vakiotekstin väliin), kirjoita siihen omaksi kappaleekseen <code>{{osio:Alapohja}}</code>.</li>
         <li><b>Yhdistelmä:</b> osioita, joilla on oma <code>{{osio:…}}</code>-merkintä, ei toisteta <code>{{kirjaukset osioittain}}</code>-kohdassa. Siihen kootaan loput osiot (myös itse kirjoitetut ja ”Muut havainnot”), joten mikään kirjaus ei jää pois.</li>
         <li><b>Tyhjät osiot pois:</b> jos osiolla ei ole kirjauksia, otsikko ja vakioteksti voidaan poistaa raportista: <code>{{jos osio:Alapohja}}</code> otsikon edelle ja <code>{{/jos}}</code> osion loppuun.</li>
       </ol>

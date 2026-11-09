@@ -253,3 +253,10 @@ Service workerin välimuistin versio on nostettu (`aloitussivu-v20`).
 - **Samannimiset taulukkokentät:** jos menetelmässä on useita samannimisiä taulukkokenttiä, joista näkyy ehdon mukaan vain yksi (esimerkiksi eri Mittausarvot-taulukko kullekin mittausmenetelmälle), `{{rivit:…}}` käyttää kirjauksessa näkyvää taulukkoa, jossa on rivejä. Aiemmin käytettiin aina ensimmäistä, joten porareikämittausten rivit jäivät pois.
 - **Nimellä kirjoitetut kentät:** samannimisistä kentistä näkyvä voittaa.
 - **Piilotetun kentän varoitus kertoo syyn,** esimerkiksi: näyttöehto ei täyty: ”Mittausmenetelmä” on (=) ”Näytepala” (nyt ”Porareikä”).
+
+## Osio vain otsikointiin (aloitussivu-v31)
+
+- **Osio pääotsikkona:** osio kokoaa saman osion kirjaukset raportissa saman pääotsikon alle. Osion nimeä ei enää tulosteta muualle: `{{taulukko:…}}`-taulukon ensimmäisenä sarakkeena on vain vanhojen kirjausten Tunnus/Tila, eikä osio näy kenttämuistiinpanossa kenttänä.
+- **Automaattinen sijoitus:** kun pohjassa on `{{kirjaukset osioittain}}` ja pohjassa on otsikko, jonka nimi on sama kuin osion (numerointia ja kirjainkokoa huomioimatta, esim. ”5.1 Alapohja”), osion kirjaukset lisätään sen otsikon sisällön loppuun eikä otsikkoa toisteta. `{{osio:nimi}}` toimii edelleen tarkkaa sijoitusta varten.
+- **Ohjeet:** opastus on päivitetty Osiot-korttiin ja raporttipohjasivulle.
+- **RH-raporttipohja:** mittauspistetaulukon otsikossa on vain kirjauksen tunniste.
