@@ -247,3 +247,9 @@ Service workerin välimuistin versio on nostettu (`aloitussivu-v20`).
   - solun merkinnälle ei löydy saraketta (ja sarakkeet luetellaan)
 - **`{{rivit:…}}`-merkinnän taulukkokentän haku:** tähti ja yksikkö eivät vaikuta nimeen. Jos nimeä ei löydy, käytetään taulukkokenttää, jonka sarakkeisiin rivin merkinnät osuvat, ja siitä kerrotaan varoituksena.
 - **Pohjan tarkistus:** raporttipohjasivu huomauttaa jo pohjaa ladattaessa, jos `{{rivit:…}}`-merkinnän taulukkokenttää ei löydy menetelmistä.
+
+## Samannimiset taulukkokentät (aloitussivu-v30)
+
+- **Samannimiset taulukkokentät:** jos menetelmässä on useita samannimisiä taulukkokenttiä, joista näkyy ehdon mukaan vain yksi (esimerkiksi eri Mittausarvot-taulukko kullekin mittausmenetelmälle), `{{rivit:…}}` käyttää kirjauksessa näkyvää taulukkoa, jossa on rivejä. Aiemmin käytettiin aina ensimmäistä, joten porareikämittausten rivit jäivät pois.
+- **Nimellä kirjoitetut kentät:** samannimisistä kentistä näkyvä voittaa.
+- **Piilotetun kentän varoitus kertoo syyn,** esimerkiksi: näyttöehto ei täyty: ”Mittausmenetelmä” on (=) ”Näytepala” (nyt ”Porareikä”).

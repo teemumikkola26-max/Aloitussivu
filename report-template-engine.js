@@ -67,17 +67,25 @@
 
   /* Taulukkokentän haku {{rivit:…}}-merkinnälle: tunniste tai nimi; jos ei
      löydy, se taulukkokenttä, jonka sarakkeisiin rivin merkinnät osuvat parhaiten. */
-  function findRowField(m, ref, rowTags){
+  function findRowField(m, ref, rowTags, e, ctx){
     const tables = (m && m.fields || []).filter(x => x.type === "table");
-    let f = tables.find(x => x.id === ref || normLabel(x.label) === normLabel(ref));
-    if (f) return { field: f, guessed: false, tables };
-    let best = null, bestScore = 0;
-    tables.forEach(t => {
+    /* Menetelmässä voi olla useita samannimisiä taulukoita, joista näkyy vain
+       yksi (esim. eri mittausmenetelmille ehdoilla). Valitaan kirjauksessa
+       näkyvä taulukko, jossa on rivejä. */
+    const hasRows = t => Array.isArray((e && e.values || {})[t.id]) && e.values[t.id].some(r => r && Object.keys(r).some(k => k !== "_ocr" && r[k] != null && String(r[k]).trim() !== ""));
+    const vis = t => !ctx || !e || ctx.visible(e, t);
+    const pick = list => list.find(t => vis(t) && hasRows(t)) || list.find(vis) || list[0];
+    const named = tables.filter(x => x.id === ref || normLabel(x.label) === normLabel(ref));
+    if (named.length) return { field: pick(named), guessed: false, tables };
+    let bestScore = 0;
+    const scored = tables.map(t => {
       const labs = (t.columns || []).map(c => normLabel(c.label));
       const score = (rowTags || []).filter(tg => labs.indexOf(normLabel(tg)) >= 0).length;
-      if (score > bestScore){ best = t; bestScore = score; }
+      if (score > bestScore) bestScore = score;
+      return { t, score };
     });
-    return { field: bestScore >= 2 ? best : null, guessed: bestScore >= 2, tables };
+    if (bestScore < 2) return { field: null, guessed: false, tables };
+    return { field: pick(scored.filter(x => x.score === bestScore).map(x => x.t)), guessed: true, tables };
   }
   const ENTRY_KEYS = ["paikka","tunniste","osio","abs","kuvat","sijainti"];
 
@@ -336,7 +344,10 @@
         const vals = { paikka: ctx.ident(e), tunniste: ctx.ident(e), osio: ctx.osio(e) };
         m.fields.forEach(f => {
           vals[f.id] = ctx.visible(e, f) ? ctx.fieldValue(e, f) : "";
-          if (f.type !== "table" && f.label) vals["§" + normLabel(f.label)] = f.type === "date" ? fiDate(vals[f.id]) : vals[f.id];
+          if (f.type !== "table" && f.label){
+            const k = "§" + normLabel(f.label);
+            if (ctx.visible(e, f) || !Object.prototype.hasOwnProperty.call(vals, k)) vals[k] = f.type === "date" ? fiDate(vals[f.id]) : vals[f.id];
+          }
         });
         if (e.methodId === "rh") vals.abs = absHumidity((e.values || {}).rh, (e.values || {}).lampo);
         vals.sijainti = markerText(e);
@@ -685,7 +696,7 @@
       const ref = /\{\{\s*rivit:([^}]+)\}\}/.exec(rowText)[1].trim();
       const m = ctx.methods[e.methodId];
       const tags = (rowText.match(TAG_RE) || []).map(t => t.slice(2, -2).trim()).filter(t => !/^rivit:/.test(t));
-      const hit = findRowField(m, ref, tags);
+      const hit = findRowField(m, ref, tags, e, ctx);
       const f = hit.field;
       const mname = m ? m.name : e.methodId;
       if (!f){
@@ -696,7 +707,8 @@
       }
       if (hit.guessed) warnOnce(ctx, "Pohjan merkintä {{rivit:" + ref + "}}: menetelmässä ”" + mname + "” ei ole tämännimistä taulukkokenttää, joten käytettiin kenttää ”" + f.label + "”. Korjaa nimi pohjaan.");
       if (!ctx.visible(e, f)){
-        warnOnce(ctx, "Kirjauksessa ”" + (ctx.ident(e) || mname) + "” kenttä ”" + f.label + "” on piilotettu ehdolla, joten sen rivejä ei tuotu raporttiin.");
+        const why = e.hiddenWhy && e.hiddenWhy[f.id] ? " (" + e.hiddenWhy[f.id] + ")" : "";
+        warnOnce(ctx, "Kirjauksessa ”" + (ctx.ident(e) || mname) + "” kenttä ”" + f.label + "” on piilotettu" + why + ", joten sen rivejä ei tuotu raporttiin.");
       }
       desc(tr, "w:color").forEach(c => { if (PLACEHOLDER_REDS[(attr(c, "w:val") || "").toUpperCase()]) remove(c); });
       const cols = (f.columns || []).filter(c => c.label && String(c.label).trim());

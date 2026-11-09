@@ -1,4 +1,4 @@
-# Päivitys v20–v29: asennusohje
+# Päivitys v20–v30: asennusohje
 
 Paketti sisältää koko sovelluksen. Muutokset on tehty lähetettyyn versioon
 (aloitussivu-v19), joten aiemmat muutoksesi ovat tallessa. Muutokset on
@@ -12,8 +12,7 @@ kuvattu tarkemmin tiedostossa MUUTOKSET-2026-11.md.
 
    Jos olet jo ajanut ne, tätä ei tarvitse toistaa.
 2. **Korvaa palvelimen tiedostot tämän paketin tiedostoilla.**
-   Helpointa on viedä koko kansio.
-3. **Avaa sovellus.** Service worker (`aloitussivu-v29`) hakee uudet tiedostot
+3. **Avaa sovellus.** Service worker (`aloitussivu-v30`) hakee uudet tiedostot
    automaattisesti.
 
 ## Versioiden sisältö
@@ -27,4 +26,5 @@ kuvattu tarkemmin tiedostossa MUUTOKSET-2026-11.md.
 - **v26:** osiot raportin pääotsikoina, Tunnus/Tila korvattu osiolla ja menetelmän ensimmäisellä kentällä
 - **v27:** osiot pohjan omien otsikoiden alle ja opastus
 - **v28:** taulukkokentän rivit raporttiin (`{{rivit:…}}`), kentät nimellä merkinnöissä
-- **v29:** raportin varoitukset selkokielellä, joustavampi taulukkokentän haku
+- **v29:** raportin varoitukset selkokielellä
+- **v30:** samannimisistä taulukkokentistä käytetään näkyvää, ja piilotuksen syy kerrotaan

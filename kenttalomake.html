@@ -9751,6 +9751,23 @@ async function photoForReport(p){
   return {bytes,width:n.width,height:n.height,caption:p.caption||""};
 }
 
+/* Selkokielinen syy, miksi kenttä on piilotettu (raportin varoituksiin). */
+function hiddenReason(m,values,f,vis){
+  const byId={};
+  m.fields.forEach(x=>{ byId[x.id]=x; });
+  const fails=(Array.isArray(f.showIf)?f.showIf:[]).map(c=>{
+    const src=byId[c.fieldId];
+    if(!src||src.type==="table")return null;
+    const raw=vis[src.id]?values[src.id]:undefined;
+    if(evalCondition(c,src.type,raw,false))return null;
+    const op=(condOpsForType(src.type).find(o=>o.value===c.op)||{label:c.op}).label;
+    const cur=raw===undefined||raw===null||String(raw).trim()===""?"tyhjä":"”"+String(raw)+"”";
+    return "”"+src.label+"” "+op+(c.value!==undefined&&c.value!==""?" ”"+c.value+"”":"")+" (nyt "+cur+")";
+  }).filter(Boolean);
+  if(fails.length)return "näyttöehto ei täyty: "+fails.join(f.showMode==="any"?" tai ":" ja ");
+  return "edellinen kenttä ohittaa sen siirtymällä";
+}
+
 async function exportWithTemplate(tpl){
   if(!window.ReportTemplateEngine||!window.JSZip){
     toast("Raporttimoottoria ei saatu ladattua. Tarkista verkkoyhteys ja yritä uudelleen.");
@@ -9772,8 +9789,13 @@ async function exportWithTemplate(tpl){
       const m=METHODS.find(x=>x.id===e.methodId);
       if(!m)continue;
       const vis=computeFieldVisibility(m.fields,e.values||{});
-      const hidden={};
-      m.fields.forEach(f=>{if(vis[f.id]===false)hidden[f.id]=true;});
+      const hidden={},hiddenWhy={};
+      m.fields.forEach(f=>{
+        if(vis[f.id]===false){
+          hidden[f.id]=true;
+          hiddenWhy[f.id]=hiddenReason(m,e.values||{},f,vis);
+        }
+      });
       const photos=[];
       for(const p of (e.photos||[])){
         const ph=await photoForReport(p);
@@ -9786,6 +9808,7 @@ async function exportWithTemplate(tpl){
         methodId:e.methodId,
         values:Object.assign({},e.values||{}),
         hidden,
+        hiddenWhy,
         marker:!!e.marker,
         markerLabel:label,
         photos
