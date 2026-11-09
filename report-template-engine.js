@@ -36,6 +36,8 @@
      {{toista:id}} ... {{/toista}}   osa toistetaan jokaiselle kirjaukselle
    Taulukot:
      {{rivi:id}} rivin solussa -> rivi toistetaan jokaiselle kirjaukselle
+     {{rivi:id}}{{rivit:kenttä}} -> kaikkien kirjausten taulukkokentän rivit
+                                    samaan taulukkoon ({{tunniste}} kertoo pisteen)
    Kirjauskohtaiset (toisto- ja rivipohjissa):
      {{osio}} {{tunniste}} {{<kentän id>}} {{abs}} {{kuvat}} {{sijainti}}
      ({{paikka}} = {{tunniste}}, säilytetty vanhoja pohjia varten)
@@ -896,7 +898,10 @@
           const c = clone(tr); stripIds(c);
           const vals = ctx.entryVals(e); vals["rivi:" + m[1]] = "";
           insertBefore(tr, c);
-          replaceInline(ctx, c, vals, false);
+          /* {{rivi:id}} + {{rivit:kenttä}} samalla rivillä: kaikkien kirjausten
+             taulukkokentän rivit yhteen taulukkoon (esim. olosuhteet). */
+          if (/\{\{\s*rivit:/.test(textOf(c))) expandFieldRows(ctx, c, e, vals);
+          else replaceInline(ctx, c, vals, false);
         });
         remove(tr);
       });

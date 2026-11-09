@@ -260,3 +260,9 @@ Service workerin välimuistin versio on nostettu (`aloitussivu-v20`).
 - **Automaattinen sijoitus:** kun pohjassa on `{{kirjaukset osioittain}}` ja pohjassa on otsikko, jonka nimi on sama kuin osion (numerointia ja kirjainkokoa huomioimatta, esim. ”5.1 Alapohja”), osion kirjaukset lisätään sen otsikon sisällön loppuun eikä otsikkoa toisteta. `{{osio:nimi}}` toimii edelleen tarkkaa sijoitusta varten.
 - **Ohjeet:** opastus on päivitetty Osiot-korttiin ja raporttipohjasivulle.
 - **RH-raporttipohja:** mittauspistetaulukon otsikossa on vain kirjauksen tunniste.
+
+## Kaikkien kirjausten taulukkorivit samaan taulukkoon (aloitussivu-v32)
+
+- **Uusi yhdistelmä `{{rivi:id}}{{rivit:kenttä}}` Word-taulukon rivissä:** rivi toistetaan jokaisen kirjauksen taulukkokentän jokaiselle riville samassa taulukossa. Esimerkiksi kaikkien mittauspisteiden ympäröivät olosuhteet saadaan yhteen taulukkoon.
+- **Tunniste:** samalla rivillä `{{tunniste}}` kertoo, mistä kirjauksesta rivi on.
+- **Ohje:** raporttipohjasivun merkintäohje on päivitetty.
