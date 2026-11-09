@@ -237,3 +237,13 @@ Service workerin välimuistin versio on nostettu (`aloitussivu-v20`).
 - **`{{Abs}}`** lasketaan RH:sta ja lämpötilasta, jos sarake puuttuu tai on tyhjä.
 - **Pohjan tarkistus** tunnistaa uudet merkinnät, ja raporttipohjasivun ohje on päivitetty.
 - **Uusi raporttipohja:** rakenteiden kosteusmittausraportin pohja (RH-mittaukset), johon merkinnät on valmiiksi lisätty.
+
+## Raportin varoitukset näkyviin (aloitussivu-v29)
+
+- **Varoitukset dialogissa:** raportin muodostuksen jälkeen varoitukset näytetään selkokielisinä, eikä pelkkänä lukumääränä. Esimerkiksi:
+  - pohjan taulukkokenttää ei löydy (ja menetelmän taulukkokentät luetellaan)
+  - kirjauksen taulukossa ei ole rivejä
+  - kenttä on piilotettu ehdolla
+  - solun merkinnälle ei löydy saraketta (ja sarakkeet luetellaan)
+- **`{{rivit:…}}`-merkinnän taulukkokentän haku:** tähti ja yksikkö eivät vaikuta nimeen. Jos nimeä ei löydy, käytetään taulukkokenttää, jonka sarakkeisiin rivin merkinnät osuvat, ja siitä kerrotaan varoituksena.
+- **Pohjan tarkistus:** raporttipohjasivu huomauttaa jo pohjaa ladattaessa, jos `{{rivit:…}}`-merkinnän taulukkokenttää ei löydy menetelmistä.

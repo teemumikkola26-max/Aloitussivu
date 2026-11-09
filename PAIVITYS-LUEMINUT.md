@@ -1,4 +1,4 @@
-# Päivitys v20–v28: asennusohje
+# Päivitys v20–v29: asennusohje
 
 Paketti sisältää koko sovelluksen. Muutokset on tehty lähetettyyn versioon
 (aloitussivu-v19), joten aiemmat muutoksesi ovat tallessa. Muutokset on
@@ -10,39 +10,11 @@ kuvattu tarkemmin tiedostossa MUUTOKSET-2026-11.md.
    - `supabase-paakayttajat.sql`
    - `supabase-osiot.sql`
 
-   Ajo on turvallista toistaa.
+   Jos olet jo ajanut ne, tätä ei tarvitse toistaa.
 2. **Korvaa palvelimen tiedostot tämän paketin tiedostoilla.**
    Helpointa on viedä koko kansio.
-3. **Avaa sovellus.** Service worker (`aloitussivu-v28`) hakee uudet tiedostot
+3. **Avaa sovellus.** Service worker (`aloitussivu-v29`) hakee uudet tiedostot
    automaattisesti.
-4. **Pääkäyttäjänä:**
-   - Valitse pääkäyttäjät: Asetukset ja ylläpito → Käyttäjät.
-   - Lisää osiot ja oletusosiot.
-   - Tarkista menetelmien ensimmäiset kentät (kirjauksen tunniste).
-   - Lataa raporttipohjat Raporttipohjat-sivulla.
-
-## Muuttuneet tiedostot
-
-Uudet tiedostot:
-
-- `lukulaite-ocr.js`
-- `formula.js`
-- `supabase-paakayttajat.sql`
-- `supabase-osiot.sql`
-
-Muutetut tiedostot:
-
-- `kenttalomake.html`
-- `index.html`
-- `users.js`
-- `report-template-engine.js`
-- `raporttipohjat.html`
-- `editor-runtime.js`
-- `form-runtime.js`
-- `form.html`
-- `editor.html`
-- `sw.js`
-- `MUUTOKSET-2026-11.md`
 
 ## Versioiden sisältö
 
@@ -55,3 +27,4 @@ Muutetut tiedostot:
 - **v26:** osiot raportin pääotsikoina, Tunnus/Tila korvattu osiolla ja menetelmän ensimmäisellä kentällä
 - **v27:** osiot pohjan omien otsikoiden alle ja opastus
 - **v28:** taulukkokentän rivit raporttiin (`{{rivit:…}}`), kentät nimellä merkinnöissä
+- **v29:** raportin varoitukset selkokielellä, joustavampi taulukkokentän haku

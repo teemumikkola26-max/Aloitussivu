@@ -63,7 +63,22 @@
   const normOsio = s => String(s || "").replace(/\s+/g, " ").trim().toLowerCase();
   /* Kentän/sarakkeen nimi merkintänä: kirjainkoko, sulkeissa oleva yksikkö
      ja loppupiste eivät vaikuta ("Abs. (g/m³)" = "abs"). */
-  const normLabel = s => String(s || "").replace(/\([^)]*\)|\[[^\]]*\]/g, " ").replace(/\s+/g, " ").trim().replace(/[.:]+$/, "").trim().toLowerCase();
+  const normLabel = s => String(s || "").replace(/\([^)]*\)|\[[^\]]*\]/g, " ").replace(/\*/g, " ").replace(/\s+/g, " ").trim().replace(/[.:]+$/, "").trim().toLowerCase();
+
+  /* Taulukkokentän haku {{rivit:…}}-merkinnälle: tunniste tai nimi; jos ei
+     löydy, se taulukkokenttä, jonka sarakkeisiin rivin merkinnät osuvat parhaiten. */
+  function findRowField(m, ref, rowTags){
+    const tables = (m && m.fields || []).filter(x => x.type === "table");
+    let f = tables.find(x => x.id === ref || normLabel(x.label) === normLabel(ref));
+    if (f) return { field: f, guessed: false, tables };
+    let best = null, bestScore = 0;
+    tables.forEach(t => {
+      const labs = (t.columns || []).map(c => normLabel(c.label));
+      const score = (rowTags || []).filter(tg => labs.indexOf(normLabel(tg)) >= 0).length;
+      if (score > bestScore){ best = t; bestScore = score; }
+    });
+    return { field: bestScore >= 2 ? best : null, guessed: bestScore >= 2, tables };
+  }
   const ENTRY_KEYS = ["paikka","tunniste","osio","abs","kuvat","sijainti"];
 
   /* ------------------------------------------------------------------
@@ -666,18 +681,38 @@
     const trs = (rootEl.name === "w:tr" ? [rootEl] : desc(rootEl, "w:tr"))
       .filter(tr => /\{\{\s*rivit:[^}]+\}\}/.test(textOf(tr)));
     trs.forEach(tr => {
-      const ref = /\{\{\s*rivit:([^}]+)\}\}/.exec(textOf(tr))[1].trim();
+      const rowText = textOf(tr);
+      const ref = /\{\{\s*rivit:([^}]+)\}\}/.exec(rowText)[1].trim();
       const m = ctx.methods[e.methodId];
-      const f = m && m.fields.find(x => x.type === "table" && (x.id === ref || normLabel(x.label) === normLabel(ref)));
+      const tags = (rowText.match(TAG_RE) || []).map(t => t.slice(2, -2).trim()).filter(t => !/^rivit:/.test(t));
+      const hit = findRowField(m, ref, tags);
+      const f = hit.field;
+      const mname = m ? m.name : e.methodId;
       if (!f){
-        ctx.warnings.push("Taulukkokenttää ”" + ref + "” ei löytynyt menetelmästä " + (m ? m.name : e.methodId));
+        warnOnce(ctx, "Taulukkokenttää ”" + ref + "” ei löytynyt menetelmästä ”" + mname + "”. Menetelmän taulukkokentät: " +
+          (hit.tables.length ? hit.tables.map(t => "”" + t.label + "”").join(", ") : "ei yhtään") + ". Korjaa nimi pohjan merkintään {{rivit:…}}.");
         remove(tr);
         return;
+      }
+      if (hit.guessed) warnOnce(ctx, "Pohjan merkintä {{rivit:" + ref + "}}: menetelmässä ”" + mname + "” ei ole tämännimistä taulukkokenttää, joten käytettiin kenttää ”" + f.label + "”. Korjaa nimi pohjaan.");
+      if (!ctx.visible(e, f)){
+        warnOnce(ctx, "Kirjauksessa ”" + (ctx.ident(e) || mname) + "” kenttä ”" + f.label + "” on piilotettu ehdolla, joten sen rivejä ei tuotu raporttiin.");
       }
       desc(tr, "w:color").forEach(c => { if (PLACEHOLDER_REDS[(attr(c, "w:val") || "").toUpperCase()]) remove(c); });
       const cols = (f.columns || []).filter(c => c.label && String(c.label).trim());
       const data = ctx.visible(e, f) && Array.isArray((e.values || {})[f.id]) ? e.values[f.id] : [];
       const rows = data.filter(r => r && cols.some(c => r[c.id] != null && String(r[c.id]).trim() !== ""));
+      if (!rows.length && ctx.visible(e, f)){
+        warnOnce(ctx, "Kirjauksessa ”" + (ctx.ident(e) || mname) + "” ei ole rivejä kentässä ”" + f.label + "”.");
+      }
+      /* Solun merkintä, joka ei vastaa yhtään saraketta, kerrotaan kerran. */
+      tags.forEach(tg => {
+        const n = normLabel(tg);
+        const known = n === "abs" || cols.some(c => c.id === tg || normLabel(c.label) === n) ||
+          Object.prototype.hasOwnProperty.call(vals, tg) || Object.prototype.hasOwnProperty.call(vals, "§" + n) ||
+          Object.prototype.hasOwnProperty.call(ctx.glob, tg);
+        if (!known) warnOnce(ctx, "Pohjan merkinnälle {{" + tg + "}} ei löytynyt saraketta kentästä ”" + f.label + "”. Sarakkeet: " + cols.map(c => "”" + c.label + "”").join(", ") + ".");
+      });
       const find = re => cols.find(c => re.test(normLabel(c.label)));
       rows.forEach(r => {
         const rv = Object.assign({}, vals);
@@ -704,6 +739,8 @@
       remove(tr);
     });
   }
+
+  function warnOnce(ctx, msg){ if (ctx.warnings.indexOf(msg) < 0) ctx.warnings.push(msg); }
 
   function stripIds(e){
     desc(e, "w:bookmarkStart").concat(desc(e, "w:bookmarkEnd")).forEach(remove);
@@ -928,6 +965,15 @@
           }
           const tr = ancestor(p, "w:tr");
           const inRow = !!(tr && /\{\{rivi:/.test(textOf(tr)));
+          if (!ok && /^rivit:/.test(nm) && (methods || []).length){
+            const ref = nm.slice(6).trim();
+            const tablesAll = [];
+            (methods || []).forEach(mm => (mm.fields || []).forEach(f => { if (f.type === "table") tablesAll.push(f); }));
+            if (!tablesAll.some(f => f.id === ref || normLabel(f.label) === normLabel(ref))){
+              notices.push(tag + ": taulukkokenttää ”" + ref + "” ei löytynyt menetelmistä. Taulukkokentät: " +
+                (tablesAll.length ? tablesAll.map(f => "”" + f.label + "”").filter((x, i, a) => a.indexOf(x) === i).join(", ") : "ei yhtään") + ".");
+            }
+          }
           if (!ok && (inEntryScope || inRow) && (ENTRY_KEYS.indexOf(nm) >= 0 || fieldIds[nm] || labels[normLabel(nm)] || /^rivit:/.test(nm))) ok = true;
           found.push(tag);
           if (!ok) unknown.push(tag);

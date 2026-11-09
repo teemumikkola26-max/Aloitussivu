@@ -9809,9 +9809,18 @@ async function exportWithTemplate(tpl){
     window.ReportTemplates.setLastUsed(FORM_KEY,tpl.id);
     const notes=[];
     if(missingPhotos)notes.push(missingPhotos+" kuvaa puuttui");
-    if(res.warnings.length)notes.push("pohjassa "+res.warnings.length+" tuntematonta merkintää");
-    toast("Raportti ladattu"+(notes.length?" – "+notes.join(", "):""));
     if(res.warnings.length)console.warn("Raporttipohjan varoitukset",res.warnings);
+    if(res.warnings.length && window.AppUI){
+      /* Varoitukset näytetään selkokielellä, jotta pohjan virheen voi korjata. */
+      window.AppUI.choose({
+        title:"Raportti ladattu – tarkista nämä",
+        text:(notes.length?notes.join(", ")+".\n\n":"")+res.warnings.slice(0,8).map(w=>"• "+w).join("\n\n")+
+          (res.warnings.length>8?"\n\n…ja "+(res.warnings.length-8)+" muuta.":""),
+        actions:[{label:"Selvä",value:"ok",kind:"primary"}]
+      });
+    }else{
+      toast("Raportti ladattu"+(notes.length?" – "+notes.join(", "):""));
+    }
   }catch(err){
     console.error(err);
     toast("Raportin muodostus epäonnistui: "+(err.message||"tuntematon virhe"));
