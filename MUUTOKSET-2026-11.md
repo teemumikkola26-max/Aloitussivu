@@ -229,3 +229,11 @@ Service workerin välimuistin versio on nostettu (`aloitussivu-v20`).
 - **Opastus:**
   - Raporttipohjasivulla on oma ohje "Osiot raportin otsikoina": vaiheittainen selitys, esimerkkipohja ja nykyiset osiot merkintöineen kopioitavina.
   - Kenttälomakkeen Osiot-kortissa on lyhyt ohje ja linkki suoraan tähän ohjeeseen.
+
+## Taulukkokentän rivit raporttiin (aloitussivu-v28)
+
+- **Uusi merkintä `{{rivit:kenttä}}` toistolohkossa (`{{toista:id}}`):** Word-taulukon rivi toistetaan kirjauksen taulukkokentän jokaiselle riville, esimerkiksi RH-mittauksen Mittausarvot-taulukon jokaiselle mittaussyvyydelle. Tyhjät rivit ohitetaan.
+- **Kentät ja sarakkeet nimellä:** toistossa ja rivisoluissa kentät ja sarakkeet voi kirjoittaa nimellä, esimerkiksi `{{Pvm}}`, `{{Syvyys}}`, `{{RH}}`, `{{Lämpötila}}`, `{{Abs}}`, `{{Anturi}}` tai `{{Tasaantumisaika}}`. Kirjainkoko, sulkeissa oleva yksikkö ja loppupiste eivät vaikuta.
+- **`{{Abs}}`** lasketaan RH:sta ja lämpötilasta, jos sarake puuttuu tai on tyhjä.
+- **Pohjan tarkistus** tunnistaa uudet merkinnät, ja raporttipohjasivun ohje on päivitetty.
+- **Uusi raporttipohja:** rakenteiden kosteusmittausraportin pohja (RH-mittaukset), johon merkinnät on valmiiksi lisätty.

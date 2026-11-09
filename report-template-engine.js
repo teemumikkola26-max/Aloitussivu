@@ -24,6 +24,14 @@
    Ehdot ja toistot (omat kappaleensa):
      {{jos:id[,id]}} ... {{/jos}}    osa jää pois, jos menetelmää ei käytetty
      {{jos osio:nimi}} ... {{/jos}}  osa jää pois, jos osiossa ei ole kirjauksia
+
+   Toistossa ({{toista:id}}) kentät voi kirjoittaa myös nimellä, esim.
+   {{Tasaantumisaika}}. Nimi verrataan kirjainkoosta ja sulkeissa olevasta
+   yksiköstä riippumatta ({{RH}} = kenttä "RH (%)").
+   Taulukkokentän rivit: Word-taulukon rivi, jossa on {{rivit:Mittausarvot}},
+   toistetaan kirjauksen taulukkokentän jokaiselle riville; rivin soluihin
+   sarakkeet nimellä, esim. {{Pvm}} {{Syvyys}} {{RH}} {{Lämpötila}} {{Abs}}.
+   {{Abs}} lasketaan RH:sta ja lämpötilasta, jos sarake on tyhjä.
      {{toista:id}} ... {{/toista}}   osa toistetaan jokaiselle kirjaukselle
    Taulukot:
      {{rivi:id}} rivin solussa -> rivi toistetaan jokaiselle kirjaukselle
@@ -53,6 +61,9 @@
   const BLOCK_PREFIXES = ["menetelmä:","taulukko:","kuvat:","osio:"];
   /* Osion nimet verrataan kirjainkoosta ja välilyönneistä riippumatta. */
   const normOsio = s => String(s || "").replace(/\s+/g, " ").trim().toLowerCase();
+  /* Kentän/sarakkeen nimi merkintänä: kirjainkoko, sulkeissa oleva yksikkö
+     ja loppupiste eivät vaikuta ("Abs. (g/m³)" = "abs"). */
+  const normLabel = s => String(s || "").replace(/\([^)]*\)|\[[^\]]*\]/g, " ").replace(/\s+/g, " ").trim().replace(/[.:]+$/, "").trim().toLowerCase();
   const ENTRY_KEYS = ["paikka","tunniste","osio","abs","kuvat","sijainti"];
 
   /* ------------------------------------------------------------------
@@ -308,7 +319,10 @@
       entryVals(e){
         const m = methods[e.methodId];
         const vals = { paikka: ctx.ident(e), tunniste: ctx.ident(e), osio: ctx.osio(e) };
-        m.fields.forEach(f => { vals[f.id] = ctx.visible(e, f) ? ctx.fieldValue(e, f) : ""; });
+        m.fields.forEach(f => {
+          vals[f.id] = ctx.visible(e, f) ? ctx.fieldValue(e, f) : "";
+          if (f.type !== "table" && f.label) vals["§" + normLabel(f.label)] = f.type === "date" ? fiDate(vals[f.id]) : vals[f.id];
+        });
         if (e.methodId === "rh") vals.abs = absHumidity((e.values || {}).rh, (e.values || {}).lampo);
         vals.sijainti = markerText(e);
         return vals;
@@ -317,6 +331,7 @@
         const name = tag.slice(2, -2).trim();
         if (ev && Object.prototype.hasOwnProperty.call(ev, name)) return ev[name];
         if (Object.prototype.hasOwnProperty.call(ctx.glob, name)) return ctx.glob[name];
+        if (ev && Object.prototype.hasOwnProperty.call(ev, "§" + normLabel(name))) return ev["§" + normLabel(name)];
         if (name.indexOf("lkm:") === 0) return String(ctx.of(name.slice(4)).length);
         return null;
       }
@@ -644,6 +659,52 @@
     });
   }
 
+  /* Word-taulukon rivi, jossa on {{rivit:kenttä}}, toistetaan kirjauksen
+     taulukkokentän jokaiselle (ei-tyhjälle) riville. Solujen merkinnät ovat
+     sarakkeiden nimiä tai tunnisteita. Jos rivejä ei ole, rivi poistetaan. */
+  function expandFieldRows(ctx, rootEl, e, vals){
+    const trs = (rootEl.name === "w:tr" ? [rootEl] : desc(rootEl, "w:tr"))
+      .filter(tr => /\{\{\s*rivit:[^}]+\}\}/.test(textOf(tr)));
+    trs.forEach(tr => {
+      const ref = /\{\{\s*rivit:([^}]+)\}\}/.exec(textOf(tr))[1].trim();
+      const m = ctx.methods[e.methodId];
+      const f = m && m.fields.find(x => x.type === "table" && (x.id === ref || normLabel(x.label) === normLabel(ref)));
+      if (!f){
+        ctx.warnings.push("Taulukkokenttää ”" + ref + "” ei löytynyt menetelmästä " + (m ? m.name : e.methodId));
+        remove(tr);
+        return;
+      }
+      desc(tr, "w:color").forEach(c => { if (PLACEHOLDER_REDS[(attr(c, "w:val") || "").toUpperCase()]) remove(c); });
+      const cols = (f.columns || []).filter(c => c.label && String(c.label).trim());
+      const data = ctx.visible(e, f) && Array.isArray((e.values || {})[f.id]) ? e.values[f.id] : [];
+      const rows = data.filter(r => r && cols.some(c => r[c.id] != null && String(r[c.id]).trim() !== ""));
+      const find = re => cols.find(c => re.test(normLabel(c.label)));
+      rows.forEach(r => {
+        const rv = Object.assign({}, vals);
+        rv["rivit:" + ref] = "";
+        cols.forEach(c => {
+          const raw = r[c.id];
+          const v = raw == null || String(raw).trim() === "" ? "" :
+            ((c.type === "number" || c.type === "calc") ? fmtNumKeep(raw) : (c.type === "date" ? fiDate(raw) : String(raw)));
+          rv[c.id] = v;
+          rv["§" + normLabel(c.label)] = v;
+        });
+        /* Absoluuttinen kosteus lasketaan, jos sarake puuttuu tai on tyhjä. */
+        if (!rv["§abs"]){
+          const cRh = find(/^rh\b|suhteellinen/), cT = find(/^t$|lämpötila|lampotila/);
+          if (cRh && cT && r[cRh.id] != null && r[cT.id] != null && String(r[cRh.id]).trim() && String(r[cT.id]).trim()){
+            rv["§abs"] = absHumidity(r[cRh.id], r[cT.id]);
+          }
+        }
+        const c2 = clone(tr); stripIds(c2);
+        desc(c2, "w:vMerge").forEach(remove);
+        insertBefore(tr, c2);
+        replaceInline(ctx, c2, rv, false);
+      });
+      remove(tr);
+    });
+  }
+
   function stripIds(e){
     desc(e, "w:bookmarkStart").concat(desc(e, "w:bookmarkEnd")).forEach(remove);
     (function w(n){ if (n.t !== "el") return; delAttr(n, "w14:paraId"); delAttr(n, "w14:textId"); n.children.forEach(w); })(e);
@@ -722,6 +783,7 @@
           }
           const c = clone(src); stripIds(c);
           insertBefore(b, c);
+          expandFieldRows(ctx, c, e, vals);
           replaceInline(ctx, c, vals);
         });
       });
@@ -836,6 +898,10 @@
     if (!zip.file("word/document.xml")) throw new Error("Tiedosto ei ole Word-asiakirja (.docx)");
     const ids = {}; (methods || []).forEach(m => { ids[m.id] = m; });
     const fieldIds = {}; (methods || []).forEach(m => (m.fields || []).forEach(f => { fieldIds[f.id] = 1; }));
+    const labels = { abs:1 }; (methods || []).forEach(m => (m.fields || []).forEach(f => {
+      if (f.label) labels[normLabel(f.label)] = 1;
+      (f.columns || []).forEach(c => { if (c.label) labels[normLabel(c.label)] = 1; fieldIds[c.id] = 1; });
+    }));
     const found = [], unknown = [];
     const names = Object.keys(zip.files).filter(n => /^word\/(document|header\d+|footer\d+)\.xml$/.test(n));
     let inEntryScope = false;
@@ -862,7 +928,7 @@
           }
           const tr = ancestor(p, "w:tr");
           const inRow = !!(tr && /\{\{rivi:/.test(textOf(tr)));
-          if (!ok && (inEntryScope || inRow) && (ENTRY_KEYS.indexOf(nm) >= 0 || fieldIds[nm])) ok = true;
+          if (!ok && (inEntryScope || inRow) && (ENTRY_KEYS.indexOf(nm) >= 0 || fieldIds[nm] || labels[normLabel(nm)] || /^rivit:/.test(nm))) ok = true;
           found.push(tag);
           if (!ok) unknown.push(tag);
         });
