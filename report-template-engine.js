@@ -90,7 +90,7 @@
     if (bestScore < 2) return { field: null, guessed: false, tables };
     return { field: pick(scored.filter(x => x.score === bestScore).map(x => x.t)), guessed: true, tables };
   }
-  const ENTRY_KEYS = ["paikka","tunniste","osio","abs","kuvat","sijainti"];
+  const ENTRY_KEYS = ["paikka","tunniste","osio","abs","kuvat","sijainti","huomiot"];
 
   /* ------------------------------------------------------------------
      Pieni XML-puu: { t:"el", name, attrs:[[k,v]], children:[], parent }
@@ -321,8 +321,14 @@
         raporttipvm: fiDate(reportIso), projektinumero: p.projektinumero || ""
       },
       of(ids){
+        /* Menetelmän voi antaa tunnisteella tai nimellä ({{toista:Märkätilakartoitus}}). */
         const list = String(ids).split(",").map(s => s.trim());
-        return entries.filter(e => list.indexOf(e.methodId) >= 0);
+        const keys = list.map(normLabel);
+        return entries.filter(e => {
+          if (list.indexOf(e.methodId) >= 0) return true;
+          const m = methods[e.methodId];
+          return !!m && (keys.indexOf(normLabel(m.name)) >= 0 || (m.short && keys.indexOf(normLabel(m.short)) >= 0));
+        });
       },
       fieldValue(e, f){
         const v = (e.values || {})[f.id];
@@ -344,7 +350,7 @@
       ownOsiot: {},   /* pohjassa omalla {{osio:nimi}}-merkinnällä sijoitetut osiot */
       entryVals(e){
         const m = methods[e.methodId];
-        const vals = { paikka: ctx.ident(e), tunniste: ctx.ident(e), osio: ctx.osio(e) };
+        const vals = { paikka: ctx.ident(e), tunniste: ctx.ident(e), osio: ctx.osio(e), huomiot: String((e.values || {}).huomiot || "").trim() };
         m.fields.forEach(f => {
           vals[f.id] = ctx.visible(e, f) ? ctx.fieldValue(e, f) : "";
           if (f.type !== "table" && f.label){
@@ -748,9 +754,25 @@
         const c2 = clone(tr); stripIds(c2);
         desc(c2, "w:vMerge").forEach(remove);
         insertBefore(tr, c2);
+        dropEmptyLines(ctx, c2, rv);
         replaceInline(ctx, c2, rv, false);
       });
       remove(tr);
+    });
+  }
+
+  /* Solussa, jossa on useita kappaleita, kappale jätetään pois, jos kaikki
+     sen merkinnät ovat tyhjiä (esim. "Allaskaappi: {{Allaskaappi}}" pesuhuoneessa). */
+  function dropEmptyLines(ctx, rowEl, rv){
+    desc(rowEl, "w:tc").forEach(tc => {
+      const ps = kids(tc, "w:p");
+      if (ps.length < 2) return;
+      ps.forEach(p => {
+        const tags = (ptext(p).match(TAG_RE) || []).filter(t => !/^\{\{\s*rivit?:/.test(t));
+        if (!tags.length) return;
+        const empty = tags.every(t => { const v = ctx.resolve(t, rv); return v === null || String(v).trim() === ""; });
+        if (empty && kids(tc, "w:p").length > 1) remove(p);
+      });
     });
   }
 
@@ -986,7 +1008,7 @@
     const notices = [];
     const zip = await JSZipLib.loadAsync(templateBytes);
     if (!zip.file("word/document.xml")) throw new Error("Tiedosto ei ole Word-asiakirja (.docx)");
-    const ids = {}; (methods || []).forEach(m => { ids[m.id] = m; });
+    const ids = {}; (methods || []).forEach(m => { ids[m.id] = m; if (m.name) ids[normLabel(m.name)] = m; if (m.short) ids[normLabel(m.short)] = m; });
     const fieldIds = {}; (methods || []).forEach(m => (m.fields || []).forEach(f => { fieldIds[f.id] = 1; }));
     const labels = { abs:1 }; (methods || []).forEach(m => (m.fields || []).forEach(f => {
       if (f.label) labels[normLabel(f.label)] = 1;
@@ -1012,7 +1034,7 @@
             }
           }
           if (!ok && (m = /^(jos|toista|rivi|lkm|menetelmä|taulukko|kuvat):(.+)$/.exec(nm))){
-            const bad = m[2].split(",").map(s => s.trim()).filter(id => !ids[id]);
+            const bad = m[2].split(",").map(s => s.trim()).filter(id => !ids[id] && !ids[normLabel(id)]);
             ok = !bad.length;
             if (!ok){ unknown.push(tag + " (tuntematon menetelmä: " + bad.join(", ") + ")"); found.push(tag); return; }
           }

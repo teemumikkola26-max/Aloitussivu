@@ -266,3 +266,10 @@ Service workerin välimuistin versio on nostettu (`aloitussivu-v20`).
 - **Uusi yhdistelmä `{{rivi:id}}{{rivit:kenttä}}` Word-taulukon rivissä:** rivi toistetaan jokaisen kirjauksen taulukkokentän jokaiselle riville samassa taulukossa. Esimerkiksi kaikkien mittauspisteiden ympäröivät olosuhteet saadaan yhteen taulukkoon.
 - **Tunniste:** samalla rivillä `{{tunniste}}` kertoo, mistä kirjauksesta rivi on.
 - **Ohje:** raporttipohjasivun merkintäohje on päivitetty.
+
+## Märkätilakartoituksen raporttipohjan tuki (aloitussivu-v33)
+
+- **Menetelmä nimellä:** `{{toista:…}}`, `{{rivi:…}}` ja `{{jos:…}}` hyväksyvät menetelmän tunnisteen lisäksi sen nimen, esimerkiksi `{{toista:Märkätilakartoitus}}`.
+- **Uusi merkintä `{{huomiot}}`:** kirjauksen Lisähuomiot-teksti toistossa.
+- **Tyhjät rivit pois:** `{{rivit:…}}`-rivin solussa kappale jätetään pois, jos kaikki sen merkinnät ovat tyhjiä. Esimerkiksi allaskaapin rivi ei näy pesuhuoneen kohdalla.
+- **Uusi raporttipohja:** märkätilakartoituksen pohja, jossa merkinnät ovat valmiina.
