@@ -287,3 +287,12 @@ Service workerin välimuistin versio on nostettu (`aloitussivu-v20`).
 - **Uusi merkintä `{{?kenttä}}`:** toistossa koko kappale jää pois, jos kenttä on tyhjä.
 - **Tyhjät taulukot pois:** toistossa Word-taulukko, jossa on `{{rivit:…}}`, jää kokonaan pois, jos taulukkokentässä ei ole rivejä tai kenttä on piilotettu. Tästä ei anneta varoitusta.
 - **Ohje:** raporttipohjasivun merkintäohje on päivitetty.
+
+## Tallennuspaikan valinta (aloitussivu-v36)
+
+- **Tallennuspaikka valittavissa:** kun kenttälomakkeelta ladataan Word-raportti, kenttämuistiinpano, pohjakuva-PDF, yksittäinen kuva tai kuvat ZIP-pakettina, käyttäjä voi valita tallennuspaikan.
+  - **Chrome/Edge tietokoneella:** Tallenna nimellä -ikkuna (kansio ja tiedostonimi). Selain muistaa viimeksi käytetyn kansion erikseen raporteille, pohjakuville ja kuville.
+  - **Puhelin/tabletti:** valinta "Valitse kansio tai sovellus" (jakovalikko, esim. Tallenna Tiedostoihin tai Drive) tai "Lataukset-kansioon".
+- **Varmistus pitkässä muodostuksessa:** jos raportin muodostus kestää niin kauan, että selain ei enää salli tallennusikkunaa, sovellus pyytää yhden lisänapautuksen ("Valitse tallennuspaikka").
+- **Uusi asetus "Kysy tallennuspaikka ladattaessa"** (Lisää toimintoja, oletuksena päällä). Kun asetus on pois, tiedostot ladataan suoraan Lataukset-kansioon kuten ennen.
+- **Ennallaan:** kamerakuvien automaattinen tallennus laitteelle toimii kuten ennen.

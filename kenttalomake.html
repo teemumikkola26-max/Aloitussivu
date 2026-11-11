@@ -4124,8 +4124,13 @@ async function openPhotoViewer(entry,photo,onChange){
   overlay.querySelector('[data-a="save"]').onclick=async()=>{
     const blob=photo.blob instanceof Blob?photo.blob:null;
     if(!blob){toast("Kuvaa ei voi tallentaa");return;}
-    const res=await saveBlobToDevice(blob,photoFileName(blob.type),true);
-    if(res==="download")toast("Kuva ladattu laitteelle");
+    /* iPhone/iPad: jakovalikosta "Tallenna kuva" vie Kuviin; muualla valitaan tallennuspaikka. */
+    if(IS_IOS){
+      const res=await saveBlobToDevice(blob,photoFileName(blob.type),true);
+      if(res==="download")toast("Kuva ladattu laitteelle");
+    }else{
+      await saveFileAs(blob,photoFileName(blob.type),"kl-kuvat");
+    }
   };
   overlay.querySelector('[data-a="del"]').onclick=async()=>{
     if(!(await window.AppUI.confirm({title:"Poistetaanko kuva?",text:"Kuva ja sen kuvateksti poistetaan kirjauksesta.",ok:"Poista kuva",cancel:"Säilytä kuva",danger:true})))return;
@@ -4191,6 +4196,105 @@ function downloadBlob(blob,name){
   a.remove();
   setTimeout(()=>URL.revokeObjectURL(url),4000);
 }
+/* ============================================================
+   TALLENNUSPAIKAN VALINTA
+   ============================================================
+ * Kun asetus "Kysy tallennuspaikka" on päällä (oletus):
+ * - Chrome/Edge (tietokone): Tallenna nimellä -ikkuna, jossa valitaan kansio ja
+ *   tiedostonimi. Selain muistaa viimeksi käytetyn kansion tiedostotyypeittäin.
+ * - Puhelin/tabletti: valitaan, ladataanko Lataukset-kansioon vai valitaanko
+ *   kansio tai sovellus jakovalikosta (iOS: Tallenna Tiedostoihin, Android: Drive/Tiedostot).
+ * Asetus pois: tiedosto ladataan suoraan Lataukset-kansioon kuten ennen.
+ */
+const ASK_SAVE_KEY="kenttalomake_ask_save_location_v1";
+function askSaveLocation(){ try{ return localStorage.getItem(ASK_SAVE_KEY)!=="0"; }catch(e){ return true; } }
+function setAskSaveLocation(v){ try{ localStorage.setItem(ASK_SAVE_KEY,v?"1":"0"); }catch(e){} }
+
+const SAVE_TYPES={
+  docx:{description:"Word-asiakirja",accept:{"application/vnd.openxmlformats-officedocument.wordprocessingml.document":[".docx"]}},
+  pdf:{description:"PDF-tiedosto",accept:{"application/pdf":[".pdf"]}},
+  jpg:{description:"Kuva",accept:{"image/jpeg":[".jpg",".jpeg"]}},
+  png:{description:"Kuva",accept:{"image/png":[".png"]}},
+  zip:{description:"ZIP-paketti",accept:{"application/zip":[".zip"]}}
+};
+
+async function writeWithPicker(blob,name,pickerId){
+  const ext=(name.split(".").pop()||"").toLowerCase();
+  const opts={suggestedName:name,id:pickerId||("kl-"+ext)};
+  if(SAVE_TYPES[ext])opts.types=[SAVE_TYPES[ext]];
+  const h=await window.showSaveFilePicker(opts);
+  const w=await h.createWritable();
+  await w.write(blob);
+  await w.close();
+  return h.name||name;
+}
+
+/* Palauttaa "picker" | "share" | "download" | "cancel". */
+async function saveFileAs(blob,name,pickerId){
+  if(!askSaveLocation()){ downloadBlob(blob,name); return "download"; }
+
+  if(window.showSaveFilePicker){
+    try{
+      const saved=await writeWithPicker(blob,name,pickerId);
+      toast("Tallennettu: "+saved);
+      return "picker";
+    }catch(err){
+      if(err && err.name==="AbortError"){ toast("Tallennus peruttu"); return "cancel"; }
+      /* Pitkä raportin muodostus voi kuluttaa selaimen sallimaan napautuksen
+         voimassaoloajan: pyydetään uusi napautus ja yritetään kerran uudelleen. */
+      if(err && (err.name==="SecurityError"||err.name==="NotAllowedError") && window.AppUI){
+        const v=await window.AppUI.choose({
+          title:"Tiedosto on valmis",
+          text:name,
+          actions:[{label:"Valitse tallennuspaikka",value:"pick",kind:"primary"},{label:"Peruuta",value:null,kind:"plain"}]
+        });
+        if(v!=="pick"){ toast("Tallennus peruttu"); return "cancel"; }
+        try{
+          const saved=await writeWithPicker(blob,name,pickerId);
+          toast("Tallennettu: "+saved);
+          return "picker";
+        }catch(err2){
+          if(err2 && err2.name==="AbortError"){ toast("Tallennus peruttu"); return "cancel"; }
+          console.warn("Tallennus valittuun paikkaan epäonnistui",err2);
+        }
+      }else{
+        console.warn("Tallennus valittuun paikkaan epäonnistui",err);
+      }
+      downloadBlob(blob,name);
+      toast("Tallennuspaikan valinta ei onnistunut – tiedosto ladattiin Lataukset-kansioon");
+      return "download";
+    }
+  }
+
+  /* Puhelin/tabletti: jakovalikko toimii tallennuspaikan valintana. */
+  let file=null;
+  try{ file=new File([blob],name,{type:blob.type||"application/octet-stream"}); }catch(e){}
+  if(file && navigator.canShare && navigator.canShare({files:[file]}) && window.AppUI){
+    const v=await window.AppUI.choose({
+      title:"Mihin tiedosto tallennetaan?",
+      text:name,
+      actions:[
+        {label:"Valitse kansio tai sovellus",value:"share",kind:"primary"},
+        {label:"Lataukset-kansioon",value:"download",kind:"plain"},
+        {label:"Peruuta",value:null,kind:"plain"}
+      ]
+    });
+    if(!v){ toast("Tallennus peruttu"); return "cancel"; }
+    if(v==="share"){
+      try{
+        await navigator.share({files:[file],title:name});
+        return "share";
+      }catch(e){
+        if(e && e.name==="AbortError"){ toast("Tallennus peruttu"); return "cancel"; }
+        console.warn("Jakaminen epäonnistui",e);
+      }
+    }
+  }
+  downloadBlob(blob,name);
+  toast("Tiedosto ladattu Lataukset-kansioon");
+  return "download";
+}
+
 /* Jakovalikko (iOS: "Tallenna kuva" -> Kuvat) ; muuten tavallinen lataus. */
 async function saveBlobToDevice(blob,name,preferShare){
   try{
@@ -4275,6 +4379,16 @@ function collectPhotoFiles(list){
   return {files,skipped};
 }
 async function saveFilesToDevice(files,zipName){
+  if(!askSaveLocation()){
+    if(window.JSZip){
+      const zip=new JSZip();
+      files.forEach(f=>zip.file(f.name,f.blob,{binary:true}));
+      downloadBlob(await zip.generateAsync({type:"blob",compression:"STORE"}),zipName);
+      return "zip";
+    }
+    files.forEach((f,i)=>setTimeout(()=>downloadBlob(f.blob,f.name),i*400));
+    return "download";
+  }
   /* 1. Työpöytä: kansion valinta */
   if(window.showDirectoryPicker){
     let dir=null;
@@ -4313,13 +4427,13 @@ async function saveFilesToDevice(files,zipName){
       }
     }
   }catch(err){}
-  /* 3. ZIP-lataus */
+  /* 3. ZIP-paketti valittuun paikkaan */
   if(window.JSZip){
     const zip=new JSZip();
     files.forEach(f=>zip.file(f.name,f.blob,{binary:true}));
     const zb=await zip.generateAsync({type:"blob",compression:"STORE"});
-    downloadBlob(zb,zipName);
-    return "zip";
+    const r=await saveFileAs(zb,zipName,"kl-kuvat");
+    return r==="cancel"?"cancel":"zip";
   }
   files.forEach((f,i)=>setTimeout(()=>downloadBlob(f.blob,f.name),i*400));
   return "download";
@@ -5022,6 +5136,7 @@ function renderMoreMenu(){
     <details class="card more-menu">
       <summary>Lisää toimintoja</summary>
       <div class="more-body">
+        <label class="setting-row"><input type="checkbox" id="chkAskSave"> Kysy tallennuspaikka ladattaessa (raportit, pohjakuva, kuvat)</label>
         <label class="setting-row"><input type="checkbox" id="chkDeviceSave"> Tallenna kamerakuvat myös laitteelle</label>
         <button type="button" class="btn btn-outline btn-block" id="btnSaveAllPhotos" style="display:none;">⬇ Tallenna kaikki kuvat laitteelle</button>
         <button type="button" class="btn btn-outline btn-block" id="btnLogout">Kirjaudu ulos</button>
@@ -5074,6 +5189,12 @@ function renderMoreMenu(){
     })))return;
     try{await autosave(true);}catch(err){}
     try{await window.__supabaseClient.auth.signOut();}catch(err){toast("Uloskirjautuminen epäonnistui");}
+  };
+  const chkAsk=d.querySelector("#chkAskSave");
+  chkAsk.checked=askSaveLocation();
+  chkAsk.onchange=()=>{
+    setAskSaveLocation(chkAsk.checked);
+    toast(chkAsk.checked?"Tallennuspaikka kysytään jokaisella latauksella":"Tiedostot ladataan suoraan Lataukset-kansioon");
   };
   const chk=d.querySelector("#chkDeviceSave");
   chk.checked=deviceSaveEnabled();
@@ -9878,11 +9999,8 @@ async function exportWithTemplate(tpl){
     const safe=(project.nimi||"kohde").replace(/[^a-z0-9äöå]+/gi,"_").slice(0,40);
     const tplSafe=String(tpl.name||"Raportti").replace(/[^a-z0-9äöå]+/gi,"_").slice(0,30);
     const name=tplSafe+"_"+safe+"_"+(project.pvm||localDateISO())+".docx";
-    const url=URL.createObjectURL(res.output);
-    const a=document.createElement("a");
-    a.href=url; a.download=name;
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(()=>URL.revokeObjectURL(url),4000);
+    const saveRes=await saveFileAs(res.output,name,"kl-raportit");
+    if(saveRes==="cancel")return;
     window.ReportTemplates.setLastUsed(FORM_KEY,tpl.id);
     const notes=[];
     if(missingPhotos)notes.push(missingPhotos+" kuvaa puuttui");
@@ -10397,12 +10515,6 @@ async function exportWordLegacy(){
       });
 
 
-    const url=
-      URL.createObjectURL(
-        blob
-      );
-
-
     const safe=
       (project.nimi||"kohde")
         .replace(
@@ -10411,35 +10523,8 @@ async function exportWordLegacy(){
         );
 
 
-    const a=
-      document.createElement("a");
-
-    a.href=url;
-
-    a.download=
-      `Kenttamuistiinpano_${safe}_${project.pvm}.docx`;
-
-
-    document.body.appendChild(a);
-
-    a.click();
-
-    a.remove();
-
-
-    setTimeout(
-      ()=>{
-        URL.revokeObjectURL(
-          url
-        );
-      },
-      4000
-    );
-
-
-    toast(
-      "Word-tiedosto (.docx) ladattu"
-    );
+    const saveRes=await saveFileAs(blob,`Kenttamuistiinpano_${safe}_${project.pvm}.docx`,"kl-raportit");
+    if(saveRes==="cancel")return;
 
   }catch(err){
 
@@ -14020,12 +14105,6 @@ async function exportFloorPlanPdf(){
       );
 
 
-    const url=
-      URL.createObjectURL(
-        blob
-      );
-
-
     const safe=
       (project.nimi||"kohde")
         .replace(
@@ -14034,39 +14113,8 @@ async function exportFloorPlanPdf(){
         );
 
 
-    const a=
-      document.createElement(
-        "a"
-      );
-
-
-    a.href=url;
-
-
-    a.download=
-      `Pohjakuva_merkinnoin_${safe}_${project.pvm}.pdf`;
-
-
-    document.body.appendChild(a);
-
-    a.click();
-
-    a.remove();
-
-
-    setTimeout(
-      ()=>{
-        URL.revokeObjectURL(
-          url
-        );
-      },
-      4000
-    );
-
-
-    toast(
-      "Pohjakuva (PDF) ladattu"
-    );
+    const saveRes=await saveFileAs(blob,`Pohjakuva_merkinnoin_${safe}_${project.pvm}.pdf`,"kl-pohjakuvat");
+    if(saveRes==="cancel")return;
 
   }catch(err){
 

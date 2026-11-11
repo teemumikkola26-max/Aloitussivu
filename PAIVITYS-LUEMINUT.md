@@ -1,4 +1,4 @@
-# Päivitys v20–v35: asennusohje
+# Päivitys v20–v36: asennusohje
 
 Paketti sisältää koko sovelluksen. Muutokset on tehty lähetettyyn versioon
 (aloitussivu-v19), joten aiemmat muutoksesi ovat tallessa. Muutokset on
@@ -12,7 +12,7 @@ kuvattu tarkemmin tiedostossa MUUTOKSET-2026-11.md.
 
    Jos olet jo ajanut ne, tätä ei tarvitse toistaa.
 2. **Korvaa palvelimen tiedostot tämän paketin tiedostoilla.**
-3. **Avaa sovellus.** Service worker (`aloitussivu-v35`) hakee uudet tiedostot
+3. **Avaa sovellus.** Service worker (`aloitussivu-v36`) hakee uudet tiedostot
    automaattisesti.
 
 ## Versioiden sisältö
@@ -33,3 +33,4 @@ kuvattu tarkemmin tiedostossa MUUTOKSET-2026-11.md.
 - **v33:** menetelmä nimellä merkinnöissä, `{{huomiot}}`, tyhjät rivit pois (märkätilakartoituksen pohja)
 - **v34:** osiolistan synkronoinnin korjaus ja tilatieto Osiot-korttiin
 - **v35:** kenttäarvosuodatin merkinnöissä, `{{?kenttä}}`, tyhjät toistotaulukot pois (laaja tutkimusselosteen pohja)
+- **v36:** tallennuspaikan valinta ladattaessa (raportit, pohjakuva, kuvat)
