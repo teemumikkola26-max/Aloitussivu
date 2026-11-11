@@ -36,6 +36,10 @@
      {{toista:id}} ... {{/toista}}   osa toistetaan jokaiselle kirjaukselle
    Taulukot:
      {{rivi:id}} rivin solussa -> rivi toistetaan jokaiselle kirjaukselle
+     Suodatin: {{rivi:rh[Mittausmenetelmä=Porareikä|Näytepala]}} (myös jos/toista/
+     lkm/menetelmä/taulukko/kuvat) rajaa kirjaukset kentän arvon mukaan.
+     Toistossa taulukko jää pois, jos sen taulukkokentissä ei ole rivejä.
+     {{?kenttä}} toistossa: koko kappale jää pois, jos kenttä on tyhjä.
      {{rivi:id}}{{rivit:kenttä}} -> kaikkien kirjausten taulukkokentän rivit
                                     samaan taulukkoon ({{tunniste}} kertoo pisteen)
    Kirjauskohtaiset (toisto- ja rivipohjissa):
@@ -321,14 +325,30 @@
         raporttipvm: fiDate(reportIso), projektinumero: p.projektinumero || ""
       },
       of(ids){
-        /* Menetelmän voi antaa tunnisteella tai nimellä ({{toista:Märkätilakartoitus}}). */
-        const list = String(ids).split(",").map(s => s.trim());
+        /* Menetelmän voi antaa tunnisteella tai nimellä ({{toista:Märkätilakartoitus}}).
+           Suodatin hakasulkeissa rajaa kirjaukset kentän arvon mukaan, vaihtoehdot |-merkillä:
+           {{rivi:rh[Mittausmenetelmä=Porareikä|Näytepala]}} */
+        const fm = /^(.*?)\[([^\]=]+)=([^\]]*)\]\s*$/.exec(String(ids));
+        const list = (fm ? fm[1] : String(ids)).split(",").map(s => s.trim()).filter(Boolean);
         const keys = list.map(normLabel);
-        return entries.filter(e => {
+        let out = entries.filter(e => {
           if (list.indexOf(e.methodId) >= 0) return true;
           const m = methods[e.methodId];
           return !!m && (keys.indexOf(normLabel(m.name)) >= 0 || (m.short && keys.indexOf(normLabel(m.short)) >= 0));
         });
+        if (fm){
+          const fl = fm[2].trim(), want = fm[3].split("|").map(v => normOsio(v)).filter(Boolean);
+          out = out.filter(e => {
+            const m = methods[e.methodId];
+            const fs = (m && m.fields || []).filter(f => f.type !== "table" && (f.id === fl || normLabel(f.label) === normLabel(fl)));
+            return fs.some(f => {
+              if (!ctx.visible(e, f)) return false;
+              const v = normOsio((e.values || {})[f.id]);
+              return want.length ? want.indexOf(v) >= 0 : v !== "";
+            });
+          });
+        }
+        return out;
       },
       fieldValue(e, f){
         const v = (e.values || {})[f.id];
@@ -363,7 +383,7 @@
         return vals;
       },
       resolve(tag, ev){
-        const name = tag.slice(2, -2).trim();
+        const name = tag.slice(2, -2).trim().replace(/^\?\s*/, "");
         if (ev && Object.prototype.hasOwnProperty.call(ev, name)) return ev[name];
         if (Object.prototype.hasOwnProperty.call(ctx.glob, name)) return ctx.glob[name];
         if (ev && Object.prototype.hasOwnProperty.call(ev, "§" + normLabel(name))) return ev["§" + normLabel(name)];
@@ -699,7 +719,13 @@
   function expandFieldRows(ctx, rootEl, e, vals){
     const trs = (rootEl.name === "w:tr" ? [rootEl] : desc(rootEl, "w:tr"))
       .filter(tr => /\{\{\s*rivit:[^}]+\}\}/.test(textOf(tr)));
+    /* Toistossa taulukko poistetaan kokonaan (otsikkoriveineen), jos sen
+       taulukkokentissä ei ollut yhtään riviä. */
+    const added = new Map();
     trs.forEach(tr => {
+      const tbl = ancestor(tr, "w:tbl");
+      if (tbl && !added.has(tbl)) added.set(tbl, 0);
+      const before = tbl ? kids(tbl, "w:tr").length : 0;
       const rowText = textOf(tr);
       const ref = /\{\{\s*rivit:([^}]+)\}\}/.exec(rowText)[1].trim();
       const m = ctx.methods[e.methodId];
@@ -714,7 +740,8 @@
         return;
       }
       if (hit.guessed) warnOnce(ctx, "Pohjan merkintä {{rivit:" + ref + "}}: menetelmässä ”" + mname + "” ei ole tämännimistä taulukkokenttää, joten käytettiin kenttää ”" + f.label + "”. Korjaa nimi pohjaan.");
-      if (!ctx.visible(e, f)){
+      const quiet = rootEl.name !== "w:tr";   /* toistossa tyhjä tai piilotettu taulukko jätetään pois ilman varoitusta */
+      if (!ctx.visible(e, f) && !quiet){
         const why = e.hiddenWhy && e.hiddenWhy[f.id] ? " (" + e.hiddenWhy[f.id] + ")" : "";
         warnOnce(ctx, "Kirjauksessa ”" + (ctx.ident(e) || mname) + "” kenttä ”" + f.label + "” on piilotettu" + why + ", joten sen rivejä ei tuotu raporttiin.");
       }
@@ -722,7 +749,7 @@
       const cols = (f.columns || []).filter(c => c.label && String(c.label).trim());
       const data = ctx.visible(e, f) && Array.isArray((e.values || {})[f.id]) ? e.values[f.id] : [];
       const rows = data.filter(r => r && cols.some(c => r[c.id] != null && String(r[c.id]).trim() !== ""));
-      if (!rows.length && ctx.visible(e, f)){
+      if (!rows.length && ctx.visible(e, f) && !quiet){
         warnOnce(ctx, "Kirjauksessa ”" + (ctx.ident(e) || mname) + "” ei ole rivejä kentässä ”" + f.label + "”.");
       }
       /* Solun merkintä, joka ei vastaa yhtään saraketta, kerrotaan kerran. */
@@ -755,10 +782,13 @@
         desc(c2, "w:vMerge").forEach(remove);
         insertBefore(tr, c2);
         dropEmptyLines(ctx, c2, rv);
+        dropOptional(ctx, c2, rv);
         replaceInline(ctx, c2, rv, false);
       });
+      if (tbl) added.set(tbl, added.get(tbl) + (kids(tbl, "w:tr").length - before));
       remove(tr);
     });
+    if (rootEl.name !== "w:tr") added.forEach((n, tbl) => { if (n === 0 && tbl.parent) remove(tbl); });
   }
 
   /* Solussa, jossa on useita kappaleita, kappale jätetään pois, jos kaikki
@@ -774,6 +804,25 @@
         if (empty && kids(tc, "w:p").length > 1) remove(p);
       });
     });
+  }
+
+  /* {{?kenttä}}: kappale jätetään pois, jos jokin sen ?-merkinnöistä on tyhjä
+     (esim. "Lattian ja AO-puun alapinnan korkeusero: {{?Lattian ja AO-puun alapinnan korkeusero}} cm").
+     Palauttaa true, jos koko elementti poistettiin. */
+  function dropOptional(ctx, rootEl, vals){
+    const ps = rootEl.name === "w:p" ? [rootEl] : desc(rootEl, "w:p");
+    let removedRoot = false;
+    ps.forEach(p => {
+      const tags = (ptext(p).match(TAG_RE) || []).filter(t => /^\{\{\s*\?/.test(t));
+      if (!tags.length) return;
+      const empty = tags.some(t => { const v = ctx.resolve(t, vals); return v === null || String(v).trim() === ""; });
+      if (!empty) return;
+      const tc = ancestor(p, "w:tc");
+      if (tc && kids(tc, "w:p").length <= 1){ kids(p).filter(x => x.name === "w:r").forEach(remove); return; }
+      if (p === rootEl) removedRoot = true;
+      remove(p);
+    });
+    return removedRoot;
   }
 
   function warnOnce(ctx, msg){ if (ctx.warnings.indexOf(msg) < 0) ctx.warnings.push(msg); }
@@ -857,6 +906,7 @@
           const c = clone(src); stripIds(c);
           insertBefore(b, c);
           expandFieldRows(ctx, c, e, vals);
+          if (dropOptional(ctx, c, vals)) return;
           replaceInline(ctx, c, vals);
         });
       });
@@ -1022,7 +1072,7 @@
       desc(kids(d)[0], "w:p").forEach(p => {
         const t = ptext(p);
         (t.match(TAG_RE) || []).forEach(tag => {
-          const nm = tag.slice(2, -2).trim();
+          const nm = tag.slice(2, -2).trim().replace(/^\?\s*/, "");
           if (/^toista:/.test(nm)) inEntryScope = true;
           if (nm === "/toista") inEntryScope = false;
           let ok = GLOBAL_KEYS.indexOf(nm) >= 0 || BLOCK_NAMES.indexOf(nm) >= 0 || nm === "/jos" || nm === "/toista";
@@ -1034,7 +1084,8 @@
             }
           }
           if (!ok && (m = /^(jos|toista|rivi|lkm|menetelmä|taulukko|kuvat):(.+)$/.exec(nm))){
-            const bad = m[2].split(",").map(s => s.trim()).filter(id => !ids[id] && !ids[normLabel(id)]);
+            const spec = m[2].replace(/\[[^\]]*\]\s*$/, "");
+            const bad = spec.split(",").map(s => s.trim()).filter(id => !ids[id] && !ids[normLabel(id)]);
             ok = !bad.length;
             if (!ok){ unknown.push(tag + " (tuntematon menetelmä: " + bad.join(", ") + ")"); found.push(tag); return; }
           }

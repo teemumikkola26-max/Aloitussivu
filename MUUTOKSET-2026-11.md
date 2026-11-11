@@ -273,3 +273,17 @@ Service workerin välimuistin versio on nostettu (`aloitussivu-v20`).
 - **Uusi merkintä `{{huomiot}}`:** kirjauksen Lisähuomiot-teksti toistossa.
 - **Tyhjät rivit pois:** `{{rivit:…}}`-rivin solussa kappale jätetään pois, jos kaikki sen merkinnät ovat tyhjiä. Esimerkiksi allaskaapin rivi ei näy pesuhuoneen kohdalla.
 - **Uusi raporttipohja:** märkätilakartoituksen pohja, jossa merkinnät ovat valmiina.
+
+## Osiolistan synkronoinnin korjaus (aloitussivu-v34)
+
+- **Korjattu virhe, jossa osiolista saattoi tyhjentyä pilvestä:** laite, jolla oli tyhjä tai vanha lista, korvasi sen pilvessä tallentaessaan menetelmiä. Näin kävi esimerkiksi, kun laitteella oli odottava menetelmämuutos tai pilvihaku oli epäonnistunut.
+- **Uusi toimintatapa:** osiolista viedään pilveen vain, kun sitä on muutettu kyseisellä laitteella. Muuten pilven lista säilyy ja haetaan laitteelle.
+- **Päivitys toiselta laitteelta:** Menetelmät-sivun avaaminen hakee tuoreimman osiolistan pilvestä.
+- **Tila näkyviin:** Osiot-kortti kertoo, onko lista yhteinen kaikille laitteille, odottaako muutos verkkoyhteyttä vai tallentuuko lista vain laitteelle, koska `supabase-osiot.sql` on ajamatta.
+
+## Laajan tutkimusselosteen pohjan tuki (aloitussivu-v35)
+
+- **Suodatin hakasulkeissa:** kirjaukset voi rajata kentän arvon mukaan, esimerkiksi `{{rivi:rh[Mittausmenetelmä=Porareikä|Näytepala]}}` tai `{{jos:nayte[Näytteen tyyppi=VOC ilmanäyte]}}`. Suodatin toimii jos-, toista-, rivi-, lkm-, menetelmä-, taulukko- ja kuvat-merkinnöissä.
+- **Uusi merkintä `{{?kenttä}}`:** toistossa koko kappale jää pois, jos kenttä on tyhjä.
+- **Tyhjät taulukot pois:** toistossa Word-taulukko, jossa on `{{rivit:…}}`, jää kokonaan pois, jos taulukkokentässä ei ole rivejä tai kenttä on piilotettu. Tästä ei anneta varoitusta.
+- **Ohje:** raporttipohjasivun merkintäohje on päivitetty.

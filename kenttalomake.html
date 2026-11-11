@@ -693,6 +693,9 @@ select{
 .sp-sub{font-size:15px;margin:14px 0 4px}
 .sp-open-warn{margin-top:12px;padding:10px 12px;border-radius:10px;background:#fbf1de;color:#7a4a06;font-size:14px}
 .osio-help{margin:10px 0 4px;font-size:14.5px}
+.osio-sync{margin-top:10px;font-size:14px;padding:8px 10px;border-radius:8px}
+.osio-sync.ok{background:#e6efe6;color:#2f6b3a}
+.osio-sync.warn{background:#fbf1de;color:#7a4a06}
 .osio-help summary{cursor:pointer;font-weight:700;min-height:40px;display:flex;align-items:center}
 .osio-help ul{padding-left:20px;margin:6px 0 10px}
 .osio-help li{margin-bottom:6px}
@@ -1462,6 +1465,8 @@ async function syncCustomMethodsFromCloud(){
   try{pushPending=localStorage.getItem(METHODS_PUSH_PENDING_KEY)==="1";}catch(err){}
   if(pushPending){
     if(await pushMethodsToCloud())setMethodsPushPending(false);
+    /* Osiolista haetaan silti pilvestä, ellei sitä ole muutettu tällä laitteella. */
+    if(!osiotDirty())await pullOsiotFromCloud();
     return;
   }
 
@@ -1479,9 +1484,15 @@ async function syncCustomMethodsFromCloud(){
           .select("methods")
           .maybeSingle());
     }
-    if(data && data.settings && Array.isArray(data.settings.osiot)){
-      OSIOT=data.settings.osiot.filter(x=>typeof x==="string"&&x.trim());
-      try{ localStorage.setItem(OSIOT_STORAGE_KEY,JSON.stringify(OSIOT)); }catch(err){}
+    if(!error){
+      osiotSyncState=settingsColumnOk?"cloud":"device";
+      if(osiotDirty()){
+        /* Tällä laitteella muutettu lista viedään pilveen ennen kuin pilven lista otetaan. */
+        await pushMethodsToCloud();
+      }else if(data && data.settings && Array.isArray(data.settings.osiot)){
+        OSIOT=data.settings.osiot.filter(x=>typeof x==="string"&&x.trim());
+        try{ localStorage.setItem(OSIOT_STORAGE_KEY,JSON.stringify(OSIOT)); }catch(err){}
+      }
     }
 
     if(error){
@@ -1516,6 +1527,31 @@ async function syncCustomMethodsFromCloud(){
 /* Osiolista tallennetaan custom_methods.settings-sarakkeeseen (supabase-osiot.sql).
    Jos saraketta ei ole, osiot pysyvät laitekohtaisina. */
 let settingsColumnOk=true;
+/* "cloud" = lista on yhteinen, "device" = settings-sarake puuttuu, "" = ei vielä tiedossa */
+let osiotSyncState="";
+const OSIOT_DIRTY_KEY="kenttalomake_osiot_dirty_v1";
+function osiotDirty(){ try{ return localStorage.getItem(OSIOT_DIRTY_KEY)==="1"; }catch(err){ return false; } }
+function setOsiotDirty(v){ try{ if(v)localStorage.setItem(OSIOT_DIRTY_KEY,"1"); else localStorage.removeItem(OSIOT_DIRTY_KEY); }catch(err){} }
+async function pullOsiotFromCloud(){
+  if(!window.__supabaseClient||!settingsColumnOk)return false;
+  try{
+    const {data,error}=await window.__supabaseClient.from(CUSTOM_METHODS_TABLE).select("settings").maybeSingle();
+    if(error){
+      if(isMissingSettingsColumn(error)){ settingsColumnOk=false; osiotSyncState="device"; }
+      return false;
+    }
+    osiotSyncState="cloud";
+    if(data && data.settings && Array.isArray(data.settings.osiot)){
+      const next=data.settings.osiot.filter(x=>typeof x==="string"&&x.trim());
+      if(JSON.stringify(next)!==JSON.stringify(OSIOT)){
+        OSIOT=next;
+        try{ localStorage.setItem(OSIOT_STORAGE_KEY,JSON.stringify(OSIOT)); }catch(err){}
+        return true;
+      }
+    }
+  }catch(err){}
+  return false;
+}
 function isMissingSettingsColumn(error){
   const m=String((error&&(error.message||error.details))||"");
   return (error&&error.code==="42703") || (/settings/.test(m) && /column|schema cache/i.test(m));
@@ -1528,7 +1564,11 @@ async function pushMethodsToCloud(){
       methods:METHODS,
       updated_at:new Date().toISOString()
     };
-    if(settingsColumnOk)row.settings={osiot:OSIOT};
+    /* Osiolista viedään vain, kun sitä on muutettu tällä laitteella. Muuten
+       sarake jätetään pois, jolloin pilven lista säilyy (upsert päivittää vain
+       annetut sarakkeet) eikä laite, jolla lista on vanha tai tyhjä, korvaa sitä. */
+    const sendOsiot=settingsColumnOk && osiotDirty();
+    if(sendOsiot)row.settings={osiot:OSIOT};
     let {error}=
       await window.__supabaseClient
         .from(CUSTOM_METHODS_TABLE)
@@ -1548,6 +1588,8 @@ async function pushMethodsToCloud(){
       return false;
     }
 
+    if(sendOsiot && row.settings)setOsiotDirty(false);
+    osiotSyncState=settingsColumnOk?"cloud":"device";
     return true;
 
   }catch(err){
@@ -5006,6 +5048,8 @@ function renderMoreMenu(){
   d.querySelector("#btnManageMethods").onclick=()=>{
     view="methodsManage";
     render();
+    /* Haetaan tuorein osiolista, jos joku on muuttanut sitä toisella laitteella. */
+    if(!osiotDirty())pullOsiotFromCloud().then(ch=>{ if(view==="methodsManage")render(); });
   };
   d.querySelector("#btnTemplates").onclick=async()=>{
     try{await autosave(true);}catch(err){}
@@ -6286,6 +6330,13 @@ function renderOsiotCard(){
         <button type="button" class="btn btn-primary">Lisää</button>
       </div>
       <div class="hint" style="margin-top:6px;">Nimen muutos koskee uusia kirjauksia ja menetelmien oletusosioita. Jo tehtyjen kirjausten osio ei muutu.</div>
+      ${osiotSyncState==="device"
+        ?'<div class="osio-sync warn">⚠ Osiolista tallentuu vain tälle laitteelle, koska tietokannasta puuttuu osioiden sarake. Pääkäyttäjä: aja supabase-osiot.sql Supabasen SQL-editorissa, niin lista on yhteinen kaikille.</div>'
+        :osiotSyncState==="cloud"
+          ?(osiotDirty()
+            ?'<div class="osio-sync warn">Muutokset odottavat verkkoyhteyttä. Lista siirtyy muille laitteille, kun yhteys palaa.</div>'
+            :'<div class="osio-sync ok">✓ Osiolista on yhteinen kaikille laitteille. Muut näkevät muutokset, kun avaavat kohteen tai Menetelmät-sivun.</div>')
+          :""}
     </div>
   `);
   const list=c.querySelector(".osio-list");
@@ -6336,7 +6387,9 @@ function renderOsiotCard(){
 }
 async function saveOsiot(){
   try{ localStorage.setItem(OSIOT_STORAGE_KEY,JSON.stringify(OSIOT)); }catch(err){}
+  setOsiotDirty(true);
   await persistMethods();
+  if(view==="methodsManage")render();
 }
 
 function renderMethodsManageCard(){
